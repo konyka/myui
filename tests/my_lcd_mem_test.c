@@ -55,12 +55,12 @@ static void test_fill_rect_bgra(void) {
   uint32_t stride = my_lcd_mem_get_stride(lcd);
   const uint8_t* p;
 
-  my_lcd_fill_rect(lcd, &(my_rect_t){1, 1, 2, 2}, my_color_rgba(10, 20, 30, 40));
+  my_lcd_fill_rect(lcd, &(my_rect_t){1, 1, 2, 2}, my_color_rgba(10, 20, 30, 255));
   p = buf + 1 * stride + 1 * 4;
   TEST_ASSERT_EQ_INT(p[0], 30); /* B */
   TEST_ASSERT_EQ_INT(p[1], 20); /* G */
   TEST_ASSERT_EQ_INT(p[2], 10); /* R */
-  TEST_ASSERT_EQ_INT(p[3], 40); /* A */
+  TEST_ASSERT_EQ_INT(p[3], 255); /* A */
   p = buf; /* (0,0) untouched */
   TEST_ASSERT_EQ_INT(p[0], 0);
   my_lcd_destroy(lcd);
@@ -70,10 +70,15 @@ static void test_fill_rect_argb_and_rgb888(void) {
   my_lcd_t* lcd = my_lcd_mem_create(NULL, 2, 1, MY_PIXEL_FORMAT_ARGB8888);
   uint8_t* buf = my_lcd_mem_get_buffer(lcd);
   my_lcd_fill_rect(lcd, &(my_rect_t){0, 0, 1, 1}, my_color_rgba(1, 2, 3, 4));
-  TEST_ASSERT_EQ_INT(buf[0], 4); /* A */
-  TEST_ASSERT_EQ_INT(buf[1], 1); /* R */
-  TEST_ASSERT_EQ_INT(buf[2], 2); /* G */
-  TEST_ASSERT_EQ_INT(buf[3], 3); /* B */
+  /* a=4 blends over the black bg: out = src*4/255 + dst = src*4/255 (0) */
+  TEST_ASSERT_EQ_INT(buf[0], 0); /* A channel unblended by dst */
+  TEST_ASSERT(buf[1] <= 1 && buf[2] <= 1 && buf[3] <= 1);
+  /* opaque variant keeps replace semantics for the channels */
+  my_lcd_fill_rect(lcd, &(my_rect_t){0, 0, 1, 1}, my_color_rgba(1, 2, 3, 255));
+  TEST_ASSERT_EQ_INT(buf[0], 255);
+  TEST_ASSERT_EQ_INT(buf[1], 1);
+  TEST_ASSERT_EQ_INT(buf[2], 2);
+  TEST_ASSERT_EQ_INT(buf[3], 3);
   my_lcd_destroy(lcd);
 
   lcd = my_lcd_mem_create(NULL, 2, 1, MY_PIXEL_FORMAT_RGB888);
@@ -153,6 +158,44 @@ static void test_draw_pixels_clips(void) {
   my_lcd_destroy(lcd);
 }
 
+static void test_fill_rect_alpha_blending(void) {
+  /* formula: out = (src*a + dst*(255-a)) / 255 (truncating).
+   * white bg + red a=128: g,b = 255*127/255 = 127 */
+  my_lcd_t* lcd = my_lcd_mem_create(NULL, 4, 4, MY_PIXEL_FORMAT_BGRA8888);
+  uint8_t* buf = my_lcd_mem_get_buffer(lcd);
+  uint32_t stride = my_lcd_mem_get_stride(lcd);
+  uint8_t* p;
+
+  my_lcd_fill_rect(lcd, &(my_rect_t){0, 0, 4, 4}, my_color_rgb(255, 255, 255));
+  my_lcd_fill_rect(lcd, &(my_rect_t){1, 1, 2, 2}, my_color_rgba(255, 0, 0, 128));
+
+  p = buf + 1 * stride + 1 * 4;
+  TEST_ASSERT_EQ_INT(p[2], 255); /* R stays */
+  TEST_ASSERT_EQ_INT(p[1], 127); /* G = 127 */
+  TEST_ASSERT_EQ_INT(p[0], 127); /* B = 127 */
+
+  p = buf; /* outside: untouched white */
+  TEST_ASSERT_EQ_INT(p[2], 255);
+  TEST_ASSERT_EQ_INT(p[1], 255);
+
+  my_lcd_destroy(lcd);
+
+  /* RGB565: same math, tolerance from 5/6-bit repacking */
+  lcd = my_lcd_mem_create(NULL, 2, 2, MY_PIXEL_FORMAT_RGB565);
+  buf = my_lcd_mem_get_buffer(lcd);
+  my_lcd_fill_rect(lcd, &(my_rect_t){0, 0, 2, 2}, my_color_rgb(255, 255, 255));
+  my_lcd_fill_rect(lcd, &(my_rect_t){0, 0, 1, 1}, my_color_rgba(255, 0, 0, 128));
+  {
+    uint16_t v;
+    uint8_t g;
+    memcpy(&v, buf, 2);
+    TEST_ASSERT_EQ_INT((v >> 11) & 0x1F, 31); /* R full */
+    g = (uint8_t)((v >> 5) & 0x3F);
+    TEST_ASSERT(g >= 30 && g <= 33); /* ~half green */
+  }
+  my_lcd_destroy(lcd);
+}
+
 static void test_frame_and_null_params(void) {
   my_lcd_t* lcd = my_lcd_mem_create(NULL, 4, 4, MY_PIXEL_FORMAT_RGB565);
   TEST_ASSERT_EQ_INT(my_lcd_begin_frame(lcd, NULL), MY_RET_OK);
@@ -182,6 +225,7 @@ MYTEST_MAIN_BEGIN()
   MYTEST_RUN(test_fill_rect_clips_to_surface);
   MYTEST_RUN(test_draw_pixels_rgb888);
   MYTEST_RUN(test_draw_pixels_clips);
+  MYTEST_RUN(test_fill_rect_alpha_blending);
   MYTEST_RUN(test_frame_and_null_params);
   MYTEST_RUN(test_no_leak_with_debug_allocator);
 MYTEST_MAIN_END()

@@ -103,6 +103,17 @@ static void test_gles2_real_render(void) {
   glReadPixels(2, 2, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, px);
   TEST_ASSERT(px[0] < 60); /* dark outside */
 
+  /* translucent red over the red-filled area -> blended result */
+  glClearColor(1.0f, 1.0f, 1.0f, 1.0f);
+  glClear(GL_COLOR_BUFFER_BIT);
+  my_vgcanvas_begin_frame(vg, NULL);
+  my_vgcanvas_set_fill_color(vg, my_color_rgba(255, 0, 0, 128));
+  my_vgcanvas_fill_rect(vg, &(my_rectf_t){8, 8, 48, 48});
+  my_vgcanvas_end_frame(vg);
+  glFinish();
+  glReadPixels(32, 32, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, px);
+  TEST_ASSERT(px[0] > 200 && px[1] > 100 && px[1] < 160); /* ~(255,128,128) */
+
   /* text via the gles2 backend (bitmap font, alpha texture quads) */
   {
     my_font_t* font = my_font_bitmap_create(NULL);

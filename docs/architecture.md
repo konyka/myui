@@ -128,3 +128,10 @@ PAL port 矩阵：
 - 焦点：分发器在 POINTER_DOWN 时切换焦点并发 "focus"/"blur" emitter 事件（点空白处 blur）；非焦点控件收不到 KEY 路径（edit 自身也检查 focused）。
 - 绘制：bg/border（**focused 复用样式 HOVER 槽**，文档约定）、选区高亮、光标竖线（常亮，闪烁 TODO）、文本超宽时 scroll_x 跟随光标。
 - MVVM：widget_target 映射 edit 的 text/hint；"changed" 事件驱动 TwoWay 回写，validator 拒绝时自动恢复。
+
+## 渲染质量（M7c：alpha 混合 + 抗锯齿）
+
+- **混合**：`my_color_t.a` 全链生效。`lcd_mem` 的 `fill_rect` 在 a<255 时走 src-over（`out = (src*a + dst*(255-a))/255`，整除截断；RGB565 展开-混合-重打包，MONO 阈值化），a=255 保持原快速替换路径。文本 span 混合（M7a 的 `blend_span`）同一公式。混合公式与期望值在 my_lcd_mem_test 中以像素级断言固化（如 50% 红盖白 = (255,127,127)）。
+- **抗锯齿**：路径填充与圆角的扫描线做 **x 方向 4 子采样覆盖率**（子采样中心 (2k+1)/8），边缘像素以 `color.a * cov/4` src-over；**y 方向不采样**（成本控制，视觉已明显改善，权衡已注明）。轴对齐直边覆盖率恒满（零回归）。`my_vgcanvas_soft_set_antialias(vg, on/off)` 运行时开关，默认开；golden 基准场景固定 AA off，AA 场景单独建基准。
+- **GLES2**：着色器混合 src-over（uniform 色含 a），EGL 冒烟断言半透明读回；GLES AA（MSAA/顶点覆盖）TODO。
+- 性能（-O0 Debug）：半透明矩形 2.03ms/帧（与不透明 2.19ms 相当）；路径填充 AA on 1.00ms vs off 0.68ms（约 +46%，仅限路径场景，矩形填充零开销）。

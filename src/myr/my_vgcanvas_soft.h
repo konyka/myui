@@ -28,4 +28,7 @@ my_vgcanvas_t* my_vgcanvas_soft_create(const my_allocator_t* allocator,
  */
 const my_dirty_rects_t* my_vgcanvas_soft_get_dirty_rects(my_vgcanvas_t* vg);
 
+/** @brief Access the soft backend's anti-alias flag (default on). */
+void my_vgcanvas_soft_set_antialias(my_vgcanvas_t* vg, bool enabled);
+
 #endif /* MY_VGCANVAS_SOFT_H */

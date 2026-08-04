@@ -9,6 +9,7 @@
 #include <time.h>
 
 #include "mypal/dummy/my_pal_dummy.h"
+#include "myr/my_vgcanvas_soft.h"
 #include "myui/my_window_manager.h"
 #include "myui/widgets/my_button.h"
 
@@ -46,6 +47,56 @@ int main(void) {
 
   printf("bench_render: %d buttons x %d frames: total %.1f ms, avg %.3f ms/frame\n",
          BENCH_BUTTONS, BENCH_FRAMES, total, total / BENCH_FRAMES);
+
+  /* translucent fill (blend path) + AA on/off comparison */
+  {
+    my_window_t* win2 = my_window_create(NULL, pal, 800, 480, "b2");
+    my_vgcanvas_t* vg2 = my_vgcanvas_soft_create(
+        NULL, my_pal_window_get_lcd(win2->pal_window));
+    t0 = now_ms();
+    for (f = 0; f < BENCH_FRAMES; f++) {
+      my_vgcanvas_begin_frame(vg2, NULL);
+      for (i = 0; i < 100; i++) {
+        my_vgcanvas_set_fill_color(vg2, my_color_rgba(255, 0, 0, 128));
+        my_vgcanvas_fill_rect(vg2, &(my_rectf_t){(float)(i % 10) * 78,
+                                                 (float)(i / 10) * 44, 72, 40});
+      }
+      my_vgcanvas_end_frame(vg2);
+    }
+    t1 = now_ms();
+    printf("bench_render: 100 translucent rects x %d frames: total %.1f ms, "
+           "avg %.3f ms/frame\n",
+           BENCH_FRAMES, t1 - t0, (t1 - t0) / BENCH_FRAMES);
+
+    /* AA on/off comparison on path fills */
+    {
+      int pass;
+      for (pass = 0; pass < 2; pass++) {
+        my_vgcanvas_soft_set_antialias(vg2, pass == 0);
+        t0 = now_ms();
+        for (f = 0; f < BENCH_FRAMES; f++) {
+          my_vgcanvas_begin_frame(vg2, NULL);
+          for (i = 0; i < 8; i++) {
+            my_vgcanvas_set_fill_color(vg2, my_color_rgb(255, 255, 255));
+            my_vgcanvas_begin_path(vg2);
+            my_vgcanvas_move_to(vg2, 100.0f * i + 50, 40);
+            my_vgcanvas_line_to(vg2, 100.0f * i + 90, 400);
+            my_vgcanvas_line_to(vg2, 100.0f * i + 10, 400);
+            my_vgcanvas_close_path(vg2);
+            my_vgcanvas_fill(vg2);
+          }
+          my_vgcanvas_end_frame(vg2);
+        }
+        t1 = now_ms();
+        printf("bench_render: 8 triangles x %d frames AA=%s: total %.1f ms, "
+               "avg %.3f ms/frame\n",
+               BENCH_FRAMES, pass == 0 ? "on" : "off", t1 - t0,
+               (t1 - t0) / BENCH_FRAMES);
+      }
+    }
+    my_vgcanvas_destroy(vg2);
+    my_widget_unref(my_window_widget(win2));
+  }
 
   my_widget_unref(my_window_widget(win));
   my_pal_destroy(pal);

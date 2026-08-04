@@ -57,6 +57,7 @@ typedef struct my_vgcanvas_soft_t {
   size_t contour_cap;
 
   my_dirty_rects_t dirty;
+  bool antialias; /**< scanline coverage AA on path fills (M7c, default on) */
 } my_vgcanvas_soft_t;
 
 /* ---------------- growable arrays ---------------- */
@@ -93,6 +94,99 @@ static void soft_fill_device_rect(my_vgcanvas_soft_t* s, my_rect_t r,
   if (my_rect_intersect(&r, &s->state.clip, &clipped)) {
     my_lcd_fill_rect(s->lcd, &clipped, color);
     my_dirty_rects_add(&s->dirty, &clipped);
+  }
+}
+
+/* ---------------- coverage anti-aliasing (M7c) ----------------
+ * Horizontal 4x subsampling on scanline edges: each edge pixel gets a
+ * coverage of 0..4 subsamples (centers at (2k+1)/8) and is blended
+ * src-over with alpha = color.a * cov / 4. Vertical direction is NOT
+ * subsampled (cost control; visually already much smoother). Straight
+ * horizontal/vertical edges always have full coverage (no regression).
+ */
+
+/** @brief Coverage 0..4 of a left-edge pixel whose fraction is f. */
+static int cov_left(float f) {
+  int k, n = 0;
+  for (k = 0; k < 4; k++) {
+    if ((float)(2 * k + 1) / 8.0f >= f) {
+      n++;
+    }
+  }
+  return n;
+}
+
+/** @brief Coverage 0..4 of a right-edge pixel whose fraction is f. */
+static int cov_right(float f) {
+  int k, n = 0;
+  for (k = 0; k < 4; k++) {
+    if ((float)(2 * k + 1) / 8.0f <= f) {
+      n++;
+    }
+  }
+  return n;
+}
+
+/** @brief Blend one pixel with coverage (skips when outside the clip). */
+static void soft_blend_pixel(my_vgcanvas_soft_t* s, int32_t x, int32_t y,
+                             int cov, my_color_t color) {
+  const my_rect_t* clip = &s->state.clip;
+  my_color_t c = color;
+  if (cov <= 0 || x < clip->x || x >= clip->x + clip->w || y < clip->y ||
+      y >= clip->y + clip->h) {
+    return;
+  }
+  c.a = (uint8_t)((color.a * cov) / 4);
+  my_lcd_blend_span(s->lcd, x, y, &c.a, 1, c);
+  my_dirty_rects_add(&s->dirty, &(my_rect_t){x, y, 1, 1});
+}
+
+/**
+ * @brief Fill one scanline span [xl, xr] (device y): opaque interior
+ * [ceil(xl), floor(xr)-1], coverage-blended edge pixels when AA is on.
+ */
+static void soft_fill_span(my_vgcanvas_soft_t* s, int32_t y, float xl,
+                           float xr, my_color_t color) {
+  if (!s->antialias) {
+    /* hard edge: pixel-center rule (M1 behavior) */
+    int32_t xa = (int32_t)ceilf(xl - 0.5f);
+    int32_t xb = (int32_t)ceilf(xr - 0.5f);
+    if (xb > xa) {
+      soft_fill_device_rect(s, my_rect_init(xa, y, xb - xa, 1), color);
+    }
+    return;
+  }
+  {
+    float fxl = xl - floorf(xl);
+    float fxr = xr - floorf(xr);
+    int32_t lpix = (int32_t)floorf(xl);
+    int32_t rpix = (int32_t)floorf(xr);
+    if (lpix == rpix) {
+      /* sub-pixel span: coverage of centers inside [fxl, fxr] */
+      int k, n = 0;
+      for (k = 0; k < 4; k++) {
+        float c = (float)(2 * k + 1) / 8.0f;
+        if (c >= fxl && c <= fxr) {
+          n++;
+        }
+      }
+      soft_blend_pixel(s, lpix, y, n, color);
+      return;
+    }
+    if (fxl > 0.0f) {
+      soft_blend_pixel(s, lpix, y, cov_left(fxl), color);
+    }
+    if (fxr > 0.0f) {
+      soft_blend_pixel(s, rpix, y, cov_right(fxr), color);
+    }
+    /* interior pixels fully covered: xl' <= p and p+1 <= xr' */
+    {
+      int32_t x0 = (fxl > 0.0f) ? lpix + 1 : lpix;
+      int32_t x1 = (fxr > 0.0f) ? rpix - 1 : rpix - 1;
+      if (x1 >= x0) {
+        soft_fill_device_rect(s, my_rect_init(x0, y, x1 - x0 + 1, 1), color);
+      }
+    }
   }
 }
 
@@ -227,8 +321,8 @@ static void soft_fill_circle(my_vgcanvas_soft_t* s, int32_t cx, int32_t cy,
                              int32_t r, my_color_t color) {
   int32_t dy;
   for (dy = -r; dy <= r; dy++) {
-    int32_t dx = (int32_t)floorf(sqrtf((float)(r * r - dy * dy)));
-    soft_fill_device_rect(s, my_rect_init(cx - dx, cy + dy, 2 * dx + 1, 1), color);
+    float fdx = sqrtf((float)(r * r - dy * dy));
+    soft_fill_span(s, cy + dy, (float)cx - fdx, (float)cx + fdx + 1.0f, color);
   }
 }
 
@@ -354,12 +448,7 @@ static void soft_fill_scanline(my_vgcanvas_soft_t* s, int32_t y, float* xs,
 
   qsort(xs, nxs, sizeof(float), float_cmp);
   for (k = 0; k + 1 < nxs; k += 2) {
-    int32_t xa = (int32_t)ceilf(xs[k] - 0.5f);
-    int32_t xb = (int32_t)ceilf(xs[k + 1] - 0.5f);
-    if (xb > xa) {
-      soft_fill_device_rect(s, my_rect_init(xa, y, xb - xa, 1),
-                            s->state.fill_color);
-    }
+    soft_fill_span(s, y, xs[k], xs[k + 1], s->state.fill_color);
   }
 }
 
@@ -559,8 +648,16 @@ my_vgcanvas_t* my_vgcanvas_soft_create(const my_allocator_t* allocator,
   s->state.font_size = 16;
   s->state.clip =
       my_rect_init(0, 0, (int32_t)my_lcd_get_width(lcd), (int32_t)my_lcd_get_height(lcd));
+  s->antialias = true;
   my_dirty_rects_init(&s->dirty);
   return (my_vgcanvas_t*)s;
+}
+
+void my_vgcanvas_soft_set_antialias(my_vgcanvas_t* vg, bool enabled) {
+  my_vgcanvas_soft_t* s = (my_vgcanvas_soft_t*)vg;
+  if (s != NULL && s->base.vtable == &s_soft_vtable) {
+    s->antialias = enabled;
+  }
 }
 
 const my_dirty_rects_t* my_vgcanvas_soft_get_dirty_rects(my_vgcanvas_t* vg) {

@@ -17,6 +17,9 @@ typedef struct my_lcd_mem_t {
   bool buffer_owned; /**< false for create_from_buffer (e.g. mmap'd fb) */
 } my_lcd_mem_t;
 
+static void blend_row(my_lcd_mem_t* m, uint8_t* row, int32_t x0, uint32_t n,
+                      my_color_t c);
+
 /* ---------------- vtable: properties ---------------- */
 
 static uint32_t lcd_mem_get_width(my_lcd_t* lcd) {
@@ -141,6 +144,15 @@ static my_ret_t lcd_mem_fill_rect(my_lcd_t* lcd, const my_rect_t* rect,
     return MY_RET_OK;
   }
 
+  /* translucent color: per-pixel src-over (opaque keeps the fast path) */
+  if (color.a < 255) {
+    for (y = clipped.y; y < clipped.y + clipped.h; y++) {
+      blend_row(m, m->buffer + (size_t)y * m->stride, clipped.x,
+                (uint32_t)clipped.w, color);
+    }
+    return MY_RET_OK;
+  }
+
   for (y = clipped.y; y < clipped.y + clipped.h; y++) {
     uint8_t* row = m->buffer + (size_t)y * m->stride;
     uint32_t n = (uint32_t)clipped.w;
@@ -202,7 +214,51 @@ static my_ret_t lcd_mem_draw_pixels(my_lcd_t* lcd, const void* pixels, int32_t x
 /* ---------------- blend (src-over) ---------------- */
 
 static inline uint8_t blend_ch(uint8_t src, uint8_t dst, uint8_t a) {
+  /* out = (src*a + dst*(255-a)) / 255, truncating division */
   return (uint8_t)(((uint32_t)src * a + (uint32_t)dst * (255u - a)) / 255u);
+}
+
+/** @brief Blend one row of n pixels of the given format with src-over. */
+static void blend_row(my_lcd_mem_t* m, uint8_t* row, int32_t x0, uint32_t n,
+                      my_color_t c) {
+  uint32_t i;
+  uint8_t a = c.a;
+  for (i = 0; i < n; i++) {
+    uint8_t* p = row + (size_t)(x0 + (int32_t)i) *
+                       (my_pixel_format_bpp(m->format) / 8u);
+    switch (m->format) {
+      case MY_PIXEL_FORMAT_RGB565: {
+        uint16_t v, o;
+        uint8_t dr, dg, db;
+        memcpy(&v, p, 2);
+        dr = (uint8_t)((v >> 11) << 3);
+        dg = (uint8_t)(((v >> 5) & 0x3F) << 2);
+        db = (uint8_t)((v & 0x1F) << 3);
+        o = (uint16_t)(((blend_ch(c.r, dr, a) >> 3) << 11) |
+                       ((blend_ch(c.g, dg, a) >> 2) << 5) |
+                       (blend_ch(c.b, db, a) >> 3));
+        memcpy(p, &o, 2);
+        break;
+      }
+      case MY_PIXEL_FORMAT_RGB888:
+        p[0] = blend_ch(c.r, p[0], a);
+        p[1] = blend_ch(c.g, p[1], a);
+        p[2] = blend_ch(c.b, p[2], a);
+        break;
+      case MY_PIXEL_FORMAT_ARGB8888:
+        p[1] = blend_ch(c.r, p[1], a);
+        p[2] = blend_ch(c.g, p[2], a);
+        p[3] = blend_ch(c.b, p[3], a);
+        break;
+      case MY_PIXEL_FORMAT_BGRA8888:
+        p[0] = blend_ch(c.b, p[0], a);
+        p[1] = blend_ch(c.g, p[1], a);
+        p[2] = blend_ch(c.r, p[2], a);
+        break;
+      default:
+        break;
+    }
+  }
 }
 
 static my_ret_t lcd_mem_blend_span(my_lcd_t* lcd, int32_t x, int32_t y,

@@ -23,6 +23,7 @@ typedef struct golden_scene_t {
 } golden_scene_t;
 
 static void golden_scene_shapes(my_vgcanvas_t* vg) {
+  my_vgcanvas_soft_set_antialias(vg, false);
   static const my_color_t NAVY = {16, 16, 64, 255};
   static const my_color_t RED = {255, 0, 0, 255};
   static const my_color_t GREEN = {0, 255, 0, 255};
@@ -62,6 +63,7 @@ static void golden_scene_shapes(my_vgcanvas_t* vg) {
 }
 
 static void golden_scene_clip(my_vgcanvas_t* vg) {
+  my_vgcanvas_soft_set_antialias(vg, false);
   static const my_color_t BLACK = {0, 0, 0, 255};
   static const my_color_t RED = {255, 0, 0, 255};
   static const my_color_t BLUE = {0, 0, 255, 255};
@@ -78,6 +80,7 @@ static void golden_scene_clip(my_vgcanvas_t* vg) {
 }
 
 static void golden_scene_rounded(my_vgcanvas_t* vg) {
+  my_vgcanvas_soft_set_antialias(vg, false);
   static const my_color_t GRAY = {32, 32, 32, 255};
   static const my_color_t CYAN = {0, 255, 255, 255};
   static const my_color_t MAGENTA = {255, 0, 255, 255};
@@ -94,6 +97,7 @@ static void golden_scene_rounded(my_vgcanvas_t* vg) {
 }
 
 static void golden_scene_concave(my_vgcanvas_t* vg) {
+  my_vgcanvas_soft_set_antialias(vg, false);
   static const my_color_t BLACK = {0, 0, 0, 255};
   static const my_color_t ORANGE = {255, 128, 0, 255};
   static const my_color_t WHITE = {255, 255, 255, 255};
@@ -132,6 +136,7 @@ static void golden_scene_concave(my_vgcanvas_t* vg) {
 }
 
 static void golden_scene_mono(my_vgcanvas_t* vg) {
+  my_vgcanvas_soft_set_antialias(vg, false);
   static const my_color_t OFF = {0, 0, 0, 255};
   static const my_color_t ON = {255, 255, 255, 255};
 
@@ -154,6 +159,33 @@ static void golden_scene_mono(my_vgcanvas_t* vg) {
   my_vgcanvas_end_frame(vg);
 }
 
+static void golden_scene_aa(my_vgcanvas_t* vg) {
+  static const my_color_t NAVY = {16, 16, 64, 255};
+  static const my_color_t WHITE = {255, 255, 255, 255};
+  static const my_color_t GREEN = {0, 255, 0, 255};
+  static const my_color_t RED50 = {255, 0, 0, 128};
+
+  my_vgcanvas_soft_set_antialias(vg, true); /* AA coverage visible */
+  my_vgcanvas_begin_frame(vg, NULL);
+  my_vgcanvas_set_fill_color(vg, NAVY);
+  my_vgcanvas_fill_rect(vg, &(my_rectf_t){0, 0, 64, 48});
+
+  my_vgcanvas_set_fill_color(vg, WHITE);
+  my_vgcanvas_begin_path(vg);
+  my_vgcanvas_move_to(vg, 50, 6);
+  my_vgcanvas_line_to(vg, 60, 42);
+  my_vgcanvas_line_to(vg, 8, 42);
+  my_vgcanvas_close_path(vg);
+  my_vgcanvas_fill(vg);
+
+  my_vgcanvas_set_fill_color(vg, GREEN);
+  my_vgcanvas_fill_rounded_rect(vg, &(my_rectf_t){4, 4, 20, 16}, 6);
+
+  my_vgcanvas_set_fill_color(vg, RED50); /* translucent overlay */
+  my_vgcanvas_fill_rect(vg, &(my_rectf_t){24, 24, 30, 16});
+  my_vgcanvas_end_frame(vg);
+}
+
 static const golden_scene_t GOLDEN_SCENES[] = {
     {"scene_shapes_rgb565", 64, 48, MY_PIXEL_FORMAT_RGB565, golden_scene_shapes},
     {"scene_clip_rgb888", 32, 24, MY_PIXEL_FORMAT_RGB888, golden_scene_clip},
@@ -162,6 +194,7 @@ static const golden_scene_t GOLDEN_SCENES[] = {
     {"scene_concave_bgra8888", 48, 36, MY_PIXEL_FORMAT_BGRA8888,
      golden_scene_concave},
     {"scene_mono", 64, 24, MY_PIXEL_FORMAT_MONO, golden_scene_mono},
+    {"scene_aa_bgra8888", 64, 48, MY_PIXEL_FORMAT_BGRA8888, golden_scene_aa},
 };
 
 #define GOLDEN_SCENE_COUNT (sizeof(GOLDEN_SCENES) / sizeof(GOLDEN_SCENES[0]))
