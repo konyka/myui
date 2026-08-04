@@ -9,6 +9,7 @@
 #include "myc/my_str.h"
 #include "mymvvm_myui/my_mvvm.h"
 #include "myui/widgets/my_button.h"
+#include "myui/widgets/my_edit.h"
 #include "myui/widgets/my_label.h"
 
 /* ---------------- properties ---------------- */
@@ -24,6 +25,15 @@ static my_ret_t target_set_prop(my_binding_target_t* t, const char* name,
     }
     if (my_str_eq(w->widget_type, "label")) {
       return my_label_set_text(w, s);
+    }
+    if (my_str_eq(w->widget_type, "edit")) {
+      return my_edit_set_text(w, s);
+    }
+    return MY_RET_NOT_SUPPORTED;
+  }
+  if (strcmp(name, "hint") == 0) {
+    if (my_str_eq(w->widget_type, "edit")) {
+      return my_edit_set_hint(w, my_value_get_str(v));
     }
     return MY_RET_NOT_SUPPORTED;
   }
@@ -72,6 +82,8 @@ static my_ret_t target_get_prop(my_binding_target_t* t, const char* name,
       s = ((my_button_t*)w)->text;
     } else if (my_str_eq(w->widget_type, "label")) {
       s = ((my_label_t*)w)->text;
+    } else if (my_str_eq(w->widget_type, "edit")) {
+      s = my_edit_get_text(w);
     }
     return my_value_set_str(v, s);
   }

@@ -8,6 +8,7 @@
 #include "mypal/dummy/my_pal_dummy.h"
 #include "mymvvm/my_view_model_array.h"
 #include "myui/widgets/my_button.h"
+#include "myui/widgets/my_edit.h"
 #include "myui/widgets/my_label.h"
 
 #include "mytest.h"
@@ -273,6 +274,85 @@ static void test_navigator_wm(void) {
   app_destroy(&a);
 }
 
+/* ---------------- edit TwoWay end-to-end ---------------- */
+
+static void type_into_edit(my_widget_t* edit, const char* keys) {
+  const char* p;
+  ((my_edit_t*)edit)->focused = true;
+  for (p = keys; *p != '\0'; p++) {
+    my_event_t e = my_event_init(MY_EVENT_KEY_DOWN);
+    e.u.key.key = (uint8_t)*p;
+    edit->vtable->on_event(edit, &e);
+  }
+}
+
+static void test_edit_two_way_end_to_end(void) {
+  app_ctx_t a;
+  my_widget_t* edit;
+  my_value_t out;
+  app_init(&a);
+  a.vm = my_view_model_dummy_create(NULL);
+  set_vm_str(a.vm, "name", "init");
+
+  edit = my_edit_create(NULL);
+  my_widget_set_rect(edit, &(my_rect_t){0, 0, 200, 28});
+  my_widget_set_bind_rules(edit, "v:text={name, Mode=TwoWay}");
+  my_widget_add_child(my_window_widget(a.win), edit);
+  my_widget_unref(edit);
+
+  a.mc = my_mvvm_bind(a.wm, a.win, a.vm);
+  TEST_ASSERT_NOT_NULL(a.mc);
+  TEST_ASSERT_EQ_STR(my_edit_get_text(edit), "init"); /* vm -> edit */
+
+  type_into_edit(edit, "X"); /* edit -> vm via "changed" */
+  my_value_init(&out, NULL);
+  my_view_model_get_prop(a.vm, "name", &out);
+  TEST_ASSERT_EQ_STR(my_value_get_str(&out), "initX");
+
+  set_vm_str(a.vm, "name", "from_vm"); /* vm -> edit again */
+  my_value_reset(&out);
+  TEST_ASSERT_EQ_STR(my_edit_get_text(edit), "from_vm");
+
+  app_destroy(&a);
+}
+
+static void test_edit_validator_rejects(void) {
+  app_ctx_t a;
+  my_widget_t* edit;
+  my_value_t out;
+  app_init(&a);
+  a.vm = my_view_model_dummy_create(NULL);
+  set_vm_str(a.vm, "name", "alice");
+
+  edit = my_edit_create(NULL);
+  my_widget_set_rect(edit, &(my_rect_t){0, 0, 200, 28});
+  my_widget_set_bind_rules(edit, "v:text={name, Mode=TwoWay, Validator=not_empty}");
+  my_widget_add_child(my_window_widget(a.win), edit);
+  my_widget_unref(edit);
+
+  a.mc = my_mvvm_bind(a.wm, a.win, a.vm);
+
+  /* select all + delete: empty writeback must be rejected and restored */
+  {
+    my_event_t e = my_event_init(MY_EVENT_KEY_DOWN);
+    ((my_edit_t*)edit)->focused = true;
+    e.u.key.key = 'a';
+    e.u.key.modifiers = MY_KEYMOD_CTRL;
+    edit->vtable->on_event(edit, &e);
+    e.u.key.key = MY_KEY_BACKSPACE;
+    e.u.key.modifiers = 0;
+    edit->vtable->on_event(edit, &e);
+  }
+
+  my_value_init(&out, NULL);
+  my_view_model_get_prop(a.vm, "name", &out);
+  TEST_ASSERT_EQ_STR(my_value_get_str(&out), "alice"); /* vm unchanged */
+  TEST_ASSERT_EQ_STR(my_edit_get_text(edit), "alice"); /* edit restored */
+  my_value_reset(&out);
+
+  app_destroy(&a);
+}
+
 static void test_no_leak_with_debug_allocator(void) {
   my_allocator_t* dbg = my_allocator_debug_create(NULL);
   my_pal_t* pal = my_pal_dummy_create(dbg);
@@ -324,5 +404,7 @@ MYTEST_MAIN_BEGIN()
   MYTEST_RUN(test_close_window_command);
   MYTEST_RUN(test_items_end_to_end);
   MYTEST_RUN(test_navigator_wm);
+  MYTEST_RUN(test_edit_two_way_end_to_end);
+  MYTEST_RUN(test_edit_validator_rejects);
   MYTEST_RUN(test_no_leak_with_debug_allocator);
 MYTEST_MAIN_END()

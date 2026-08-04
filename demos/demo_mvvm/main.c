@@ -13,6 +13,7 @@
 #include "mymvvm/my_view_model_array.h"
 #include "mymvvm_myui/my_mvvm.h"
 #include "myui/widgets/my_button.h"
+#include "myui/widgets/my_edit.h"
 #include "myui/widgets/my_label.h"
 
 /** @brief Prefer a system TTF (stb backend), fall back to the 8x8 font. */
@@ -48,6 +49,7 @@ typedef struct app_t {
   my_view_model_array_t* persons;
   my_mvvm_context_t* mc;
   my_navigator_wm_t* nav;
+  my_font_t* font;
 } app_t;
 
 static void set_vm_int(my_view_model_t* vm, const char* name, int32_t i) {
@@ -67,6 +69,14 @@ static int32_t get_vm_int(my_view_model_t* vm, const char* name) {
   }
   my_value_reset(&v);
   return r;
+}
+
+static void set_vm_str(my_view_model_t* vm, const char* name, const char* s) {
+  my_value_t v;
+  my_value_init(&v, NULL);
+  my_value_set_str(&v, s);
+  my_view_model_set_prop(vm, name, &v);
+  my_value_reset(&v);
 }
 
 static my_ret_t on_inc(void* ctx, const char* args) {
@@ -165,10 +175,49 @@ static my_widget_t* add_btn(my_widget_t* parent, const char* text,
   return b;
 }
 
+static my_ret_t on_submit(void* ctx, const char* args) {
+  my_view_model_t* vm = (my_view_model_t*)ctx;
+  my_value_t v;
+  const char* name = "";
+  (void)args;
+  my_value_init(&v, NULL);
+  if (my_view_model_get_prop(vm, "name", &v) == MY_RET_OK) {
+    name = my_value_get_str(&v);
+  }
+  {
+    char msg[80];
+    snprintf(msg, sizeof(msg), "Hello, %s!", name != NULL ? name : "?");
+    my_value_reset(&v);
+    my_value_init(&v, NULL);
+    my_value_set_str(&v, msg);
+    my_view_model_set_prop(vm, "greeting", &v);
+    my_value_reset(&v);
+  }
+  return MY_RET_OK;
+}
+
 static void build_ui(app_t* app) {
   my_widget_t* root = my_window_widget(app->win);
   my_widget_t* count_label = my_label_create(NULL, "0");
   my_widget_t* list = my_widget_create(NULL, "list");
+  my_widget_t* name_edit = my_edit_create(NULL);
+  my_widget_t* greet = my_label_create(NULL, "-");
+
+  /* form row: name edit (TwoWay + validator) + submit button */
+  my_widget_set_rect(name_edit, &(my_rect_t){20, 380, 240, 32});
+  my_edit_set_hint(name_edit, "your name");
+  my_edit_set_font(name_edit, app->font, 16);
+  my_widget_set_bind_rules(name_edit,
+                           "v:text={name, Mode=TwoWay, Validator=not_empty}");
+  my_widget_add_child(root, name_edit);
+  my_widget_unref(name_edit);
+
+  add_btn(root, "submit", "v:on_click={submit}", 280, 380, 120);
+
+  my_widget_set_rect(greet, &(my_rect_t){420, 380, 240, 32});
+  my_widget_set_bind_rules(greet, "v:text={greeting}");
+  my_widget_add_child(root, greet);
+  my_widget_unref(greet);
 
   my_widget_set_rect(count_label, &(my_rect_t){20, 20, 200, 32});
   my_widget_set_bind_rules(count_label, "v:text={count, Converter=int_to_str}");
@@ -237,7 +286,10 @@ int main(void) {
   app.vm = my_view_model_dummy_create(NULL);
   my_view_model_dummy_add_command(app.vm, "inc", on_inc, app.vm);
   my_view_model_dummy_add_command(app.vm, "dec", on_dec, app.vm);
+  my_view_model_dummy_add_command(app.vm, "submit", on_submit, app.vm);
   set_vm_int(app.vm, "count", 0);
+  set_vm_str(app.vm, "name", "");
+  set_vm_str(app.vm, "greeting", "-");
 
   app.persons = my_view_model_array_dummy_create(NULL);
   my_view_model_array_dummy_push(app.persons, person("alice"));
@@ -256,10 +308,8 @@ int main(void) {
   my_mvvm_register_template("person_row", build_person_row, &row_ctx);
 
   app.win = my_window_create(NULL, app.pal, 800, 480, "myui demo_mvvm");
-  {
-    my_font_t* font = create_default_font();
-    my_window_set_font(app.win, font, 16);
-  }
+  app.font = create_default_font();
+  my_window_set_font(app.win, app.font, 16);
   build_ui(&app);
   my_window_manager_open(app.wm, app.win);
   app.mc = my_mvvm_bind(app.wm, app.win, app.vm);
@@ -269,13 +319,22 @@ int main(void) {
   {
     const char* dump = getenv("MYUI_DEMO_DUMP_PPM");
     if (dump != NULL) {
+      static const char typed[] = "myui";
+      size_t i;
       click_at(&app, 65, 82);   /* +1 twice */
       click_at(&app, 65, 82);
       click_at(&app, 100, 136); /* delete first row (deferred via timer) */
+      click_at(&app, 60, 396);  /* focus the name edit */
+      for (i = 0; typed[i] != '\0'; i++) {
+        my_event_t e = my_event_init(MY_EVENT_KEY_DOWN);
+        e.u.key.key = (uint8_t)typed[i];
+        my_window_on_pal_event(app.win, &e);
+      }
+      click_at(&app, 340, 396); /* submit */
       my_pal_dummy_set_now_ms(app.pal, 50);
       my_pal_main_loop_run(app.loop); /* fire the deferred delete */
       my_pal_dummy_set_now_ms(app.pal, 100);
-      my_pal_main_loop_run(app.loop); /* next paint tick redraws 2 rows */
+      my_pal_main_loop_run(app.loop); /* next paint tick redraws */
       dump_ppm(app.win->pal_window, dump);
       my_mvvm_context_destroy(app.mc);
       my_view_model_array_unref(app.persons);

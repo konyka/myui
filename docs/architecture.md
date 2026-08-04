@@ -109,3 +109,22 @@ PAL port 矩阵：
 - 渲染落地：vgcanvas vtable 增加 `set_font(font, size)`（font 可 NULL 仅改字号）与 `measure_text`；soft backend 的 draw_text 把字形 alpha 经 `my_lcd_blend_span`（lcd vtable 新增的 src-over span 混合，各格式特化）写入；gles2 backend 把字形上传为 alpha 纹理（64 项直接映射缓存），第二套纹理着色器 + quad 绘制（纹理图集批提交为 TODO）。
 - 控件：button/label 用 measure 居中真实文本，主题键 `font_size`/`fg_color` 生效；无字体时回退旧占位条（兼容老测试）。窗口 `my_window_set_font` 设默认字体。
 - 第三方说明：`3rd/stb/stb_truetype.h`（public domain），其实现宏单独成 TU 并仅对该文件放宽警告，项目自身标准不变。
+
+## edit 文本输入控件（M7b）
+
+`src/myui/widgets/my_edit.h/.c`：单行输入，focusable。状态机简表：
+
+| 输入 | 行为 |
+|------|------|
+| 可打印 ASCII (32..126) | 有选区先删选区，插入字节，emit "changed"；max_len（按 codepoint）截断 |
+| Left/Right | 按 codepoint 步进（UTF-8 不碎）；Shift = 扩选 |
+| Home/End | 行首/行尾 |
+| Backspace/Delete | 有选区删选区，否则删前/后一个 codepoint |
+| Ctrl+A | 全选（anchor=0, cursor=end） |
+| Enter | emit "activate" |
+| POINTER_DOWN | 点击定位光标（font measure 逐字前缀宽，无 font 退化为等宽估算） |
+
+- 光标/选区按字节偏移存于 codepoint 边界；password 模式缓存 `*` 掩码串；readonly 拒绝编辑；hint 空文本未聚焦时灰色显示。
+- 焦点：分发器在 POINTER_DOWN 时切换焦点并发 "focus"/"blur" emitter 事件（点空白处 blur）；非焦点控件收不到 KEY 路径（edit 自身也检查 focused）。
+- 绘制：bg/border（**focused 复用样式 HOVER 槽**，文档约定）、选区高亮、光标竖线（常亮，闪烁 TODO）、文本超宽时 scroll_x 跟随光标。
+- MVVM：widget_target 映射 edit 的 text/hint；"changed" 事件驱动 TwoWay 回写，validator 拒绝时自动恢复。

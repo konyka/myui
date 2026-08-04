@@ -7,7 +7,7 @@
 - **分层架构**：myc 基础库 / mypal 平台抽象 / myr 渲染抽象 / myui 控件核心 / mymvvm MVVM，层间只经 vtable 接口通信
 - **双渲染 backend**：软件光栅化（零依赖，5 种像素格式）+ GLES2（CPU 三角化，GL 调用经函数表隔离），同一冻结 vgcanvas 接口
 - **字体系统**：stb_truetype（TTF + LRU 字形缓存）+ 内置 8x8 位图字体兜底（`MYUI_FONT_STB=OFF` 嵌入式裁剪），soft/GLES2 双 backend 文本渲染
-- **控件系统**：引用计数控件树、linear 布局（px/%/flex）、事件分发（grab/焦点）、主题样式（文本加载）、属性动画、脏矩形局部重绘
+- **控件系统**：引用计数控件树、linear 布局（px/%/flex）、事件分发（grab/焦点）、主题样式（文本加载）、属性动画、脏矩形局部重绘；内置 button/label/edit（单行文本输入，UTF-8 光标与选区）
 - **MVVM**：data/command/items/condition 绑定、converter/validator、navigator、声明式规则字符串，UI 适配经 binding_target 抽象（base 可独立单测）
 - **TDD**：自研 mytest 最小框架，35 个 ctest 全绿；golden-image 渲染回归；性能基线（50 按钮全帧 2.25ms）
 

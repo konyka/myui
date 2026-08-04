@@ -109,3 +109,22 @@ v:on_click={back, CloseWindow=true}
 - 列表：`v:items={persons, ItemTemplate=person_row}`；模板把每行建成一个按钮（文字来自行 vm 的 `name`）；行内点击经定时器延迟删除该人 → `items_changed` → 自动重建。
 - 导航：`v:on_click={goto, ToPage=detail}` 打开 detail 页；detail 页按钮 `v:on_click={back, CloseWindow=true}` 关闭自己返回。
 - 全 demo 没有一行手动刷新 UI 的代码。
+
+## TwoWay 表单完整示例（M7b edit 落地）
+
+```c
+/* 窗口内放一个 edit 控件并挂规则 */
+my_widget_t* name_edit = my_edit_create(NULL);
+my_widget_set_rect(name_edit, &(my_rect_t){20, 380, 240, 32});
+my_edit_set_hint(name_edit, "your name");
+my_widget_set_bind_rules(name_edit, "v:text={name, Mode=TwoWay, Validator=not_empty}");
+my_widget_add_child(root, name_edit);
+
+/* 提交按钮 + 状态 label */
+my_widget_set_bind_rules(submit_btn, "v:on_click={submit}");
+my_widget_set_bind_rules(status_label, "v:text={greeting}");
+
+mc = my_mvvm_bind(wm, win, vm);   /* 之后一切自动 */
+```
+
+数据流：用户键入 → edit 发 `"changed"` → 绑定回写 `vm.name`（not_empty 校验空值被拒并恢复 edit）；`vm.name` 被代码改动 → 自动推送到 edit。点提交 → `submit` 命令读 `vm.name` 写 `greeting` → label 刷新。demo_mvvm 即此场景。

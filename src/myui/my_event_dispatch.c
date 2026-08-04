@@ -58,6 +58,20 @@ static my_widget_t* nearest_focusable(my_widget_t* w) {
   return w;
 }
 
+/** @brief Switch key focus, emitting "blur"/"focus" on the widgets. */
+static void set_focus(my_event_dispatcher_t* d, my_widget_t* widget) {
+  if (d->focused == widget) {
+    return;
+  }
+  if (d->focused != NULL) {
+    my_emitter_emit(d->focused->emitter, "blur", NULL);
+  }
+  d->focused = widget;
+  if (widget != NULL) {
+    my_emitter_emit(widget->emitter, "focus", NULL);
+  }
+}
+
 bool my_event_dispatch(my_event_dispatcher_t* dispatcher,
                        const my_event_t* event) {
   my_widget_t* target;
@@ -71,12 +85,10 @@ bool my_event_dispatch(my_event_dispatcher_t* dispatcher,
                                   event->u.pointer.y);
       dispatcher->grabbed = target;
       if (target != NULL) {
-        my_widget_t* f = nearest_focusable(target);
-        if (f != NULL) {
-          dispatcher->focused = f;
-        }
+        set_focus(dispatcher, nearest_focusable(target));
         return deliver(target, event);
       }
+      set_focus(dispatcher, NULL); /* click on empty space: blur */
       return false;
     case MY_EVENT_POINTER_MOVE:
       target = dispatcher->grabbed;

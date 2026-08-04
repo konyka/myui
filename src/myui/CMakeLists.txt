@@ -11,6 +11,7 @@ add_library(myui STATIC
   my_window_manager.c
   widgets/my_button.c
   widgets/my_label.c
+  widgets/my_edit.c
 )
 
 target_include_directories(myui PUBLIC ${CMAKE_SOURCE_DIR}/src)
