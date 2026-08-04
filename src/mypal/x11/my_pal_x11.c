@@ -124,6 +124,12 @@ static my_ret_t x11_lcd_fill_rect(my_lcd_t* lcd, const my_rect_t* rect,
   return my_lcd_fill_rect(((x11_lcd_t*)lcd)->mem, rect, color);
 }
 
+static my_ret_t x11_lcd_blend_span(my_lcd_t* lcd, int32_t x, int32_t y,
+                                     const uint8_t* alpha, int32_t n,
+                                     my_color_t color) {
+  return my_lcd_blend_span(((x11_lcd_t*)lcd)->mem, x, y, alpha, n, color);
+}
+
 static void x11_lcd_destroy(my_lcd_t* lcd) {
   x11_lcd_t* x = (x11_lcd_t*)lcd;
   if (x != NULL) {
@@ -134,7 +140,7 @@ static void x11_lcd_destroy(my_lcd_t* lcd) {
 static const my_lcd_vtable_t s_x11_lcd_vtable = {
     x11_lcd_get_width,  x11_lcd_get_height, x11_lcd_get_format,
     x11_lcd_begin_frame, x11_lcd_end_frame, x11_lcd_draw_pixels,
-    x11_lcd_fill_rect,  x11_lcd_destroy};
+    x11_lcd_fill_rect, x11_lcd_blend_span, x11_lcd_destroy};
 
 /* window vtable */
 

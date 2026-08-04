@@ -25,6 +25,7 @@
 
 #include "myc/my_error.h"
 #include "myr/my_color.h"
+#include "myr/my_font.h"
 #include "myr/my_rect.h"
 
 typedef struct my_vgcanvas_t my_vgcanvas_t;
@@ -65,6 +66,16 @@ typedef struct my_vgcanvas_vtable_t {
   my_ret_t (*draw_text)(my_vgcanvas_t* vg, const char* text, float x, float y);
 
   void (*destroy)(my_vgcanvas_t* vg);
+
+  /**
+   * @brief Set the current font and size (M7a). font may be NULL to
+   * change only the size; draw_text returns NOT_SUPPORTED without a font.
+   */
+  my_ret_t (*set_font)(my_vgcanvas_t* vg, my_font_t* font, int32_t size);
+
+  /** @brief Measure text with the current font/size (NOT_SUPPORTED without). */
+  my_ret_t (*measure_text)(my_vgcanvas_t* vg, const char* text, int32_t* w,
+                           int32_t* h);
 } my_vgcanvas_vtable_t;
 
 /** @brief vgcanvas base "class": first member of every backend. */
@@ -161,6 +172,17 @@ static inline void my_vgcanvas_destroy(my_vgcanvas_t* vg) {
   if (vg != NULL) {
     vg->vtable->destroy(vg);
   }
+}
+
+static inline my_ret_t my_vgcanvas_set_font(my_vgcanvas_t* vg, my_font_t* font,
+                                            int32_t size) {
+  return vg->vtable->set_font(vg, font, size);
+}
+
+static inline my_ret_t my_vgcanvas_measure_text(my_vgcanvas_t* vg,
+                                                const char* text, int32_t* w,
+                                                int32_t* h) {
+  return vg->vtable->measure_text(vg, text, w, h);
 }
 
 #endif /* MY_VGCANVAS_H */

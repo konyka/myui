@@ -25,6 +25,28 @@ static const char* FS_SRC =
     "uniform vec4 u_color;\n"
     "void main(void) { gl_FragColor = u_color; }\n";
 
+static const char* VS_TEXT_SRC =
+    "attribute vec2 a_pos;\n"
+    "attribute vec2 a_uv;\n"
+    "uniform vec2 u_resolution;\n"
+    "varying vec2 v_uv;\n"
+    "void main(void) {\n"
+    "  vec2 ndc = (a_pos / u_resolution) * 2.0 - 1.0;\n"
+    "  gl_Position = vec4(ndc.x, -ndc.y, 0.0, 1.0);\n"
+    "  v_uv = a_uv;\n"
+    "}\n";
+
+static const char* FS_TEXT_SRC =
+    "precision mediump float;\n"
+    "uniform vec4 u_color;\n"
+    "uniform sampler2D u_tex;\n"
+    "varying vec2 v_uv;\n"
+    "void main(void) {\n"
+    "  gl_FragColor = vec4(u_color.rgb, u_color.a * texture2D(u_tex, v_uv).r);\n"
+    "}\n";
+
+#define GLES_TEX_CACHE_SIZE 64
+
 /* ---------------- state ---------------- */
 
 typedef struct gles_state_t {
@@ -34,7 +56,15 @@ typedef struct gles_state_t {
   float tx;
   float ty;
   my_rect_t clip;
+  my_font_t* font;   /**< borrowed; NULL = no text */
+  int32_t font_size;
 } gles_state_t;
+
+typedef struct gles_tex_entry_t {
+  uint32_t codepoint;
+  int32_t size;
+  uint32_t texture; /**< 0 = empty */
+} gles_tex_entry_t;
 
 typedef struct path_point_t {
   float x;
@@ -54,6 +84,8 @@ typedef struct my_vgcanvas_gles2_t {
   int32_t fb_w;
   int32_t fb_h;
   uint32_t program;
+  uint32_t text_program; /**< lazy: created on first draw_text */
+  gles_tex_entry_t tex_cache[GLES_TEX_CACHE_SIZE];
   gles_state_t state;
 
   gles_state_t* stack;
@@ -471,11 +503,99 @@ static my_ret_t gles_stroke(my_vgcanvas_t* vg) {
 
 static my_ret_t gles_draw_text(my_vgcanvas_t* vg, const char* text, float x,
                                float y) {
-  (void)vg;
-  (void)text;
-  (void)x;
-  (void)y;
-  return MY_RET_NOT_SUPPORTED;
+  my_vgcanvas_gles2_t* s = (my_vgcanvas_gles2_t*)vg;
+  int32_t ascent;
+  float pen_x, top;
+  const char* p = text;
+
+  if (text == NULL) {
+    return MY_RET_INVALID_PARAMS;
+  }
+  if (s->state.font == NULL || s->state.font_size <= 0 ||
+      s->gl.create_texture == NULL) {
+    return MY_RET_NOT_SUPPORTED;
+  }
+  if (s->text_program == 0) {
+    s->text_program =
+        s->gl.create_program(s->gl.ctx, VS_TEXT_SRC, FS_TEXT_SRC);
+    if (s->text_program == 0) {
+      return MY_RET_FAIL;
+    }
+  }
+  s->gl.use_program(s->gl.ctx, s->text_program);
+  s->gl.uniform2f(s->gl.ctx, s->text_program, "u_resolution", (float)s->fb_w,
+                  (float)s->fb_h);
+
+  ascent = my_font_ascent(s->state.font, s->state.font_size);
+  pen_x = x + s->state.tx;
+  top = y + s->state.ty;
+
+  while (*p != '\0') {
+    uint32_t cp = my_utf8_next(&p);
+    my_glyph_t g;
+    uint32_t slot;
+    float gx, gy, quad[24];
+    if (my_font_get_glyph(s->state.font, cp, s->state.font_size, &g) !=
+            MY_RET_OK ||
+        g.bitmap == NULL || g.w <= 0 || g.h <= 0) {
+      pen_x += g.advance > 0 ? (float)g.advance : 0.0f;
+      continue;
+    }
+    /* direct-mapped texture cache: evict on slot collision */
+    slot = (cp ^ (uint32_t)s->state.font_size) % GLES_TEX_CACHE_SIZE;
+    if (s->tex_cache[slot].texture == 0 ||
+        s->tex_cache[slot].codepoint != cp ||
+        s->tex_cache[slot].size != s->state.font_size) {
+      if (s->tex_cache[slot].texture != 0) {
+        s->gl.delete_texture(s->gl.ctx, s->tex_cache[slot].texture);
+      }
+      s->tex_cache[slot].texture =
+          s->gl.create_texture(s->gl.ctx, g.bitmap, g.w, g.h);
+      s->tex_cache[slot].codepoint = cp;
+      s->tex_cache[slot].size = s->state.font_size;
+    }
+    gx = pen_x + (float)g.bearing_x;
+    gy = top + (float)(ascent - g.bearing_y);
+    /* quad: 2 triangles, interleaved xy+uv */
+    {
+      float x0 = gx, y0 = gy, x1 = gx + (float)g.w, y1 = gy + (float)g.h;
+      const float verts[6][4] = {{x0, y0, 0, 0}, {x1, y0, 1, 0}, {x1, y1, 1, 1},
+                                 {x0, y0, 0, 0}, {x1, y1, 1, 1}, {x0, y1, 0, 1}};
+      memcpy(quad, verts, sizeof(quad));
+    }
+    s->gl.uniform4f(s->gl.ctx, s->text_program, "u_color",
+                    (float)s->state.fill_color.r / 255.0f,
+                    (float)s->state.fill_color.g / 255.0f,
+                    (float)s->state.fill_color.b / 255.0f,
+                    (float)s->state.fill_color.a / 255.0f);
+    s->gl.draw_textured_quads(s->gl.ctx, s->text_program,
+                              s->tex_cache[slot].texture, quad, 6);
+    pen_x += (float)g.advance;
+  }
+  /* restore the flat-color program for subsequent geometry */
+  s->gl.use_program(s->gl.ctx, s->program);
+  return MY_RET_OK;
+}
+
+static my_ret_t gles_set_font(my_vgcanvas_t* vg, my_font_t* font,
+                              int32_t size) {
+  my_vgcanvas_gles2_t* s = (my_vgcanvas_gles2_t*)vg;
+  if (font != NULL) {
+    s->state.font = font;
+  }
+  if (size > 0) {
+    s->state.font_size = size;
+  }
+  return MY_RET_OK;
+}
+
+static my_ret_t gles_measure_text(my_vgcanvas_t* vg, const char* text,
+                                  int32_t* w, int32_t* h) {
+  my_vgcanvas_gles2_t* s = (my_vgcanvas_gles2_t*)vg;
+  if (s->state.font == NULL || s->state.font_size <= 0) {
+    return MY_RET_NOT_SUPPORTED;
+  }
+  return my_font_measure(s->state.font, text, s->state.font_size, w, h);
 }
 
 /* ---------------- lifecycle ---------------- */
@@ -483,6 +603,17 @@ static my_ret_t gles_draw_text(my_vgcanvas_t* vg, const char* text, float x,
 static void gles_destroy(my_vgcanvas_t* vg) {
   my_vgcanvas_gles2_t* s = (my_vgcanvas_gles2_t*)vg;
   if (s != NULL) {
+    size_t i;
+    if (s->gl.delete_texture != NULL) {
+      for (i = 0; i < GLES_TEX_CACHE_SIZE; i++) {
+        if (s->tex_cache[i].texture != 0) {
+          s->gl.delete_texture(s->gl.ctx, s->tex_cache[i].texture);
+        }
+      }
+    }
+    if (s->text_program != 0 && s->gl.delete_program != NULL) {
+      s->gl.delete_program(s->gl.ctx, s->text_program);
+    }
     if (s->program != 0 && s->gl.delete_program != NULL) {
       s->gl.delete_program(s->gl.ctx, s->program);
     }
@@ -495,12 +626,12 @@ static void gles_destroy(my_vgcanvas_t* vg) {
 }
 
 static const my_vgcanvas_vtable_t s_gles_vtable = {
-    gles_begin_frame,      gles_end_frame,   gles_save,           gles_restore,
+    gles_begin_frame,      gles_end_frame,   gles_save,          gles_restore,
     gles_translate,        gles_clip_rect,   gles_set_fill_color,
     gles_set_stroke_color, gles_set_line_width, gles_fill_rect,  gles_stroke_rect,
     gles_fill_rounded_rect, gles_begin_path, gles_move_to,       gles_line_to,
     gles_close_path,       gles_fill,        gles_stroke,        gles_draw_text,
-    gles_destroy};
+    gles_destroy,          gles_set_font,    gles_measure_text};
 
 my_vgcanvas_t* my_vgcanvas_gles2_create_with_gl(const my_allocator_t* allocator,
                                                 int32_t width, int32_t height,
@@ -528,6 +659,8 @@ my_vgcanvas_t* my_vgcanvas_gles2_create_with_gl(const my_allocator_t* allocator,
   s->state.fill_color = my_color_rgba(0, 0, 0, 255);
   s->state.stroke_color = my_color_rgba(0, 0, 0, 255);
   s->state.line_width = 1.0f;
+  s->state.font = NULL;
+  s->state.font_size = 16;
   s->state.clip = my_rect_init(0, 0, width, height);
   return (my_vgcanvas_t*)s;
 }

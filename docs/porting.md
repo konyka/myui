@@ -89,3 +89,15 @@
 - x11/wayland port 的 CMake 选择逻辑与 Linux 完全一致（`MYUI_PAL=auto|x11|wayland`，顶层未做系统区分，FreeBSD 自然工作）；依赖用 `pkg install libX11 wayland wayland-protocols libxkbcommon`。
 - 差异点：**linux_fb port 不适用**——FreeBSD 无 evdev（输入走 sysmouse/kbdmux 与 USB HID ioctl，接口不同）；framebuffer 设备为 `/dev/tty` + vt(4) 或 drm-kmod 的 KMS，需单独 port（M7+ 候选，建议直接走 wayland port + drm-kmod）。
 - POSIX 层（`my_osal.c`）FreeBSD 兼容（open/ioctl/mmap/poll/read 均在）。
+
+## 最小体积配置（M7a）
+
+嵌入式/裸机裁剪路径：
+
+```sh
+cmake -S . -B build -DMYUI_FONT_STB=OFF -DMYUI_PAL=linux_fb
+```
+
+- `MYUI_FONT_STB=OFF`：去掉 stb_truetype 与 TTF 加载（`my_font_stb_create` 返回 NULL），文本全部走内置 8x8 位图字体（约 760 字节数据）。
+- 渲染只保留 software backend + my_lcd_mem（或 from_buffer 直包显存）。
+- 该配置下 dummy/linux_fb 测试与全部控件可用；无字体依赖、无文件系统依赖。

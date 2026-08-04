@@ -13,10 +13,28 @@
 #include "mypal/my_pal.h"
 #include "myr/my_lcd_mem.h"
 #include "myr/my_vgcanvas_soft.h"
+#include "myui/my_window.h"
 
 #ifndef MYUI_VERSION
 #define MYUI_VERSION "0.1.0"
 #endif
+
+/** @brief Prefer a system TTF (stb backend), fall back to the 8x8 font. */
+static my_font_t* create_default_font(void) {
+  static const char* candidates[] = {
+      "/usr/share/fonts/liberation-sans-fonts/LiberationSans-Regular.ttf",
+      "/usr/share/fonts/truetype/liberation-sans-fonts/LiberationSans-Regular.ttf",
+      "/usr/share/fonts/google-droid-sans-fonts/DroidSans.ttf", NULL};
+  my_font_t* font = NULL;
+  int i;
+  for (i = 0; candidates[i] != NULL && font == NULL; i++) {
+    font = my_font_stb_create(NULL, candidates[i], 0);
+  }
+  if (font == NULL) {
+    font = my_font_bitmap_create(NULL);
+  }
+  return font;
+}
 
 typedef struct app_t {
   my_pal_t* pal;
@@ -27,10 +45,15 @@ typedef struct app_t {
 static void draw_scene(my_pal_window_t* window) {
   my_lcd_t* lcd = my_pal_window_get_lcd(window);
   my_vgcanvas_t* vg = my_vgcanvas_soft_create(NULL, lcd);
+  static my_font_t* font = NULL;
   int32_t w = 0, h = 0;
   if (vg == NULL) {
     return;
   }
+  if (font == NULL) {
+    font = create_default_font();
+  }
+  my_vgcanvas_set_font(vg, font, 20);
   my_pal_window_get_size(window, &w, &h);
 
   my_vgcanvas_begin_frame(vg, NULL);
@@ -54,6 +77,9 @@ static void draw_scene(my_pal_window_t* window) {
   my_vgcanvas_line_to(vg, 380, 380);
   my_vgcanvas_close_path(vg);
   my_vgcanvas_fill(vg);
+
+  my_vgcanvas_set_fill_color(vg, my_color_rgb(255, 255, 255));
+  my_vgcanvas_draw_text(vg, "myui: text works!", 40, 420);
   my_vgcanvas_end_frame(vg);
 
   my_vgcanvas_destroy(vg);

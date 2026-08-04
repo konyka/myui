@@ -23,6 +23,8 @@ typedef struct soft_state_t {
   float tx;
   float ty;
   my_rect_t clip; /* device coordinates */
+  my_font_t* font;     /**< borrowed; NULL = no text */
+  int32_t font_size;
 } soft_state_t;
 
 typedef struct path_point_t {
@@ -442,11 +444,77 @@ static my_ret_t soft_stroke(my_vgcanvas_t* vg) {
 
 static my_ret_t soft_draw_text(my_vgcanvas_t* vg, const char* text, float x,
                                float y) {
-  (void)vg;
-  (void)text;
-  (void)x;
-  (void)y;
-  return MY_RET_NOT_SUPPORTED; /* fonts land in a later milestone */
+  my_vgcanvas_soft_t* s = (my_vgcanvas_soft_t*)vg;
+  const my_rect_t* clip = &s->state.clip;
+  int32_t ascent;
+  float pen_x;
+  int32_t top;
+  const char* p = text;
+
+  if (text == NULL) {
+    return MY_RET_INVALID_PARAMS;
+  }
+  if (s->state.font == NULL || s->state.font_size <= 0) {
+    return MY_RET_NOT_SUPPORTED;
+  }
+  ascent = my_font_ascent(s->state.font, s->state.font_size);
+  pen_x = x + s->state.tx;
+  top = soft_round(y + s->state.ty);
+
+  while (*p != '\0') {
+    uint32_t cp = my_utf8_next(&p);
+    my_glyph_t g;
+    int32_t gx, gy, row;
+    if (my_font_get_glyph(s->state.font, cp, s->state.font_size, &g) !=
+        MY_RET_OK) {
+      continue;
+    }
+    gx = soft_round(pen_x) + g.bearing_x;
+    gy = top + ascent - g.bearing_y;
+    if (g.bitmap != NULL) {
+      for (row = 0; row < g.h; row++) {
+        int32_t dy = gy + row;
+        int32_t dx0 = gx, dx1 = gx + g.w;
+        const uint8_t* alpha_row = g.bitmap + (size_t)row * (size_t)g.w;
+        if (dy < clip->y || dy >= clip->y + clip->h) {
+          continue;
+        }
+        if (dx0 < clip->x) {
+          dx0 = clip->x;
+        }
+        if (dx1 > clip->x + clip->w) {
+          dx1 = clip->x + clip->w;
+        }
+        if (dx1 > dx0) {
+          my_lcd_blend_span(s->lcd, dx0, dy, alpha_row + (dx0 - gx), dx1 - dx0,
+                            s->state.fill_color);
+        }
+      }
+    }
+    pen_x += (float)g.advance;
+  }
+  return MY_RET_OK;
+}
+
+static my_ret_t soft_set_font(my_vgcanvas_t* vg, my_font_t* font,
+                              int32_t size) {
+  my_vgcanvas_soft_t* s = (my_vgcanvas_soft_t*)vg;
+  if (font != NULL) {
+    s->state.font = font;
+  }
+  if (size > 0) {
+    s->state.font_size = size;
+  }
+  return MY_RET_OK;
+}
+
+static my_ret_t soft_measure_text(my_vgcanvas_t* vg, const char* text,
+                                  int32_t* w, int32_t* h) {
+  my_vgcanvas_soft_t* s = (my_vgcanvas_soft_t*)vg;
+  if (s->state.font == NULL || s->state.font_size <= 0) {
+    return MY_RET_NOT_SUPPORTED;
+  }
+  return my_font_measure(s->state.font, text, s->state.font_size, w, h);
 }
 
 /* ---------------- lifecycle ---------------- */
@@ -467,7 +535,7 @@ static const my_vgcanvas_vtable_t s_soft_vtable = {
     soft_set_stroke_color, soft_set_line_width, soft_fill_rect,  soft_stroke_rect,
     soft_fill_rounded_rect, soft_begin_path, soft_move_to,       soft_line_to,
     soft_close_path,       soft_fill,        soft_stroke,        soft_draw_text,
-    soft_destroy};
+    soft_destroy,          soft_set_font,    soft_measure_text};
 
 my_vgcanvas_t* my_vgcanvas_soft_create(const my_allocator_t* allocator,
                                        my_lcd_t* lcd) {
@@ -487,6 +555,8 @@ my_vgcanvas_t* my_vgcanvas_soft_create(const my_allocator_t* allocator,
   s->state.line_width = 1.0f;
   s->state.tx = 0.0f;
   s->state.ty = 0.0f;
+  s->state.font = NULL;
+  s->state.font_size = 16;
   s->state.clip =
       my_rect_init(0, 0, (int32_t)my_lcd_get_width(lcd), (int32_t)my_lcd_get_height(lcd));
   my_dirty_rects_init(&s->dirty);

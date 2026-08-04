@@ -122,6 +122,12 @@ static my_ret_t wl_lcd_pixels(my_lcd_t* lcd, const void* px, int32_t x,
 static my_ret_t wl_lcd_fill(my_lcd_t* lcd, const my_rect_t* r, my_color_t c) {
   return my_lcd_fill_rect(((wl_lcd_t*)lcd)->mem, r, c);
 }
+static my_ret_t wl_lcd_blend(my_lcd_t* lcd, int32_t x, int32_t y,
+                               const uint8_t* alpha, int32_t n,
+                               my_color_t color) {
+  return my_lcd_blend_span(((wl_lcd_t*)lcd)->mem, x, y, alpha, n, color);
+}
+
 static void wl_lcd_destroy(my_lcd_t* lcd) {
   wl_lcd_t* x = (wl_lcd_t*)lcd;
   if (x != NULL) {
@@ -132,7 +138,8 @@ static void wl_lcd_destroy(my_lcd_t* lcd) {
 static const my_lcd_vtable_t s_wl_lcd_vtable = {wl_lcd_w,      wl_lcd_h,
                                                 wl_lcd_fmt,    wl_lcd_begin,
                                                 wl_lcd_end,    wl_lcd_pixels,
-                                                wl_lcd_fill,   wl_lcd_destroy};
+                                                wl_lcd_fill,   wl_lcd_blend,
+                                                wl_lcd_destroy};
 
 /* shm buffer create (memfd + mmap, WL_SHM_FORMAT_XRGB8888) */
 static bool wl_buffer_create(wl_window_t* w) {

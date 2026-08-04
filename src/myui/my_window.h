@@ -24,6 +24,8 @@ typedef struct my_window_t {
   my_color_t bg_color;
   my_theme_t* theme;                 /**< active theme */
   bool theme_owned;
+  my_font_t* font;                   /**< borrowed default font */
+  int32_t font_size;
   my_dirty_rects_t dirty;            /**< frame dirty collector (sink) */
   my_event_dispatcher_t dispatcher;
   bool modal;
@@ -52,6 +54,12 @@ my_ret_t my_window_on_pal_event(my_window_t* win, const my_event_t* event);
 
 /** @brief Test hook: use this vgcanvas instead of creating a soft one. */
 void my_window_set_vgcanvas(my_window_t* win, my_vgcanvas_t* vg);
+
+/**
+ * @brief Set the window's default font (borrowed ref; the caller keeps
+ * and eventually destroys it). Applied to the window's vgcanvas.
+ */
+void my_window_set_font(my_window_t* win, my_font_t* font, int32_t size);
 
 /**
  * @brief Switch the window's theme (and apply it to the widget tree).

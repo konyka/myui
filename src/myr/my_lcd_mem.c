@@ -199,6 +199,92 @@ static my_ret_t lcd_mem_draw_pixels(my_lcd_t* lcd, const void* pixels, int32_t x
   return MY_RET_OK;
 }
 
+/* ---------------- blend (src-over) ---------------- */
+
+static inline uint8_t blend_ch(uint8_t src, uint8_t dst, uint8_t a) {
+  return (uint8_t)(((uint32_t)src * a + (uint32_t)dst * (255u - a)) / 255u);
+}
+
+static my_ret_t lcd_mem_blend_span(my_lcd_t* lcd, int32_t x, int32_t y,
+                                   const uint8_t* alpha, int32_t n,
+                                   my_color_t color) {
+  my_lcd_mem_t* m = (my_lcd_mem_t*)lcd;
+  int32_t i;
+  if (alpha == NULL || n <= 0) {
+    return MY_RET_INVALID_PARAMS;
+  }
+  if (y < 0 || y >= (int32_t)m->h) {
+    return MY_RET_OK;
+  }
+  if (x < 0) { /* clip left */
+    alpha += -x;
+    n += x;
+    x = 0;
+  }
+  if (x + n > (int32_t)m->w) {
+    n = (int32_t)m->w - x;
+  }
+  if (n <= 0) {
+    return MY_RET_OK;
+  }
+  for (i = 0; i < n; i++) {
+    uint8_t a = alpha[i];
+    uint8_t* p;
+    if (a == 0) {
+      continue;
+    }
+    p = m->buffer + (size_t)y * m->stride;
+    switch (m->format) {
+      case MY_PIXEL_FORMAT_RGB565: {
+        uint16_t v;
+        uint8_t dr, dg, db;
+        uint16_t o;
+        memcpy(&v, p + (size_t)(x + i) * 2, 2);
+        dr = (uint8_t)((v >> 11) << 3);
+        dg = (uint8_t)(((v >> 5) & 0x3F) << 2);
+        db = (uint8_t)((v & 0x1F) << 3);
+        o = (uint16_t)(((blend_ch(color.r, dr, a) >> 3) << 11) |
+                       ((blend_ch(color.g, dg, a) >> 2) << 5) |
+                       (blend_ch(color.b, db, a) >> 3));
+        memcpy(p + (size_t)(x + i) * 2, &o, 2);
+        break;
+      }
+      case MY_PIXEL_FORMAT_RGB888:
+        p += (size_t)(x + i) * 3;
+        p[0] = blend_ch(color.r, p[0], a);
+        p[1] = blend_ch(color.g, p[1], a);
+        p[2] = blend_ch(color.b, p[2], a);
+        break;
+      case MY_PIXEL_FORMAT_ARGB8888:
+        p += (size_t)(x + i) * 4;
+        p[1] = blend_ch(color.r, p[1], a);
+        p[2] = blend_ch(color.g, p[2], a);
+        p[3] = blend_ch(color.b, p[3], a);
+        break;
+      case MY_PIXEL_FORMAT_BGRA8888:
+        p += (size_t)(x + i) * 4;
+        p[0] = blend_ch(color.b, p[0], a);
+        p[1] = blend_ch(color.g, p[1], a);
+        p[2] = blend_ch(color.r, p[2], a);
+        break;
+      case MY_PIXEL_FORMAT_MONO:
+        if (a >= 128) {
+          bool on = mono_is_on(color);
+          uint8_t mask = (uint8_t)(0x80u >> ((uint32_t)(x + i) % 8u));
+          if (on) {
+            p[(uint32_t)(x + i) / 8u] |= mask;
+          } else {
+            p[(uint32_t)(x + i) / 8u] &= (uint8_t)~mask;
+          }
+        }
+        break;
+      default:
+        return MY_RET_NOT_SUPPORTED;
+    }
+  }
+  return MY_RET_OK;
+}
+
 static void lcd_mem_destroy(my_lcd_t* lcd) {
   my_lcd_mem_t* m = (my_lcd_mem_t*)lcd;
   if (m != NULL) {
@@ -214,7 +300,7 @@ static void lcd_mem_destroy(my_lcd_t* lcd) {
 static const my_lcd_vtable_t s_lcd_mem_vtable = {
     lcd_mem_get_width,  lcd_mem_get_height, lcd_mem_get_format,
     lcd_mem_begin_frame, lcd_mem_end_frame, lcd_mem_draw_pixels,
-    lcd_mem_fill_rect,  lcd_mem_destroy};
+    lcd_mem_fill_rect,  lcd_mem_blend_span, lcd_mem_destroy};
 
 my_lcd_t* my_lcd_mem_create(const my_allocator_t* allocator, uint32_t w, uint32_t h,
                             my_pixel_format_t format) {

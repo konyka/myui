@@ -15,6 +15,23 @@
 #include "myui/widgets/my_button.h"
 #include "myui/widgets/my_label.h"
 
+/** @brief Prefer a system TTF (stb backend), fall back to the 8x8 font. */
+static my_font_t* create_default_font(void) {
+  static const char* candidates[] = {
+      "/usr/share/fonts/liberation-sans-fonts/LiberationSans-Regular.ttf",
+      "/usr/share/fonts/truetype/liberation-sans-fonts/LiberationSans-Regular.ttf",
+      "/usr/share/fonts/google-droid-sans-fonts/DroidSans.ttf", NULL};
+  my_font_t* font = NULL;
+  int i;
+  for (i = 0; candidates[i] != NULL && font == NULL; i++) {
+    font = my_font_stb_create(NULL, candidates[i], 0);
+  }
+  if (font == NULL) {
+    font = my_font_bitmap_create(NULL);
+  }
+  return font;
+}
+
 #ifdef MYUI_PAL_DUMMY
 #include "mypal/dummy/my_pal_dummy.h"
 #include "myr/my_lcd_mem.h"
@@ -239,6 +256,10 @@ int main(void) {
   my_mvvm_register_template("person_row", build_person_row, &row_ctx);
 
   app.win = my_window_create(NULL, app.pal, 800, 480, "myui demo_mvvm");
+  {
+    my_font_t* font = create_default_font();
+    my_window_set_font(app.win, font, 16);
+  }
   build_ui(&app);
   my_window_manager_open(app.wm, app.win);
   app.mc = my_mvvm_bind(app.wm, app.win, app.vm);

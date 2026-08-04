@@ -6,10 +6,25 @@ add_library(myr STATIC
   my_vgcanvas_soft.c
   my_vgcanvas_gles2.c
   my_gl_real.c
+  my_font.c
+  my_font_stb.c
+  my_stb_truetype.c
 )
 
 target_include_directories(myr PUBLIC ${CMAKE_SOURCE_DIR}/src)
+target_include_directories(myr PRIVATE ${CMAKE_SOURCE_DIR}/3rd)
 target_link_libraries(myr PUBLIC myc)
+
+# third-party single-header lib: relax warnings ONLY for this TU
+# (stb_truetype is not -pedantic clean; the project's own bar is unchanged)
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
+  set_source_files_properties(my_stb_truetype.c PROPERTIES
+    COMPILE_OPTIONS "-Wno-error;-Wno-pedantic;-Wno-unused-function")
+endif()
+
+if(MYUI_FONT_STB)
+  target_compile_definitions(myr PUBLIC MYUI_FONT_STB)
+endif()
 
 # math library for the software rasterizer (floorf/ceilf/sqrtf)
 if(NOT MSVC)

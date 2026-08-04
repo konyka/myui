@@ -55,9 +55,22 @@ static void button_on_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
   my_vgcanvas_set_line_width(vg, 1);
   my_vgcanvas_stroke_rect(vg, &(my_rectf_t){0, 0, (float)widget->rect.w,
                                             (float)widget->rect.h});
-  /* text: placeholder until fonts land (returns NOT_SUPPORTED, ignored) */
+  /* text: real draw_text when a font is set on the backend (M7a) */
   if (b->text != NULL) {
-    my_vgcanvas_draw_text(vg, b->text, 0, 0);
+    int32_t tw = 0, th = 0;
+    int32_t font_size =
+        my_widget_style_get_int(widget, button_state(b), "font_size", 14);
+    my_vgcanvas_set_font(vg, NULL, font_size);
+    if (my_vgcanvas_measure_text(vg, b->text, &tw, &th) == MY_RET_OK) {
+      uint32_t fg = my_widget_style_get_color(widget, button_state(b),
+                                              "fg_color", 0x212121FFu);
+      my_vgcanvas_set_fill_color(vg, my_color_from_rgba32(fg));
+      my_vgcanvas_draw_text(vg, b->text,
+                            ((float)widget->rect.w - (float)tw) / 2.0f,
+                            ((float)widget->rect.h - (float)th) / 2.0f);
+    } else {
+      my_vgcanvas_draw_text(vg, b->text, 0, 0); /* placeholder, ignored */
+    }
   }
 }
 

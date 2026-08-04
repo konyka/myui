@@ -158,12 +158,28 @@ static void rec_destroy(my_vgcanvas_t* vg) {
   (void)vg; /* stack-allocated, nothing to free */
 }
 
+static my_ret_t rec_set_font(my_vgcanvas_t* vg, my_font_t* font, int32_t size) {
+  rec_op((rec_vg_t*)vg, "set_font %d", (int)size);
+  (void)font;
+  return MY_RET_OK;
+}
+
+static my_ret_t rec_measure_text(my_vgcanvas_t* vg, const char* text,
+                                 int32_t* w, int32_t* h) {
+  (void)vg;
+  (void)text;
+  (void)w;
+  (void)h;
+  return MY_RET_NOT_SUPPORTED;
+}
+
 static const my_vgcanvas_vtable_t REC_VG_VTABLE = {
     rec_begin_frame, rec_end_frame,  rec_save,       rec_restore,
     rec_translate,   rec_clip_rect,  rec_set_fill_color, rec_set_stroke_color,
     rec_set_line_width, rec_fill_rect, rec_stroke_rect, rec_fill_rounded_rect,
     rec_begin_path,  rec_move_to,    rec_line_to,    rec_close_path,
-    rec_fill,        rec_stroke,     rec_draw_text,  rec_destroy};
+    rec_fill,        rec_stroke,     rec_draw_text,  rec_destroy,
+    rec_set_font,    rec_measure_text};
 
 static void rec_vg_init(rec_vg_t* r) {
   memset(r, 0, sizeof(*r));

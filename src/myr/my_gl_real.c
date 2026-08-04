@@ -121,13 +121,57 @@ static void real_draw_arrays(void* ctx, uint32_t program, const float* xy,
   glDisableVertexAttribArray((GLuint)loc);
 }
 
+static uint32_t real_create_texture(void* ctx, const uint8_t* alpha, int32_t w,
+                                    int32_t h) {
+  GLuint tex;
+  (void)ctx;
+  glGenTextures(1, &tex);
+  glBindTexture(GL_TEXTURE_2D, tex);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, (GLsizei)w, (GLsizei)h, 0,
+               GL_LUMINANCE, GL_UNSIGNED_BYTE, alpha);
+  return (uint32_t)tex;
+}
+
+static void real_delete_texture(void* ctx, uint32_t texture) {
+  GLuint tex = (GLuint)texture;
+  (void)ctx;
+  glDeleteTextures(1, &tex);
+}
+
+static void real_draw_textured(void* ctx, uint32_t program, uint32_t texture,
+                               const float* xyuv, int32_t count) {
+  GLint pos_loc, uv_loc;
+  (void)ctx;
+  glEnable(GL_BLEND);
+  glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+  glActiveTexture(GL_TEXTURE0);
+  glBindTexture(GL_TEXTURE_2D, (GLuint)texture);
+  pos_loc = glGetAttribLocation((GLuint)program, "a_pos");
+  uv_loc = glGetAttribLocation((GLuint)program, "a_uv");
+  glVertexAttribPointer((GLuint)pos_loc, 2, GL_FLOAT, GL_FALSE,
+                        4 * (GLsizei)sizeof(float), xyuv);
+  glEnableVertexAttribArray((GLuint)pos_loc);
+  glVertexAttribPointer((GLuint)uv_loc, 2, GL_FLOAT, GL_FALSE,
+                        4 * (GLsizei)sizeof(float), xyuv + 2);
+  glEnableVertexAttribArray((GLuint)uv_loc);
+  glDrawArrays(GL_TRIANGLES, 0, (GLsizei)count);
+  glDisableVertexAttribArray((GLuint)pos_loc);
+  glDisableVertexAttribArray((GLuint)uv_loc);
+}
+
 const my_gl_t* my_gl_real_default(void) {
   static const my_gl_t real = {real_viewport,      real_enable_scissor,
                                real_scissor,       real_clear_color,
                                real_clear,         real_create_program,
                                real_delete_program, real_use_program,
                                real_uniform2f,     real_uniform4f,
-                               real_draw_arrays,   NULL};
+                               real_draw_arrays,   real_create_texture,
+                               real_delete_texture, real_draw_textured,
+                               NULL};
   return &real;
 }
 

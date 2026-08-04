@@ -103,6 +103,28 @@ static void test_gles2_real_render(void) {
   glReadPixels(2, 2, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, px);
   TEST_ASSERT(px[0] < 60); /* dark outside */
 
+  /* text via the gles2 backend (bitmap font, alpha texture quads) */
+  {
+    my_font_t* font = my_font_bitmap_create(NULL);
+    int lit = 0, x, y;
+    GLubyte row[16 * 4];
+    TEST_ASSERT_NOT_NULL(font);
+    my_vgcanvas_set_font(vg, font, 8);
+    my_vgcanvas_set_fill_color(vg, my_color_rgb(0, 255, 0));
+    TEST_ASSERT_EQ_INT(my_vgcanvas_draw_text(vg, "A", 10, 8), MY_RET_OK);
+    glFinish();
+    for (y = 8; y < 16 && lit == 0; y++) {
+      glReadPixels(10, 64 - 1 - y, 8, 1, GL_RGBA, GL_UNSIGNED_BYTE, row);
+      for (x = 0; x < 8; x++) {
+        if (row[x * 4 + 1] > 100) {
+          lit = 1;
+        }
+      }
+    }
+    TEST_ASSERT(lit > 0); /* some green glyph pixels rendered */
+    my_font_destroy(font);
+  }
+
   my_vgcanvas_destroy(vg);
 }
 

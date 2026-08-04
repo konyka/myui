@@ -58,6 +58,13 @@ typedef struct my_lcd_vtable_t {
                           uint32_t w, uint32_t h);
   /** @brief Fill rect with color (clipped to the surface, no blending). */
   my_ret_t (*fill_rect)(my_lcd_t* lcd, const my_rect_t* rect, my_color_t color);
+  /**
+   * @brief Blend a horizontal span of n pixels at (x, y) with src-over:
+   * out = color * alpha[i] + dst * (255 - alpha[i]). Used by text
+   * rendering (M7a). Clipped to the surface.
+   */
+  my_ret_t (*blend_span)(my_lcd_t* lcd, int32_t x, int32_t y,
+                         const uint8_t* alpha, int32_t n, my_color_t color);
   void (*destroy)(my_lcd_t* lcd);
 } my_lcd_vtable_t;
 
@@ -95,6 +102,12 @@ static inline my_ret_t my_lcd_draw_pixels(my_lcd_t* lcd, const void* pixels,
 static inline my_ret_t my_lcd_fill_rect(my_lcd_t* lcd, const my_rect_t* rect,
                                         my_color_t color) {
   return lcd->vtable->fill_rect(lcd, rect, color);
+}
+
+static inline my_ret_t my_lcd_blend_span(my_lcd_t* lcd, int32_t x, int32_t y,
+                                         const uint8_t* alpha, int32_t n,
+                                         my_color_t color) {
+  return lcd->vtable->blend_span(lcd, x, y, alpha, n, color);
 }
 
 static inline void my_lcd_destroy(my_lcd_t* lcd) {

@@ -16,16 +16,27 @@ static void label_on_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
   my_vgcanvas_fill_rect(vg, &(my_rectf_t){0, 0, (float)widget->rect.w,
                                           (float)widget->rect.h});
   if (label->text != NULL) {
-    /* font system lands later: draw a centered placeholder bar so the
-     * text extent is visible, plus the (currently unsupported) text call */
-    float bar_w = (float)widget->rect.w * 0.6f;
-    float bar_h = 4.0f;
-    my_vgcanvas_set_fill_color(vg, my_color_from_rgba32(fg));
-    my_vgcanvas_fill_rect(vg,
-                          &(my_rectf_t){((float)widget->rect.w - bar_w) / 2.0f,
-                                        ((float)widget->rect.h - bar_h) / 2.0f,
-                                        bar_w, bar_h});
-    my_vgcanvas_draw_text(vg, label->text, 0, 0); /* NOT_SUPPORTED for now */
+    int32_t tw = 0, th = 0;
+    int32_t font_size =
+        my_widget_style_get_int(widget, MY_STATE_NORMAL, "font_size", 16);
+    my_vgcanvas_set_font(vg, NULL, font_size);
+    if (my_vgcanvas_measure_text(vg, label->text, &tw, &th) == MY_RET_OK) {
+      /* real text rendering (M7a): centered in the label */
+      my_vgcanvas_set_fill_color(vg, my_color_from_rgba32(fg));
+      my_vgcanvas_draw_text(vg, label->text,
+                            ((float)widget->rect.w - (float)tw) / 2.0f,
+                            ((float)widget->rect.h - (float)th) / 2.0f);
+    } else {
+      /* no font on the backend: centered placeholder bar */
+      float bar_w = (float)widget->rect.w * 0.6f;
+      float bar_h = 4.0f;
+      my_vgcanvas_set_fill_color(vg, my_color_from_rgba32(fg));
+      my_vgcanvas_fill_rect(vg,
+                            &(my_rectf_t){((float)widget->rect.w - bar_w) / 2.0f,
+                                          ((float)widget->rect.h - bar_h) / 2.0f,
+                                          bar_w, bar_h});
+      my_vgcanvas_draw_text(vg, label->text, 0, 0); /* NOT_SUPPORTED for now */
+    }
   }
 }
 

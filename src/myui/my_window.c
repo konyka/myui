@@ -123,8 +123,22 @@ static my_vgcanvas_t* window_ensure_vg(my_window_t* win) {
     win->vg = my_vgcanvas_soft_create(win->allocator,
                                       my_pal_window_get_lcd(win->pal_window));
     win->vg_owned = win->vg != NULL;
+    if (win->vg != NULL && win->font != NULL) {
+      my_vgcanvas_set_font(win->vg, win->font, win->font_size);
+    }
   }
   return win->vg;
+}
+
+void my_window_set_font(my_window_t* win, my_font_t* font, int32_t size) {
+  if (win == NULL) {
+    return;
+  }
+  win->font = font;
+  win->font_size = size > 0 ? size : 16;
+  if (win->vg != NULL) {
+    my_vgcanvas_set_font(win->vg, font, win->font_size);
+  }
 }
 
 void my_window_paint(my_window_t* win) {
