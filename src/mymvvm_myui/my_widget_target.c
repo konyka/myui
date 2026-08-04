@@ -9,8 +9,11 @@
 #include "myc/my_str.h"
 #include "mymvvm_myui/my_mvvm.h"
 #include "myui/widgets/my_button.h"
+#include "myui/widgets/my_checkbox.h"
 #include "myui/widgets/my_edit.h"
 #include "myui/widgets/my_label.h"
+#include "myui/widgets/my_progress_bar.h"
+#include "myui/widgets/my_slider.h"
 
 /* ---------------- properties ---------------- */
 
@@ -36,6 +39,26 @@ static my_ret_t target_set_prop(my_binding_target_t* t, const char* name,
       return my_edit_set_hint(w, my_value_get_str(v));
     }
     return MY_RET_NOT_SUPPORTED;
+  }
+  if (strcmp(name, "value") == 0) {
+    if (my_str_eq(w->widget_type, "checkbox")) {
+      bool b = v->type == MY_VALUE_BOOL ? my_value_get_bool(v) : false;
+      return my_checkbox_set_checked(w, b);
+    }
+    if (my_str_eq(w->widget_type, "slider")) {
+      double d = v->type == MY_VALUE_DOUBLE ? my_value_get_double(v)
+                 : v->type == MY_VALUE_FLOAT ? (double)my_value_get_float(v)
+                 : v->type == MY_VALUE_INT32 ? (double)my_value_get_int32(v)
+                                             : 0.0;
+      return my_slider_set_value(w, (float)d);
+    }
+    if (my_str_eq(w->widget_type, "progress_bar")) {
+      double d = v->type == MY_VALUE_DOUBLE ? my_value_get_double(v)
+                 : v->type == MY_VALUE_FLOAT ? (double)my_value_get_float(v)
+                 : v->type == MY_VALUE_INT32 ? (double)my_value_get_int32(v)
+                                             : 0.0;
+      return my_progress_bar_set_value(w, (float)d);
+    }
   }
   if (strcmp(name, "visible") == 0) {
     return my_widget_set_visible(w, v->type == MY_VALUE_BOOL
@@ -94,6 +117,15 @@ static my_ret_t target_get_prop(my_binding_target_t* t, const char* name,
     return my_value_set_bool(v, w->enable);
   }
   if (strcmp(name, "value") == 0) {
+    if (my_str_eq(w->widget_type, "checkbox")) {
+      return my_value_set_bool(v, my_checkbox_get_checked(w));
+    }
+    if (my_str_eq(w->widget_type, "slider")) {
+      return my_value_set_double(v, (double)my_slider_get_value(w));
+    }
+    if (my_str_eq(w->widget_type, "progress_bar")) {
+      return my_value_set_double(v, (double)my_progress_bar_get_value(w));
+    }
     return my_value_copy(v, &wt->value);
   }
   if (strlen(name) == 1 && strchr("xywh", name[0]) != NULL) {

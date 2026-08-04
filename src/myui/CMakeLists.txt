@@ -12,6 +12,9 @@ add_library(myui STATIC
   widgets/my_button.c
   widgets/my_label.c
   widgets/my_edit.c
+  widgets/my_checkbox.c
+  widgets/my_slider.c
+  widgets/my_progress_bar.c
 )
 
 target_include_directories(myui PUBLIC ${CMAKE_SOURCE_DIR}/src)

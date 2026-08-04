@@ -135,3 +135,17 @@ PAL port 矩阵：
 - **抗锯齿**：路径填充与圆角的扫描线做 **x 方向 4 子采样覆盖率**（子采样中心 (2k+1)/8），边缘像素以 `color.a * cov/4` src-over；**y 方向不采样**（成本控制，视觉已明显改善，权衡已注明）。轴对齐直边覆盖率恒满（零回归）。`my_vgcanvas_soft_set_antialias(vg, on/off)` 运行时开关，默认开；golden 基准场景固定 AA off，AA 场景单独建基准。
 - **GLES2**：着色器混合 src-over（uniform 色含 a），EGL 冒烟断言半透明读回；GLES AA（MSAA/顶点覆盖）TODO。
 - 性能（-O0 Debug）：半透明矩形 2.03ms/帧（与不透明 2.19ms 相当）；路径填充 AA on 1.00ms vs off 0.68ms（约 +46%，仅限路径场景，矩形填充零开销）。
+
+## 控件清单（M7d 完成态）
+
+| 控件 | 关键属性/说明 |
+|------|---------------|
+| window | 顶层根 widget，bg_color 主题 |
+| button | text、四态颜色、click 事件 |
+| label | text、bg/fg |
+| edit | text/hint/readonly/max_len/password、光标与选区、changed/activate 事件 |
+| checkbox | text、checked(+mixed 显示态)、value(bool) 可绑、changed 事件 |
+| slider | value/min/max/step、拖动与轨道点击（grab）、value(float) 可绑、changed 事件 |
+| progress_bar | value [0,100]（展示型，OneWay 友好） |
+
+均可经 widget_target 绑定（text/visible/enable/x,y,w,h/value/hint）。

@@ -128,3 +128,18 @@ mc = my_mvvm_bind(wm, win, vm);   /* 之后一切自动 */
 ```
 
 数据流：用户键入 → edit 发 `"changed"` → 绑定回写 `vm.name`（not_empty 校验空值被拒并恢复 edit）；`vm.name` 被代码改动 → 自动推送到 edit。点提交 → `submit` 命令读 `vm.name` 写 `greeting` → label 刷新。demo_mvvm 即此场景。
+
+## 可绑定属性速查表（M7d）
+
+| 控件类型 | 可绑 prop | 类型 | 说明 |
+|----------|-----------|------|------|
+| button/label/edit | text | string | edit 支持 TwoWay（"changed" 回写） |
+| edit | hint | string | OneWay |
+| checkbox | value | bool | TwoWay（toggle 发 "changed"） |
+| slider | value | double | TwoWay（拖动发 "changed"） |
+| progress_bar | value | double | OneWay（展示） |
+| 任意 widget | visible/enable | bool | 通用 |
+| 任意 widget | x/y/w/h | int32 | 通用 |
+| 容器 widget | items={arr, ItemTemplate=..} | array vm | 列表重建 |
+
+命令绑定：任意有 emitter 事件的控件（button "click"、edit "activate" 等），`v:on_<event>={cmd, Args=.., CloseWindow=.., ToPage=..}`。

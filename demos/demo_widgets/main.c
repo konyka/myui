@@ -11,11 +11,15 @@
 #include <string.h>
 
 #include "mypal/my_pal.h"
+#include "mymvvm_myui/my_mvvm.h"
 #include "myui/my_animator.h"
 #include "myui/my_layout.h"
 #include "myui/my_window_manager.h"
 #include "myui/widgets/my_button.h"
+#include "myui/widgets/my_checkbox.h"
 #include "myui/widgets/my_label.h"
+#include "myui/widgets/my_progress_bar.h"
+#include "myui/widgets/my_slider.h"
 
 /** @brief Prefer a system TTF (stb backend), fall back to the 8x8 font. */
 static my_font_t* create_default_font(void) {
@@ -48,6 +52,8 @@ typedef struct app_t {
   my_theme_t* dark;
   bool is_dark;
   my_widget_t* anim_btn;
+  my_view_model_t* vm;
+  my_mvvm_context_t* mc;
 } app_t;
 
 static my_theme_t* make_dark_theme(void) {
@@ -143,13 +149,37 @@ static void build_ui(app_t* app) {
 
   app->anim_btn = my_button_create(NULL, "Click me: move");
   my_widget_set_rect(app->anim_btn, &(my_rect_t){20, 140, 160, 48});
-  /* escape the layouter: place it in the root with absolute position via
-   * a spacing child trick — simplest: absolute layer below root's linear
-   * flow is not available, so give it fixed layout params instead */
   my_widget_set_layout_params(app->anim_btn, "w:160 h:48");
   my_widget_add_child(root, app->anim_btn);
   my_widget_unref(app->anim_btn);
   my_widget_on(app->anim_btn, "click", on_anim_click, app);
+
+  /* controls row: checkbox + slider (TwoWay) + progress bar (OneWay) */
+  {
+    my_widget_t* row2 = my_widget_create(NULL, "row2");
+    my_widget_t* cb = my_checkbox_create(NULL, "notify");
+    my_widget_t* slider = my_slider_create(NULL);
+    my_widget_t* bar = my_progress_bar_create(NULL);
+
+    my_widget_set_layout_params(row2, "h:40");
+    my_widget_set_layouter(row2, my_layouter_linear_create(NULL, true, 12));
+    my_widget_add_child(root, row2);
+    my_widget_unref(row2);
+
+    my_widget_set_layout_params(cb, "w:120 h:32");
+    my_widget_add_child(row2, cb);
+    my_widget_unref(cb);
+
+    my_widget_set_layout_params(slider, "w:240 h:32");
+    my_widget_set_bind_rules(slider, "v:value={volume, Mode=TwoWay}");
+    my_widget_add_child(row2, slider);
+    my_widget_unref(slider);
+
+    my_widget_set_layout_params(bar, "w:160 h:16");
+    my_widget_set_bind_rules(bar, "v:value={volume}");
+    my_widget_add_child(row2, bar);
+    my_widget_unref(bar);
+  }
 }
 
 #ifdef MYUI_PAL_DUMMY
@@ -216,24 +246,44 @@ int main(void) {
   {
     my_font_t* font = create_default_font();
     my_window_set_font(app.win, font, 16);
+    my_value_t v;
+    app.vm = my_view_model_dummy_create(NULL);
+    my_value_init(&v, NULL);
+    my_value_set_double(&v, 30.0);
+    my_view_model_set_prop(app.vm, "volume", &v);
+    my_value_reset(&v);
   }
   build_ui(&app);
   my_window_manager_open(app.wm, app.win);
+  app.mc = my_mvvm_bind(app.wm, app.win, app.vm);
   my_widget_unref(my_window_widget(app.win));
 
 #ifdef MYUI_PAL_DUMMY
   {
     const char* dump = getenv("MYUI_DEMO_DUMP_PPM");
     if (dump != NULL) {
+      my_event_t e;
       /* layout + first paint so widgets have real rects, then simulate */
       my_window_paint(app.win);
       click_widget(app.win, my_widget_find_child(
                                 my_widget_get_child(my_window_widget(app.win), 1),
                                 "toggle"));
       click_widget(app.win, app.anim_btn);
+      /* drag the slider (row2: checkbox x0..120, slider x132..372, y~164..196)
+       * to ~2/3: volume -> progress bar via MVVM */
+      e = my_event_init(MY_EVENT_POINTER_DOWN);
+      e.u.pointer.x = 300;
+      e.u.pointer.y = 180;
+      my_window_on_pal_event(app.win, &e);
+      e = my_event_init(MY_EVENT_POINTER_UP);
+      e.u.pointer.x = 300;
+      e.u.pointer.y = 180;
+      my_window_on_pal_event(app.win, &e);
       my_pal_dummy_set_now_ms(app.pal, 200);
       my_pal_main_loop_run(app.loop);
       dump_ppm(app.win->pal_window, dump);
+      my_mvvm_context_destroy(app.mc);
+      my_view_model_unref(app.vm);
       my_theme_destroy(app.light);
       my_theme_destroy(app.dark);
       my_window_manager_destroy(app.wm);
@@ -246,6 +296,8 @@ int main(void) {
 
   my_pal_main_loop_run(app.loop);
 
+  my_mvvm_context_destroy(app.mc);
+  my_view_model_unref(app.vm);
   my_theme_destroy(app.light);
   my_theme_destroy(app.dark);
   my_window_manager_destroy(app.wm);

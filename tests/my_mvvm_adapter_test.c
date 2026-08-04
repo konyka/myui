@@ -10,6 +10,8 @@
 #include "myui/widgets/my_button.h"
 #include "myui/widgets/my_edit.h"
 #include "myui/widgets/my_label.h"
+#include "myui/widgets/my_progress_bar.h"
+#include "myui/widgets/my_slider.h"
 
 #include "mytest.h"
 
@@ -17,6 +19,14 @@ static void set_vm_str(my_view_model_t* vm, const char* name, const char* s) {
   my_value_t v;
   my_value_init(&v, NULL);
   my_value_set_str(&v, s);
+  my_view_model_set_prop(vm, name, &v);
+  my_value_reset(&v);
+}
+
+static void set_vm_double(my_view_model_t* vm, const char* name, double d) {
+  my_value_t v;
+  my_value_init(&v, NULL);
+  my_value_set_double(&v, d);
   my_view_model_set_prop(vm, name, &v);
   my_value_reset(&v);
 }
@@ -316,8 +326,7 @@ static void test_edit_two_way_end_to_end(void) {
   app_destroy(&a);
 }
 
-static void test_edit_validator_rejects(void) {
-  app_ctx_t a;
+static void test_edit_validator_rejects(void) {  app_ctx_t a;
   my_widget_t* edit;
   my_value_t out;
   app_init(&a);
@@ -349,6 +358,55 @@ static void test_edit_validator_rejects(void) {
   TEST_ASSERT_EQ_STR(my_value_get_str(&out), "alice"); /* vm unchanged */
   TEST_ASSERT_EQ_STR(my_edit_get_text(edit), "alice"); /* edit restored */
   my_value_reset(&out);
+
+  app_destroy(&a);
+}
+
+static void test_slider_progress_mvvm_e2e(void) {
+  app_ctx_t a;
+  my_widget_t* slider;
+  my_widget_t* bar;
+  my_event_t e;
+  app_init(&a);
+  a.vm = my_view_model_dummy_create(NULL);
+  set_vm_double(a.vm, "volume", 0);
+
+  slider = my_slider_create(NULL);
+  my_widget_set_rect(slider, &(my_rect_t){0, 0, 116, 24});
+  my_widget_set_bind_rules(slider, "v:value={volume, Mode=TwoWay}");
+  my_widget_add_child(my_window_widget(a.win), slider);
+  my_widget_unref(slider);
+
+  bar = my_progress_bar_create(NULL);
+  my_widget_set_rect(bar, &(my_rect_t){0, 40, 200, 12});
+  my_widget_set_bind_rules(bar, "v:value={volume}");
+  my_widget_add_child(my_window_widget(a.win), bar);
+  my_widget_unref(bar);
+
+  a.mc = my_mvvm_bind(a.wm, a.win, a.vm);
+  TEST_ASSERT_NOT_NULL(a.mc);
+
+  /* drag the slider to the middle: vm follows, progress bar follows */
+  e = my_event_init(MY_EVENT_POINTER_DOWN);
+  e.u.pointer.x = 58;
+  e.u.pointer.y = 12;
+  slider->vtable->on_event(slider, &e);
+  {
+    my_value_t out;
+    my_value_init(&out, NULL);
+    my_view_model_get_prop(a.vm, "volume", &out);
+    TEST_ASSERT(my_value_type(&out) == MY_VALUE_DOUBLE);
+    TEST_ASSERT(my_value_get_double(&out) > 40.0 &&
+                my_value_get_double(&out) < 60.0);
+    my_value_reset(&out);
+  }
+  TEST_ASSERT(my_progress_bar_get_value(bar) > 40.0f &&
+              my_progress_bar_get_value(bar) < 60.0f);
+
+  /* vm -> slider OneWay/TwoWay push */
+  set_vm_double(a.vm, "volume", 80);
+  TEST_ASSERT(my_slider_get_value(slider) == 80.0f);
+  TEST_ASSERT(my_progress_bar_get_value(bar) == 80.0f);
 
   app_destroy(&a);
 }
@@ -406,5 +464,6 @@ MYTEST_MAIN_BEGIN()
   MYTEST_RUN(test_navigator_wm);
   MYTEST_RUN(test_edit_two_way_end_to_end);
   MYTEST_RUN(test_edit_validator_rejects);
+  MYTEST_RUN(test_slider_progress_mvvm_e2e);
   MYTEST_RUN(test_no_leak_with_debug_allocator);
 MYTEST_MAIN_END()
