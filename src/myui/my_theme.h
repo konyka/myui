@@ -1,0 +1,71 @@
+/**
+ * @file my_theme.h
+ * @brief Theme: a style sheet mapping (widget type, optional name) to
+ * styles, plus a minimal text loader.
+ *
+ * Text format (one rule per line, '#' starts hex colors, blank lines and
+ * lines starting with ';' are ignored):
+ *   button.normal.bg_color=#FF4081
+ *   button[ok].pressed.bg_color=#C60055
+ *   label.font_size=16            (no state = applied to ALL states)
+ * Values: #RRGGBB / #RRGGBBAA (color), integers, floats, else strings.
+ */
+#ifndef MY_THEME_H
+#define MY_THEME_H
+
+#include "myc/my_darray.h"
+#include "myui/my_style.h"
+
+#define MY_THEME_TYPE_LEN 24
+#define MY_THEME_NAME_LEN 32
+
+/** @brief One theme rule: style for a (type [, name]) pair. */
+typedef struct my_theme_entry_t {
+  char widget_type[MY_THEME_TYPE_LEN]; /**< e.g. "button" */
+  char name[MY_THEME_NAME_LEN];        /**< empty = type-wide rule */
+  my_style_t style;
+} my_theme_entry_t;
+
+/** @brief Theme (style sheet). */
+typedef struct my_theme_t {
+  const my_allocator_t* allocator;
+  my_darray_t* entries; /**< my_theme_entry_t* */
+} my_theme_t;
+
+my_theme_t* my_theme_create(const my_allocator_t* allocator);
+void my_theme_destroy(my_theme_t* theme);
+
+/** @brief Set a property on the (type, name) rule (name NULL/"" = type-wide). */
+my_ret_t my_theme_set(my_theme_t* theme, const char* widget_type, const char* name,
+                      my_widget_state_t state, const char* key,
+                      const my_value_t* value);
+
+/** @brief Convenience: set a color (0xRRGGBBAA). */
+my_ret_t my_theme_set_color(my_theme_t* theme, const char* widget_type,
+                            const char* name, my_widget_state_t state,
+                            const char* key, uint32_t rgba);
+
+/** @brief Convenience: set an int32. */
+my_ret_t my_theme_set_int(my_theme_t* theme, const char* widget_type,
+                          const char* name, my_widget_state_t state,
+                          const char* key, int32_t value);
+
+/**
+ * @brief Look up a property for a widget of type/name.
+ * Resolution: (type+name, state) -> (type+name, normal) -> (type, state)
+ * -> (type, normal). NULL when unresolved.
+ */
+const my_value_t* my_theme_get(const my_theme_t* theme, const char* widget_type,
+                               const char* name, my_widget_state_t state,
+                               const char* key);
+
+/** @brief Built-in default theme (light palette for window/button/label). */
+my_theme_t* my_theme_default_create(const my_allocator_t* allocator);
+
+/**
+ * @brief Load rules from text (see file header for the format).
+ * @return MY_RET_OK, or MY_RET_INVALID_PARAMS on the first bad line.
+ */
+my_ret_t my_theme_load_str(my_theme_t* theme, const char* str);
+
+#endif /* MY_THEME_H */

@@ -1,0 +1,195 @@
+/**
+ * @file my_widget.h
+ * @brief Widget base class: tree, geometry, painting, event hooks.
+ *
+ * Subclassing (mirrors my_object conventions):
+ *  - embed my_widget_t as the FIRST member;
+ *  - in the factory: allocate, then my_widget_init(), then override
+ *    base.destroy with your own destructor that frees subclass resources
+ *    and finally calls my_widget_destroy() (widget cleanup) followed by
+ *    my_object_destroy() (frees name + struct);
+ *  - vtable entries on_paint/on_event/on_layout are all optional.
+ *
+ * Ownership: add_child() takes over ONE reference of the child (the
+ * caller keeps its own and should my_widget_unref() it when done);
+ * remove_child() releases the tree's reference.
+ *
+ * Coordinates: widget->rect is in the PARENT's coordinate space; the
+ * root's parent space is the window/global space.
+ */
+#ifndef MY_WIDGET_H
+#define MY_WIDGET_H
+
+#include "myc/my_darray.h"
+#include "myc/my_emitter.h"
+#include "myc/my_object.h"
+#include "myui/my_theme.h"
+#include "myr/my_dirty_rects.h"
+#include "myr/my_vgcanvas.h"
+#include "mypal/my_event.h"
+
+typedef struct my_widget_t my_widget_t;
+
+/** @brief Sizing mode of one layout axis. */
+typedef enum my_layout_mode_t {
+  MY_LAYOUT_AUTO = 0, /**< keep current size */
+  MY_LAYOUT_PX,       /**< fixed pixels */
+  MY_LAYOUT_PERCENT,  /**< percent of the parent's content size */
+  MY_LAYOUT_FLEX      /**< share of remaining space (weight) */
+} my_layout_mode_t;
+
+/**
+ * @brief Parsed layout params (syntax: "w:100 h:30", "w:50%", "w:1f").
+ * Parsed by my_layout_params_parse() (my_layout.h).
+ */
+typedef struct my_layout_params_t {
+  my_layout_mode_t w_mode;
+  float w_value;
+  my_layout_mode_t h_mode;
+  float h_value;
+} my_layout_params_t;
+
+/** @brief Widget vtable; every entry is optional (NULL = no-op). */
+typedef struct my_widget_vtable_t {
+  /** @brief Paint self (children are painted afterwards by the framework). */
+  void (*on_paint)(my_widget_t* widget, my_vgcanvas_t* vg);
+  /**
+   * @brief Handle a dispatched event. Return MY_RET_OK to consume it
+   * (stops bubbling), anything else to let it bubble to the parent.
+   */
+  my_ret_t (*on_event)(my_widget_t* widget, const my_event_t* event);
+  /** @brief Optional custom layout hook (layouters usually suffice). */
+  void (*on_layout)(my_widget_t* widget);
+} my_widget_vtable_t;
+
+struct my_layouter_t;
+
+/** @brief Root-only hook: a subtree is about to be removed (M3b). */
+typedef void (*my_widget_removed_hook_t)(my_widget_t* root,
+                                         my_widget_t* removed);
+
+/** @brief Widget base "class". */
+struct my_widget_t {
+  my_object_t base;                 /**< ref counting + destroy chain */
+  const my_widget_vtable_t* vtable;
+  my_widget_t* parent;              /**< weak reference */
+  my_darray_t* children;            /**< owned references (my_widget_t*) */
+  my_rect_t rect;                   /**< in parent coordinates */
+  bool visible;
+  bool enable;
+  bool focusable;
+  bool dirty;                       /**< needs repaint */
+  bool need_layout;                 /**< children need re-layout */
+  const char* widget_type;          /**< static type name for theming */
+  my_emitter_t* emitter;            /**< my_widget_on() convenience */
+  my_layout_params_t layout_params; /**< parsed "w:.. h:.." spec */
+  struct my_layouter_t* layouter;   /**< owned, NULL = absolute */
+  my_dirty_rects_t* dirty_sink;     /**< root only: frame dirty collector */
+  my_style_t* local_style;          /**< owned local overrides (M3b) */
+  my_theme_t* theme;                /**< weak; lookup climbs ancestors */
+  char* bind_rules;                 /**< owned: MVVM rules (M4b), ";" separated */
+  void* anim_mgr;                   /**< root only, weak (my_animator) */
+  my_widget_removed_hook_t removed_hook; /**< root only: subtree removed */
+};
+
+/** @brief Initialize an already-allocated widget (subclass factories). */
+my_ret_t my_widget_init(my_widget_t* widget, const my_allocator_t* allocator,
+                        const my_widget_vtable_t* vtable, const char* name);
+
+/** @brief Create a plain container widget. */
+my_widget_t* my_widget_create(const my_allocator_t* allocator, const char* name);
+
+/**
+ * @brief Widget-level destructor for the destroy chain: frees children,
+ * emitter, layout params and layouter. Does NOT free name/struct — call
+ * my_object_destroy() after it (subclass destructors chain this way).
+ */
+void my_widget_destroy(my_widget_t* widget);
+
+static inline my_widget_t* my_widget_ref(my_widget_t* widget) {
+  return widget != NULL ? (my_widget_t*)my_object_ref((my_object_t*)widget)
+                        : NULL;
+}
+
+static inline void my_widget_unref(my_widget_t* widget) {
+  if (widget != NULL) {
+    my_object_unref((my_object_t*)widget);
+  }
+}
+
+/** @brief Add child (takes over one reference of child). */
+my_ret_t my_widget_add_child(my_widget_t* parent, my_widget_t* child);
+/** @brief Remove child (releases the tree's reference). */
+my_ret_t my_widget_remove_child(my_widget_t* parent, my_widget_t* child);
+/** @brief Find a direct child by name (NULL when absent). */
+my_widget_t* my_widget_find_child(my_widget_t* parent, const char* name);
+/** @brief Number of direct children. */
+size_t my_widget_child_count(my_widget_t* parent);
+/** @brief Get the i-th direct child (borrowed). */
+my_widget_t* my_widget_get_child(my_widget_t* parent, size_t index);
+
+my_ret_t my_widget_set_rect(my_widget_t* widget, const my_rect_t* rect);
+my_ret_t my_widget_set_visible(my_widget_t* widget, bool visible);
+
+/** @brief Rename a widget (name is used by theme [name] selectors). */
+my_ret_t my_widget_set_name(my_widget_t* widget, const char* name);
+
+/** @brief Attach MVVM binding rules (";"-separated, see docs/mvvm.md). */
+my_ret_t my_widget_set_bind_rules(my_widget_t* widget, const char* rules);
+
+/**
+ * @brief Mark a local rect (NULL = whole widget) dirty; bubbles the dirty
+ * flag up and records the rect (global space) into the root's dirty_sink.
+ */
+void my_widget_invalidate(my_widget_t* widget, const my_rect_t* rect);
+
+/** @brief Local point -> global (root) coordinates. */
+void my_widget_local_to_global(my_widget_t* widget, int32_t* x, int32_t* y);
+/** @brief Global (root) point -> local coordinates. */
+void my_widget_global_to_local(my_widget_t* widget, int32_t* x, int32_t* y);
+
+/**
+ * @brief Deepest visible widget at point (x,y given in widget's PARENT
+ * space; for the root this is the global space). Z-order: later children
+ * are on top. Returns NULL when the point is outside.
+ */
+my_widget_t* my_widget_hit_test(my_widget_t* widget, int32_t x, int32_t y);
+
+/**
+ * @brief Paint the subtree: invisible -> skip; otherwise
+ * save/translate-to-origin/clip-to-rect/on_paint/children/restore.
+ */
+void my_widget_paint(my_widget_t* widget, my_vgcanvas_t* vg);
+
+/** @brief Register an emitter listener ("click", "pointer_down", ...). */
+uint32_t my_widget_on(my_widget_t* widget, const char* event_name,
+                      my_event_callback_t callback, void* ctx);
+/** @brief Unregister a listener by id. */
+my_ret_t my_widget_off(my_widget_t* widget, uint32_t id);
+
+/* layouter-related setters live in my_layout.h */
+
+/* style/theme API (implemented in my_theme.c) */
+
+/** @brief Set a local style override (highest priority). */
+my_ret_t my_widget_style_set(my_widget_t* widget, my_widget_state_t state,
+                             const char* key, const my_value_t* value);
+
+/** @brief Resolve a style value: local > theme name match > theme type
+ * match; state falls back to normal. NULL when unresolved. */
+const my_value_t* my_widget_style_get(my_widget_t* widget,
+                                      my_widget_state_t state, const char* key);
+
+/** @brief Resolve a color (0xRRGGBBAA), fallback when unresolved. */
+uint32_t my_widget_style_get_color(my_widget_t* widget, my_widget_state_t state,
+                                   const char* key, uint32_t fallback);
+
+/** @brief Resolve an int, fallback when unresolved. */
+int32_t my_widget_style_get_int(my_widget_t* widget, my_widget_state_t state,
+                                const char* key, int32_t fallback);
+
+/** @brief Attach a theme at this widget (weak ref); applies to the
+ * subtree at query time (climbs ancestors). Invalidates the subtree. */
+my_ret_t my_widget_apply_theme(my_widget_t* widget, my_theme_t* theme);
+
+#endif /* MY_WIDGET_H */
