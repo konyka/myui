@@ -1,0 +1,288 @@
+/**
+ * @file my_lcd_mem.c
+ * @brief In-memory framebuffer lcd backend with per-format specialization.
+ */
+#include "myr/my_lcd_mem.h"
+
+#include <string.h>
+
+typedef struct my_lcd_mem_t {
+  my_lcd_t base;
+  const my_allocator_t* allocator;
+  uint32_t w;
+  uint32_t h;
+  my_pixel_format_t format;
+  uint32_t stride; /**< bytes per row */
+  uint8_t* buffer;
+  bool buffer_owned; /**< false for create_from_buffer (e.g. mmap'd fb) */
+} my_lcd_mem_t;
+
+/* ---------------- vtable: properties ---------------- */
+
+static uint32_t lcd_mem_get_width(my_lcd_t* lcd) {
+  return ((my_lcd_mem_t*)lcd)->w;
+}
+
+static uint32_t lcd_mem_get_height(my_lcd_t* lcd) {
+  return ((my_lcd_mem_t*)lcd)->h;
+}
+
+static my_pixel_format_t lcd_mem_get_format(my_lcd_t* lcd) {
+  return ((my_lcd_mem_t*)lcd)->format;
+}
+
+static my_ret_t lcd_mem_begin_frame(my_lcd_t* lcd, const my_rect_t* dirty) {
+  (void)lcd;
+  (void)dirty;
+  return MY_RET_OK;
+}
+
+static my_ret_t lcd_mem_end_frame(my_lcd_t* lcd) {
+  (void)lcd;
+  return MY_RET_OK;
+}
+
+/* ---------------- pixel writers (format specialization) ---------------- */
+
+static inline void write_rgb565(uint8_t* dst, my_color_t c) {
+  uint16_t v = (uint16_t)(((c.r >> 3) << 11) | ((c.g >> 2) << 5) | (c.b >> 3));
+  memcpy(dst, &v, 2);
+}
+
+static inline void write_rgb888(uint8_t* dst, my_color_t c) {
+  dst[0] = c.r;
+  dst[1] = c.g;
+  dst[2] = c.b;
+}
+
+static inline void write_argb8888(uint8_t* dst, my_color_t c) {
+  dst[0] = c.a;
+  dst[1] = c.r;
+  dst[2] = c.g;
+  dst[3] = c.b;
+}
+
+static inline void write_bgra8888(uint8_t* dst, my_color_t c) {
+  dst[0] = c.b;
+  dst[1] = c.g;
+  dst[2] = c.r;
+  dst[3] = c.a;
+}
+
+static inline bool mono_is_on(my_color_t c) {
+  /* ITU-R BT.601 luma threshold */
+  return (uint32_t)c.r * 299 + (uint32_t)c.g * 587 + (uint32_t)c.b * 114 >=
+         128u * 1000u;
+}
+
+static void fill_row_rgb565(uint8_t* row, uint32_t n, my_color_t c) {
+  uint16_t v = (uint16_t)(((c.r >> 3) << 11) | ((c.g >> 2) << 5) | (c.b >> 3));
+  uint16_t* p = (uint16_t*)(void*)row;
+  uint32_t i;
+  for (i = 0; i < n; i++) {
+    p[i] = v;
+  }
+}
+
+static void fill_row_rgb888(uint8_t* row, uint32_t n, my_color_t c) {
+  uint32_t i;
+  for (i = 0; i < n; i++) {
+    write_rgb888(row + (size_t)i * 3, c);
+  }
+}
+
+static void fill_row_argb8888(uint8_t* row, uint32_t n, my_color_t c) {
+  uint32_t i;
+  for (i = 0; i < n; i++) {
+    write_argb8888(row + (size_t)i * 4, c);
+  }
+}
+
+static void fill_row_bgra8888(uint8_t* row, uint32_t n, my_color_t c) {
+  uint32_t i;
+  for (i = 0; i < n; i++) {
+    write_bgra8888(row + (size_t)i * 4, c);
+  }
+}
+
+static void fill_mono_bits(my_lcd_mem_t* m, const my_rect_t* r, bool on) {
+  int32_t x, y;
+  for (y = r->y; y < r->y + r->h; y++) {
+    uint8_t* row = m->buffer + (size_t)y * m->stride;
+    for (x = r->x; x < r->x + r->w; x++) {
+      uint8_t mask = (uint8_t)(0x80u >> ((uint32_t)x % 8u));
+      if (on) {
+        row[(uint32_t)x / 8u] |= mask;
+      } else {
+        row[(uint32_t)x / 8u] &= (uint8_t)~mask;
+      }
+    }
+  }
+}
+
+/* ---------------- vtable: drawing ---------------- */
+
+static my_ret_t lcd_mem_fill_rect(my_lcd_t* lcd, const my_rect_t* rect,
+                                  my_color_t color) {
+  my_lcd_mem_t* m = (my_lcd_mem_t*)lcd;
+  my_rect_t bounds, clipped;
+  int32_t y;
+
+  if (rect == NULL) {
+    return MY_RET_INVALID_PARAMS;
+  }
+  bounds = my_rect_init(0, 0, (int32_t)m->w, (int32_t)m->h);
+  if (!my_rect_intersect(rect, &bounds, &clipped)) {
+    return MY_RET_OK; /* fully outside: nothing to do */
+  }
+
+  if (m->format == MY_PIXEL_FORMAT_MONO) {
+    fill_mono_bits(m, &clipped, mono_is_on(color));
+    return MY_RET_OK;
+  }
+
+  for (y = clipped.y; y < clipped.y + clipped.h; y++) {
+    uint8_t* row = m->buffer + (size_t)y * m->stride;
+    uint32_t n = (uint32_t)clipped.w;
+    switch (m->format) {
+      case MY_PIXEL_FORMAT_RGB565:
+        fill_row_rgb565(row + (size_t)clipped.x * 2, n, color);
+        break;
+      case MY_PIXEL_FORMAT_RGB888:
+        fill_row_rgb888(row + (size_t)clipped.x * 3, n, color);
+        break;
+      case MY_PIXEL_FORMAT_ARGB8888:
+        fill_row_argb8888(row + (size_t)clipped.x * 4, n, color);
+        break;
+      case MY_PIXEL_FORMAT_BGRA8888:
+        fill_row_bgra8888(row + (size_t)clipped.x * 4, n, color);
+        break;
+      default:
+        return MY_RET_NOT_SUPPORTED;
+    }
+  }
+  return MY_RET_OK;
+}
+
+static my_ret_t lcd_mem_draw_pixels(my_lcd_t* lcd, const void* pixels, int32_t x,
+                                    int32_t y, uint32_t w, uint32_t h) {
+  my_lcd_mem_t* m = (my_lcd_mem_t*)lcd;
+  uint32_t bpp, bytes;
+  int32_t src_x = 0, src_y = 0, row;
+  my_rect_t bounds, dst, clipped;
+
+  if (pixels == NULL || w == 0 || h == 0) {
+    return MY_RET_INVALID_PARAMS;
+  }
+  if (m->format == MY_PIXEL_FORMAT_MONO) {
+    return MY_RET_NOT_SUPPORTED; /* bit-level src clipping: not needed yet */
+  }
+  bpp = my_pixel_format_bpp(m->format) / 8;
+
+  bounds = my_rect_init(0, 0, (int32_t)m->w, (int32_t)m->h);
+  dst = my_rect_init(x, y, (int32_t)w, (int32_t)h);
+  if (!my_rect_intersect(&dst, &bounds, &clipped)) {
+    return MY_RET_OK;
+  }
+  src_x = clipped.x - x;
+  src_y = clipped.y - y;
+  bytes = (uint32_t)clipped.w * bpp;
+
+  for (row = 0; row < clipped.h; row++) {
+    const uint8_t* src =
+        (const uint8_t*)pixels +
+        ((size_t)(src_y + row) * w + (size_t)src_x) * bpp;
+    uint8_t* d = m->buffer + (size_t)(clipped.y + row) * m->stride +
+                 (size_t)clipped.x * bpp;
+    memcpy(d, src, bytes);
+  }
+  return MY_RET_OK;
+}
+
+static void lcd_mem_destroy(my_lcd_t* lcd) {
+  my_lcd_mem_t* m = (my_lcd_mem_t*)lcd;
+  if (m != NULL) {
+    if (m->buffer_owned) {
+      my_mem_free(m->allocator, m->buffer);
+    }
+    my_mem_free(m->allocator, m);
+  }
+}
+
+/* ---------------- create / accessors ---------------- */
+
+static const my_lcd_vtable_t s_lcd_mem_vtable = {
+    lcd_mem_get_width,  lcd_mem_get_height, lcd_mem_get_format,
+    lcd_mem_begin_frame, lcd_mem_end_frame, lcd_mem_draw_pixels,
+    lcd_mem_fill_rect,  lcd_mem_destroy};
+
+my_lcd_t* my_lcd_mem_create(const my_allocator_t* allocator, uint32_t w, uint32_t h,
+                            my_pixel_format_t format) {
+  my_lcd_mem_t* m;
+  uint32_t stride;
+  uint32_t bpp = my_pixel_format_bpp(format);
+
+  if (w == 0 || h == 0 || bpp == 0) {
+    return NULL;
+  }
+  stride = format == MY_PIXEL_FORMAT_MONO ? (w + 7u) / 8u : w * (bpp / 8u);
+
+  m = (my_lcd_mem_t*)my_mem_calloc(allocator, 1, sizeof(my_lcd_mem_t));
+  if (m == NULL) {
+    return NULL;
+  }
+  m->buffer = (uint8_t*)my_mem_calloc(allocator, (size_t)stride * h, 1);
+  if (m->buffer == NULL) {
+    my_mem_free(allocator, m);
+    return NULL;
+  }
+  m->buffer_owned = true;
+  m->base.vtable = &s_lcd_mem_vtable;
+  m->allocator = allocator;
+  m->w = w;
+  m->h = h;
+  m->format = format;
+  m->stride = stride;
+  return (my_lcd_t*)m;
+}
+
+static my_lcd_mem_t* as_mem(my_lcd_t* lcd) {
+  if (lcd == NULL || lcd->vtable != &s_lcd_mem_vtable) {
+    return NULL;
+  }
+  return (my_lcd_mem_t*)lcd;
+}
+
+uint8_t* my_lcd_mem_get_buffer(my_lcd_t* lcd) {
+  my_lcd_mem_t* m = as_mem(lcd);
+  return m != NULL ? m->buffer : NULL;
+}
+
+uint32_t my_lcd_mem_get_stride(my_lcd_t* lcd) {
+  my_lcd_mem_t* m = as_mem(lcd);
+  return m != NULL ? m->stride : 0;
+}
+
+my_lcd_t* my_lcd_mem_create_from_buffer(const my_allocator_t* allocator,
+                                        uint32_t w, uint32_t h,
+                                        my_pixel_format_t format,
+                                        uint8_t* buffer, uint32_t stride) {
+  my_lcd_mem_t* m;
+  if (w == 0 || h == 0 || buffer == NULL ||
+      my_pixel_format_bpp(format) == 0) {
+    return NULL;
+  }
+  m = (my_lcd_mem_t*)my_mem_calloc(allocator, 1, sizeof(my_lcd_mem_t));
+  if (m == NULL) {
+    return NULL;
+  }
+  m->base.vtable = &s_lcd_mem_vtable;
+  m->allocator = allocator;
+  m->w = w;
+  m->h = h;
+  m->format = format;
+  m->stride = stride;
+  m->buffer = buffer;
+  m->buffer_owned = false;
+  return (my_lcd_t*)m;
+}
