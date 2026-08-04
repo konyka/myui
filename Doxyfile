@@ -1,0 +1,18 @@
+# myui API reference (doxygen >= 1.9). Generate: doxygen Doxyfile
+# Output: docs/api/html/index.html
+PROJECT_NAME           = myui
+PROJECT_BRIEF          = "cross-platform C99 GUI framework with MVVM"
+OUTPUT_DIRECTORY       = docs/api
+INPUT                  = src
+RECURSIVE              = YES
+FILE_PATTERNS          = *.h
+EXCLUDE                =
+EXTRACT_ALL            = NO
+EXTRACT_STATIC         = NO
+SORT_MEMBER_DOCS       = YES
+WARN_AS_ERROR          = NO
+QUIET                  = YES
+GENERATE_HTML          = YES
+GENERATE_LATEX         = NO
+GENERATE_XML           = NO
+HAVE_DOT               = NO

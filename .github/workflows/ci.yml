@@ -1,0 +1,86 @@
+# myui CI: strict C standard matrix + platform builds.
+# Runtime smokes skip gracefully when no display/compositor exists.
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  linux-matrix:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [gcc, clang]
+        std: [99, 11, 17, 23]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libx11-dev libgles2-mesa-dev libegl1-mesa-dev \
+            libwayland-dev wayland-protocols libxkbcommon-dev xvfb
+      - name: Configure (x11 port, C${{ matrix.std }})
+        run: cmake -S . -B build -DMYUI_PAL=x11 -DMYUI_C_STANDARD=${{ matrix.std }}
+      - name: Build
+        run: cmake --build build -j
+      - name: Test (headless via xvfb)
+        run: xvfb-run -a ctest --test-dir build --output-on-failure
+
+  linux-dummy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure (dummy port, no X11 needed)
+        run: cmake -S . -B build -DMYUI_PAL=dummy -DMYUI_C_STANDARD=99
+      - name: Build
+        run: cmake --build build -j
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+  linux-wayland:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwayland-dev wayland-protocols libxkbcommon-dev
+      - name: Configure (wayland port)
+        run: cmake -S . -B build -DMYUI_PAL=wayland -DMYUI_C_STANDARD=99
+      - name: Build
+        run: cmake --build build -j
+      - name: Test (smoke skips without a compositor)
+        run: ctest --test-dir build --output-on-failure
+
+  windows-msvc:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure (dummy port; core libs only, no X11/wayland)
+        run: cmake -S . -B build -DMYUI_PAL=dummy -DMYUI_C_STANDARD=17
+      - name: Build
+        run: cmake --build build --config Release -j
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure (dummy port)
+        run: cmake -S . -B build -DMYUI_PAL=dummy -DMYUI_C_STANDARD=17
+      - name: Build
+        run: cmake --build build -j
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install doxygen
+        run: sudo apt-get install -y doxygen
+      - name: Generate API reference (docs/api)
+        run: doxygen Doxyfile
