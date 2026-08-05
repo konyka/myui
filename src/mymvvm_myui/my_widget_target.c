@@ -196,7 +196,8 @@ static void items_adapter_bind_row(my_list_adapter_t* adapter,
 }
 
 static const my_list_adapter_vtable_t ITEMS_ADAPTER_VTABLE = {
-    items_adapter_count, items_adapter_create_row, items_adapter_bind_row};
+    items_adapter_count, items_adapter_create_row, items_adapter_bind_row,
+    NULL};
 
 static void items_adapter_destroy(my_widget_target_t* wt) {
   items_adapter_t* a = (items_adapter_t*)wt->items_adapter;

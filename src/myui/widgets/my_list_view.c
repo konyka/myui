@@ -4,7 +4,13 @@
  */
 #include "myui/widgets/my_list_view.h"
 
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+
+#include "myui/widgets/my_scroll_bar.h"
+
+static void lv_sync_rows(my_list_view_t* lv);
 
 typedef struct row_slot_t {
   my_widget_t* widget;
@@ -15,11 +21,85 @@ static size_t lv_count(my_list_view_t* lv) {
   return lv->adapter != NULL ? lv->adapter->vtable->get_count(lv->adapter) : 0;
 }
 
+static bool lv_variable(const my_list_view_t* lv) {
+  return lv->adapter != NULL && lv->adapter->vtable->row_height != NULL;
+}
+
+/** @brief Prefix sum: height of rows [0, i). Lazily filled (M9c). */
+static int64_t lv_psum_to(my_list_view_t* lv, size_t i) {
+  int64_t acc;
+  if (lv->psum == NULL) { /* lazily created (only used in variable mode) */
+    lv->psum = my_darray_create(lv->allocator, 0);
+    if (lv->psum == NULL) {
+      return 0;
+    }
+    my_darray_push(lv->psum, (void*)0); /* psum[0] = height of rows [0,0) = 0 */
+  }
+  while (my_darray_size(lv->psum) <= i) {
+    /* psum[n] = psum[n-1] + height(row n-1): psum[i] = height of [0, i) */
+    size_t n = my_darray_size(lv->psum);
+    int32_t h = lv->adapter->vtable->row_height(lv->adapter, n - 1);
+    acc = n > 0 ? (int64_t)(size_t)my_darray_get(lv->psum, n - 1) : 0;
+    my_darray_push(lv->psum, (void*)(size_t)(acc + h));
+  }
+  return (int64_t)(size_t)my_darray_get(lv->psum, i);
+}
+
+/** @brief Total content height; estimated until all rows are measured. */
+static int64_t lv_content_height(my_list_view_t* lv) {
+  size_t count = lv_count(lv);
+  if (!lv_variable(lv)) {
+    return (int64_t)count * lv->row_height;
+  }
+  if (my_darray_size(lv->psum) >= count) {
+    return count > 0 ? lv_psum_to(lv, count) : 0;
+  }
+  {
+    /* measured part + unmeasured part x average seen so far */
+    size_t filled = my_darray_size(lv->psum);
+    int64_t known = filled > 0 ? lv_psum_to(lv, filled) : 0;
+    double avg = filled > 0 ? (double)known / (double)filled : 24.0;
+    return known + (int64_t)(avg * (double)(count - filled));
+  }
+}
+
+static void lv_sync_scroll_bar(my_list_view_t* lv) {
+  int64_t content;
+  int64_t max;
+  if (lv->scroll_bar == NULL) {
+    return;
+  }
+  content = lv_content_height(lv);
+  max = content - ((my_widget_t*)lv)->rect.h;
+  my_scroll_bar_set_page_size(
+      lv->scroll_bar, content > 0
+                          ? (float)((my_widget_t*)lv)->rect.h / (float)content
+                          : 1.0f);
+  my_scroll_bar_set_value(lv->scroll_bar,
+                          max > 0 ? (float)lv->scroll_offset / (float)max
+                                  : 0.0f);
+}
+
+static void on_scroll_bar_changed(void* ctx, const char* event, void* data) {
+  my_list_view_t* lv = (my_list_view_t*)ctx;
+  int64_t max;
+  (void)event;
+  (void)data;
+  max = lv_content_height(lv) - ((my_widget_t*)lv)->rect.h;
+  if (max < 0) {
+    max = 0;
+  }
+  lv->scroll_offset =
+      (int32_t)(my_scroll_bar_get_value(lv->scroll_bar) * (float)max);
+  lv_sync_rows(lv);
+  lv_sync_scroll_bar(lv);
+  my_widget_invalidate((my_widget_t*)lv, NULL);
+}
+
 static int32_t lv_max_offset(my_list_view_t* lv) {
-  int64_t content = (int64_t)lv_count(lv) * lv->row_height;
-  int32_t max = (int32_t)(content > 0 ? content : 0) -
-                ((my_widget_t*)lv)->rect.h;
-  return max > 0 ? max : 0;
+  int64_t content = lv_content_height(lv);
+  int64_t max = content - ((my_widget_t*)lv)->rect.h;
+  return max > 0 ? (int32_t)max : 0;
 }
 
 static void lv_clamp_scroll(my_list_view_t* lv) {
@@ -66,8 +146,36 @@ static void lv_sync_rows(my_list_view_t* lv) {
   }
   lv_clamp_scroll(lv);
   lv_recycle_all(lv);
-  first = (size_t)(lv->scroll_offset / lv->row_height);
-  need = (size_t)(self->rect.h / lv->row_height) + 2; /* +1 buffer row */
+  if (lv_variable(lv)) {
+    /* variable heights: binary-search the first visible row in psum,
+     * then walk forward while rows intersect the viewport (+1 buffer) */
+    size_t lo = 0, hi = count;
+    while (lo < hi) {
+      size_t mid = (lo + hi) / 2;
+      if (lv_psum_to(lv, mid + 1) <= lv->scroll_offset) {
+        lo = mid + 1;
+      } else {
+        hi = mid;
+      }
+    }
+    first = lo;
+    {
+      int64_t y = first < count ? lv_psum_to(lv, first) : 0;
+      need = 0;
+      while (first + need < count &&
+             y < (int64_t)lv->scroll_offset + self->rect.h + lv->row_height) {
+        y += lv->adapter->vtable->row_height(lv->adapter, first + need);
+        need++;
+      }
+      if (need == 0 && first > 0) {
+        first--;
+        need = 1;
+      }
+    }
+  } else {
+    first = (size_t)(lv->scroll_offset / lv->row_height);
+    need = (size_t)(self->rect.h / lv->row_height) + 2; /* +1 buffer row */
+  }
   if (first >= count) {
     return;
   }
@@ -76,6 +184,7 @@ static void lv_sync_rows(my_list_view_t* lv) {
   }
   for (i = 0; i < need; i++) {
     size_t index = first + i;
+    int32_t row_y, row_h;
     my_widget_t* row = lv_pool_pop(lv);
     row_slot_t* slot;
     if (row == NULL) {
@@ -86,10 +195,14 @@ static void lv_sync_rows(my_list_view_t* lv) {
       lv->rows_created_total++;
     }
     lv->adapter->vtable->bind_row(lv->adapter, row, index);
-    my_widget_set_rect(row, &(my_rect_t){0,
-                                         (int32_t)(index * (size_t)lv->row_height) -
-                                             lv->scroll_offset,
-                                         self->rect.w, lv->row_height});
+    if (lv_variable(lv)) {
+      row_y = (int32_t)(lv_psum_to(lv, index) - lv->scroll_offset);
+      row_h = lv->adapter->vtable->row_height(lv->adapter, index);
+    } else {
+      row_y = (int32_t)(index * (size_t)lv->row_height) - lv->scroll_offset;
+      row_h = lv->row_height;
+    }
+    my_widget_set_rect(row, &(my_rect_t){0, row_y, self->rect.w, row_h});
     slot = (row_slot_t*)my_mem_calloc(lv->allocator, 1, sizeof(row_slot_t));
     if (slot == NULL) {
       my_widget_unref(row);
@@ -105,7 +218,22 @@ static void lv_sync_rows(my_list_view_t* lv) {
 
 static void lv_on_layout_changed(my_list_view_t* lv) {
   lv_sync_rows(lv);
+  lv_sync_scroll_bar(lv);
   my_widget_invalidate((my_widget_t*)lv, NULL);
+}
+
+my_ret_t my_list_view_set_scroll_bar(my_widget_t* list_view,
+                                     my_widget_t* bar) {
+  my_list_view_t* lv = (my_list_view_t*)list_view;
+  if (list_view == NULL) {
+    return MY_RET_INVALID_PARAMS;
+  }
+  lv->scroll_bar = bar;
+  if (bar != NULL) {
+    my_widget_on(bar, "changed", on_scroll_bar_changed, lv);
+  }
+  lv_sync_scroll_bar(lv);
+  return MY_RET_OK;
 }
 
 /* ---------------- vtable ---------------- */
@@ -190,6 +318,7 @@ static void lv_destroy_chain(my_object_t* obj) {
     }
     my_darray_destroy(lv->pool);
   }
+  my_darray_destroy(lv->psum);
   my_widget_destroy((my_widget_t*)lv);
   my_object_destroy(obj);
 }

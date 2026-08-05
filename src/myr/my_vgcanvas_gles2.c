@@ -522,6 +522,18 @@ static my_ret_t gles_stroke(my_vgcanvas_t* vg) {
   return MY_RET_OK;
 }
 
+static my_ret_t gles_set_line_cap(my_vgcanvas_t* vg, my_line_cap_t cap) {
+  (void)vg;
+  (void)cap; /* stored-only for now: GLES round cap/join is a TODO */
+  return MY_RET_OK;
+}
+
+static my_ret_t gles_set_line_join(my_vgcanvas_t* vg, my_line_join_t join) {
+  (void)vg;
+  (void)join;
+  return MY_RET_OK;
+}
+
 static my_ret_t gles_draw_text(my_vgcanvas_t* vg, const char* text, float x,
                                float y) {
   my_vgcanvas_gles2_t* s = (my_vgcanvas_gles2_t*)vg;
@@ -736,7 +748,7 @@ static const my_vgcanvas_vtable_t s_gles_vtable = {
     gles_fill_rounded_rect, gles_begin_path, gles_move_to,       gles_line_to,
     gles_close_path,       gles_fill,        gles_stroke,        gles_draw_text,
     gles_destroy,          gles_set_font,    gles_measure_text,
-    gles_draw_image};
+    gles_draw_image,       gles_set_line_cap, gles_set_line_join};
 
 my_vgcanvas_t* my_vgcanvas_gles2_create_with_gl(const my_allocator_t* allocator,
                                                 int32_t width, int32_t height,

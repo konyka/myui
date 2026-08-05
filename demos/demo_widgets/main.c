@@ -23,6 +23,7 @@
 #include "myui/widgets/my_label.h"
 #include "myui/widgets/my_list_view.h"
 #include "myui/widgets/my_progress_bar.h"
+#include "myui/widgets/my_scroll_bar.h"
 #include "myui/widgets/my_slider.h"
 #include "myui/widgets/my_text_area.h"
 
@@ -53,7 +54,7 @@ static void demo_bind_row(my_list_adapter_t* adapter, my_widget_t* row,
 }
 
 static const my_list_adapter_vtable_t DEMO_ADAPTER = {
-    demo_row_count, demo_create_row, demo_bind_row};
+    demo_row_count, demo_create_row, demo_bind_row, NULL};
 static my_list_adapter_t g_demo_adapter = {&DEMO_ADAPTER};
 
 /** @brief Prefer a system TTF (stb backend), fall back to the 8x8 font. */
@@ -218,15 +219,27 @@ static void build_ui(app_t* app) {
     my_widget_unref(bar);
   }
 
-  /* list_view (500 virtualized rows) + image */
+  /* list_view (500 virtualized rows) + linked scroll_bar + image */
   {
     my_widget_t* lv = my_list_view_create(NULL);
+    my_widget_t* bar = my_scroll_bar_create(NULL);
     my_widget_t* img = my_image_create(NULL);
-    my_widget_set_layout_params(lv, "h:150");
+    my_widget_t* lvrow = my_widget_create(NULL, "lvrow");
+    my_widget_set_layout_params(lvrow, "h:150");
+    my_widget_set_layouter(lvrow, my_layouter_linear_create(NULL, true, 2));
+    my_widget_add_child(root, lvrow);
+    my_widget_unref(lvrow);
+
+    my_widget_set_layout_params(lv, "w:1f h:150");
     my_list_view_set_row_height(lv, 24);
     my_list_view_set_adapter(lv, &g_demo_adapter);
-    my_widget_add_child(root, lv);
+    my_widget_add_child(lvrow, lv);
     my_widget_unref(lv);
+
+    my_widget_set_layout_params(bar, "w:14 h:150");
+    my_widget_add_child(lvrow, bar);
+    my_widget_unref(bar);
+    my_list_view_set_scroll_bar(lv, bar);
 
     my_widget_set_layout_params(img, "h:96");
     my_image_set_image(img, "/tmp/myui_demo.png");

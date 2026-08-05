@@ -34,6 +34,7 @@ typedef struct my_text_area_t {
   size_t max_len;           /**< codepoints cap, 0 = unlimited */
   bool readonly;
   char* hint;               /**< owned, shown when empty and unfocused */
+  my_widget_t* scroll_bar;     /**< weak; linked scroll_bar (M9c) */
   bool focused;
   bool cursor_visible;
   uint32_t blink_timer_id;
@@ -55,5 +56,8 @@ void my_text_area_set_font(my_widget_t* area, my_font_t* font, int32_t size);
 
 /** @brief Line count (from the offset cache). */
 size_t my_text_area_line_count(my_widget_t* area);
+
+/** @brief Link a scroll_bar (weak): synced with scroll_y/content height. */
+my_ret_t my_text_area_set_scroll_bar(my_widget_t* area, my_widget_t* bar);
 
 #endif /* MY_TEXT_AREA_H */

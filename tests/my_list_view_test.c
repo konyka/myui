@@ -40,7 +40,7 @@ static size_t mock_get_count(my_list_adapter_t* adapter) {
 }
 
 static const my_list_adapter_vtable_t MOCK_ADAPTER_VTABLE = {
-    mock_get_count, mock_create_row, mock_bind_row};
+    mock_get_count, mock_create_row, mock_bind_row, NULL};
 
 static void mock_adapter_init(mock_adapter_t* m, size_t count) {
   memset(m, 0, sizeof(*m));

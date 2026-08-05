@@ -27,6 +27,8 @@ typedef struct soft_state_t {
   my_rect_t clip; /* device coordinates */
   my_font_t* font;     /**< borrowed; NULL = no text */
   int32_t font_size;
+  my_line_cap_t line_cap;
+  my_line_join_t line_join;
 } soft_state_t;
 
 typedef struct path_point_t {
@@ -674,6 +676,21 @@ static my_ret_t soft_stroke(my_vgcanvas_t* vg) {
   for (ci = 0; ci < s->contour_count; ci++) {
     const contour_t* c = &s->contours[ci];
     size_t edges = c->count > 1 ? (c->closed ? c->count : c->count - 1) : 0;
+    if (c->count > 1 && !c->closed && s->state.line_cap == MY_LINE_CAP_ROUND) {
+      /* round caps: half-lw disks on the two endpoints (coverage-AA) */
+      int32_t r = (int32_t)(half + 0.5f);
+      int32_t cx0 = (int32_t)floorf(s->points[c->start].x + s->state.tx +
+                                    odd_off);
+      int32_t cy0 = (int32_t)floorf(s->points[c->start].y + s->state.ty +
+                                    odd_off);
+      size_t last = c->start + c->count - 1;
+      int32_t cx1 = (int32_t)floorf(s->points[last].x + s->state.tx + odd_off);
+      int32_t cy1 = (int32_t)floorf(s->points[last].y + s->state.ty + odd_off);
+      if (r > 0) {
+        soft_fill_circle(s, cx0, cy0, r, s->state.stroke_color);
+        soft_fill_circle(s, cx1, cy1, r, s->state.stroke_color);
+      }
+    }
     for (i = 0; i < edges; i++) {
       size_t j = (i + 1) % c->count;
       float x0 = s->points[c->start + i].x + odd_off;
@@ -711,8 +728,31 @@ static my_ret_t soft_stroke(my_vgcanvas_t* vg) {
       qcontour.count = 4;
       qcontour.closed = true;
       fill_polys(s, quad, 4, &qcontour, 1, s->state.stroke_color);
+      /* round joins: half-lw disk at each interior vertex (slight
+       * over-blend with segment ends for translucent strokes, noted) */
+      if (s->state.line_join == MY_LINE_JOIN_ROUND && i + 1 < c->count) {
+        int32_t r = (int32_t)(half + 0.5f);
+        if (r > 0) {
+          soft_fill_circle(
+              s, (int32_t)floorf(s->points[c->start + j].x + s->state.tx +
+                                 odd_off),
+              (int32_t)floorf(s->points[c->start + j].y + s->state.ty +
+                              odd_off),
+              r, s->state.stroke_color);
+        }
+      }
     }
   }
+  return MY_RET_OK;
+}
+
+static my_ret_t soft_set_line_cap(my_vgcanvas_t* vg, my_line_cap_t cap) {
+  ((my_vgcanvas_soft_t*)vg)->state.line_cap = cap;
+  return MY_RET_OK;
+}
+
+static my_ret_t soft_set_line_join(my_vgcanvas_t* vg, my_line_join_t join) {
+  ((my_vgcanvas_soft_t*)vg)->state.line_join = join;
   return MY_RET_OK;
 }
 
@@ -952,7 +992,7 @@ static const my_vgcanvas_vtable_t s_soft_vtable = {
     soft_fill_rounded_rect, soft_begin_path, soft_move_to,       soft_line_to,
     soft_close_path,       soft_fill,        soft_stroke,        soft_draw_text,
     soft_destroy,          soft_set_font,    soft_measure_text,
-    soft_draw_image};
+    soft_draw_image,       soft_set_line_cap, soft_set_line_join};
 
 my_vgcanvas_t* my_vgcanvas_soft_create(const my_allocator_t* allocator,
                                        my_lcd_t* lcd) {
@@ -974,6 +1014,8 @@ my_vgcanvas_t* my_vgcanvas_soft_create(const my_allocator_t* allocator,
   s->state.ty = 0.0f;
   s->state.font = NULL;
   s->state.font_size = 16;
+  s->state.line_cap = MY_LINE_CAP_BUTT;
+  s->state.line_join = MY_LINE_JOIN_MITER;
   s->state.clip =
       my_rect_init(0, 0, (int32_t)my_lcd_get_width(lcd), (int32_t)my_lcd_get_height(lcd));
   s->antialias_level = 2;

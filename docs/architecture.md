@@ -177,3 +177,9 @@ PAL port 矩阵：
 
 - **soft**：最近邻（默认关闭）或双线性（默认开）采样，alpha 按控件主题 bg 预合成后走 draw_pixels。双线性用像素中心映射 `(dst+0.5)*w/dw-0.5`、四邻域加权（float，未走定点——-O0 下 480x270→800x600 为 15.5ms/帧 vs 最近邻 2.2ms（7x）；**嵌入式建议 `MY_SCALE_FILTER_NEAREST`**，桌面默认 BILINEAR；缩小时的盒式预降采样是 TODO）。`my_vgcanvas_soft_set_scale_filter` + `my_image_set_scale_filter` 透传。
 - **gles2**：draw_image 已实现——RGBA8888 上传纹理（`create_texture_rgba`），专用 FS（直接采样不过调制色），quad + scissor；纹理按 (ptr,w,h) 键 LRU 16 项（调用方须保证位图生命周期，my_image 的解码 LRU 语义自洽，头注释注明）；EGL 冒烟四象限读回断言通过。bg 参数先画背景矩形再混合 quad。
+
+## scroll_bar 与变高列表（M9c）
+
+- `my_scroll_bar`：value [0,1] + page_size [0,1]（滑块长，min 16px）；滑块拖拽（grab）、轨道点击翻页；"changed" 事件。容器显式挂接：`my_list_view_set_scroll_bar(lv, bar)` / `my_text_area_set_scroll_bar(ta, bar)`——双向同步（容器滚动 → value/page_size 更新；bar 拖拽 → 容器 offset 更新，无事件回环）。
+- list_view 变高行：adapter vtable 增加 `row_height(index)`（NULL = 固定行高，M8b 行为零回归）。变高模式用**前缀和缓存**（darray 存累计高度，滚动到哪儿惰性算到哪儿）；总高在未测完全部行数前用"已测部分 + 未测部分×已见平均高"估算（滚动条位置轻微非线性，Android ListView 式常规取舍，头注释说明）；可视区间二分查找 + 前向累计，回收复用逻辑不变。
+- stroke 圆 cap/join：`my_vgcanvas_set_line_cap/join`（BUTT/ROUND、MITER/ROUND，入 save/restore 状态）。soft 实现为 lw/2 圆盘点（cap 取端点、join 取内部顶点），走覆盖率路径自动 AA；关节处相邻段与圆盘重叠区域对半透明描边有轻微过混合（接受并注释，合并单轮廓是 TODO）；GLES 端存状态不生效（TODO）。

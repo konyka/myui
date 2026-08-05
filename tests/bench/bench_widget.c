@@ -32,7 +32,7 @@ static void bench_bind_row(my_list_adapter_t* a, my_widget_t* row,
 }
 
 static const my_list_adapter_vtable_t BENCH_ADAPTER = {
-    bench_row_count, bench_create_row, bench_bind_row};
+    bench_row_count, bench_create_row, bench_bind_row, NULL};
 
 static void mock_adapter_init(mock_adapter_t* a, size_t count) {
   a->base.vtable = &BENCH_ADAPTER;

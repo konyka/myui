@@ -186,6 +186,26 @@ static void golden_scene_aa(my_vgcanvas_t* vg) {
   my_vgcanvas_end_frame(vg);
 }
 
+static void golden_scene_round_cap(my_vgcanvas_t* vg) {
+  static const my_color_t NAVY = {16, 16, 64, 255};
+  static const my_color_t YELLOW = {255, 220, 40, 255};
+  my_vgcanvas_soft_set_antialias(vg, true);
+  my_vgcanvas_begin_frame(vg, NULL);
+  my_vgcanvas_set_fill_color(vg, NAVY);
+  my_vgcanvas_fill_rect(vg, &(my_rectf_t){0, 0, 64, 48});
+  my_vgcanvas_set_stroke_color(vg, YELLOW);
+  my_vgcanvas_set_line_width(vg, 5);
+  my_vgcanvas_set_line_cap(vg, MY_LINE_CAP_ROUND);
+  my_vgcanvas_set_line_join(vg, MY_LINE_JOIN_ROUND);
+  my_vgcanvas_begin_path(vg);
+  my_vgcanvas_move_to(vg, 10, 38);
+  my_vgcanvas_line_to(vg, 24, 10);
+  my_vgcanvas_line_to(vg, 40, 30);
+  my_vgcanvas_line_to(vg, 56, 12);
+  my_vgcanvas_stroke(vg);
+  my_vgcanvas_end_frame(vg);
+}
+
 static const golden_scene_t GOLDEN_SCENES[] = {
     {"scene_shapes_rgb565", 64, 48, MY_PIXEL_FORMAT_RGB565, golden_scene_shapes},
     {"scene_clip_rgb888", 32, 24, MY_PIXEL_FORMAT_RGB888, golden_scene_clip},
@@ -195,6 +215,8 @@ static const golden_scene_t GOLDEN_SCENES[] = {
      golden_scene_concave},
     {"scene_mono", 64, 24, MY_PIXEL_FORMAT_MONO, golden_scene_mono},
     {"scene_aa_bgra8888", 64, 48, MY_PIXEL_FORMAT_BGRA8888, golden_scene_aa},
+    {"scene_round_cap_bgra8888", 64, 48, MY_PIXEL_FORMAT_BGRA8888,
+     golden_scene_round_cap},
 };
 
 #define GOLDEN_SCENE_COUNT (sizeof(GOLDEN_SCENES) / sizeof(GOLDEN_SCENES[0]))

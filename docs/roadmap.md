@@ -32,4 +32,5 @@
 
 - **M9a text_area 多行编辑** ✅ 已完成：行偏移缓存（局部重建，10k 行：载入 0.13ms/2000 次移动 0.09ms/100 次插入 0.09ms）；目标列语义；选区/剪贴板（保留换行）；滚动保光标；MVVM TwoWay + XML 标签；demo_widgets 接入。
 - **M9b 图像质量** ✅ 已完成：GLES draw_image（RGBA 纹理 + (ptr,w,h) LRU 16 项 + 专用采样着色器，EGL 四象限读回通过）；soft 双线性缩放（像素中心映射，默认开；bench：480x270→800x600 最近邻 2.2ms vs 双线性 15.5ms/帧（7x，-O0）——嵌入式建议 NEAREST，已写进 architecture.md）。
-- **M9c+ 候选**：x11 外部剪贴板获取、文字 shaping/Bidi、GLES draw_image 与 GLES AA、双线性缩放、变高列表与增量 diff、XML→C 生成器、滚动条拖拽、stroke 圆 cap/join。**待有 SDK 环境**：iOS(uikit)、HarmonyOS、Android、Web、win32/sdl2 port、Metal backend、FreeBSD/linux_fb 实机复核。
+- **M9c 滚动条 + 变高列表 + 圆 cap/join** ✅ 已完成：my_scroll_bar（拖拽/翻页/min-thumb/主题态）；list_view/text_area 显式挂接双向同步；变高行前缀和缓存 + 估算总高（200 次变高滚动 ≤200 行控件）；stroke ROUND cap/join（覆盖率圆盘，过混合注释）+ golden 场景。
+- **M9d+ 候选**：x11 外部剪贴板获取、文字 shaping/Bidi、GLES draw_image 与 GLES AA、双线性缩放、变高列表与增量 diff、XML→C 生成器、滚动条拖拽、stroke 圆 cap/join。**待有 SDK 环境**：iOS(uikit)、HarmonyOS、Android、Web、win32/sdl2 port、Metal backend、FreeBSD/linux_fb 实机复核。

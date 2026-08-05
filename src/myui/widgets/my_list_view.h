@@ -22,6 +22,11 @@ typedef struct my_list_adapter_vtable_t {
   my_widget_t* (*create_row)(my_list_adapter_t* adapter);
   /** @brief (Re)bind an existing row widget to a data index. */
   void (*bind_row)(my_list_adapter_t* adapter, my_widget_t* row, size_t index);
+  /**
+   * @brief Variable row height in px (M9c). NULL = fixed row_height
+   * mode (identical to M8b behavior).
+   */
+  int32_t (*row_height)(my_list_adapter_t* adapter, size_t index);
 } my_list_adapter_vtable_t;
 
 /** @brief List adapter base "class". */
@@ -41,6 +46,9 @@ typedef struct my_list_view_t {
   size_t rows_created_total;   /**< diagnostics: create_row call count */
   int32_t drag_y;              /**< drag scroll tracking (-1 = off) */
   int32_t drag_start_offset;
+  my_widget_t* scroll_bar;     /**< weak; linked scroll_bar (M9c) */
+  my_darray_t* psum;           /**< variable-height prefix sums (lazy) */
+  bool psum_all;               /**< psum filled to the end */
 } my_list_view_t;
 
 my_widget_t* my_list_view_create(const my_allocator_t* allocator);
@@ -55,5 +63,10 @@ my_ret_t my_list_view_set_scroll_offset(my_widget_t* list_view, int32_t offset);
 int32_t my_list_view_get_scroll_offset(my_widget_t* list_view);
 /** @brief Diagnostics: total rows ever created via the adapter. */
 size_t my_list_view_rows_created_total(my_widget_t* list_view);
+
+/** @brief Link a scroll_bar (weak): kept in sync with scroll_offset and
+ * content/viewport size; dragging the bar scrolls the list. */
+my_ret_t my_list_view_set_scroll_bar(my_widget_t* list_view,
+                                     my_widget_t* bar);
 
 #endif /* MY_LIST_VIEW_H */

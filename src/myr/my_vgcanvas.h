@@ -30,6 +30,18 @@
 
 typedef struct my_vgcanvas_t my_vgcanvas_t;
 
+/** @brief Stroke cap style (M9c). */
+typedef enum my_line_cap_t {
+  MY_LINE_CAP_BUTT = 0,
+  MY_LINE_CAP_ROUND
+} my_line_cap_t;
+
+/** @brief Stroke join style (M9c). */
+typedef enum my_line_join_t {
+  MY_LINE_JOIN_MITER = 0,
+  MY_LINE_JOIN_ROUND
+} my_line_join_t;
+
 /** @brief Image scaling filter (draw_image, M9b). */
 typedef enum my_scale_filter_t {
   MY_SCALE_FILTER_NEAREST = 0,
@@ -92,6 +104,13 @@ typedef struct my_vgcanvas_vtable_t {
   my_ret_t (*draw_image)(my_vgcanvas_t* vg, const uint8_t* rgba, int32_t w,
                          int32_t h, const my_rectf_t* dst,
                          const my_color_t* bg);
+  /**
+   * @brief Stroke cap/join styles (M9c). SOFT backend implements ROUND
+   * (coverage-AA circles); other backends may ignore (documented TODO).
+   * Part of the save/restore state.
+   */
+  my_ret_t (*set_line_cap)(my_vgcanvas_t* vg, my_line_cap_t cap);
+  my_ret_t (*set_line_join)(my_vgcanvas_t* vg, my_line_join_t join);
 } my_vgcanvas_vtable_t;
 
 /** @brief vgcanvas base "class": first member of every backend. */
@@ -206,6 +225,16 @@ static inline my_ret_t my_vgcanvas_draw_image(my_vgcanvas_t* vg,
                                               int32_t h, const my_rectf_t* dst,
                                               const my_color_t* bg) {
   return vg->vtable->draw_image(vg, rgba, w, h, dst, bg);
+}
+
+static inline my_ret_t my_vgcanvas_set_line_cap(my_vgcanvas_t* vg,
+                                                my_line_cap_t cap) {
+  return vg->vtable->set_line_cap(vg, cap);
+}
+
+static inline my_ret_t my_vgcanvas_set_line_join(my_vgcanvas_t* vg,
+                                                 my_line_join_t join) {
+  return vg->vtable->set_line_join(vg, join);
 }
 
 #endif /* MY_VGCANVAS_H */

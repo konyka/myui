@@ -8,6 +8,7 @@
 
 #include "myc/my_str.h"
 #include "myui/my_window.h"
+#include "myui/widgets/my_scroll_bar.h"
 
 #define TA_PAD_X 4
 #define TA_PAD_Y 3
@@ -225,6 +226,59 @@ static void user_delete_range(my_text_area_t* ta, size_t start, size_t end) {
 
 /* ---------------- scrolling ---------------- */
 
+static int32_t ta_line_height(const my_text_area_t* ta) {
+  int32_t line_h = ta->font != NULL
+                       ? my_font_line_height(ta->font, ta->font_size)
+                       : ta->font_size;
+  return line_h > 0 ? line_h : 16;
+}
+
+static void ta_sync_scroll_bar(my_text_area_t* ta) {
+  my_widget_t* w = (my_widget_t*)ta;
+  int32_t content, max;
+  if (ta->scroll_bar == NULL) {
+    return;
+  }
+  content = (int32_t)ta_line_count(ta) * ta_line_height(ta);
+  max = content - (w->rect.h - 2 * TA_PAD_Y);
+  if (max < 0) {
+    max = 0;
+  }
+  my_scroll_bar_set_page_size(
+      ta->scroll_bar, content > 0
+                          ? (float)(w->rect.h - 2 * TA_PAD_Y) / (float)content
+                          : 1.0f);
+  my_scroll_bar_set_value(ta->scroll_bar,
+                          max > 0 ? (float)ta->scroll_y / (float)max : 0.0f);
+}
+
+static void ta_on_scroll_bar_changed(void* ctx, const char* event, void* data) {
+  my_text_area_t* ta = (my_text_area_t*)ctx;
+  int32_t max = (int32_t)ta_line_count(ta) * ta_line_height(ta) -
+                (((my_widget_t*)ta)->rect.h - 2 * TA_PAD_Y);
+  (void)event;
+  (void)data;
+  if (max < 0) {
+    max = 0;
+  }
+  ta->scroll_y = (int32_t)(my_scroll_bar_get_value(ta->scroll_bar) * (float)max);
+  ta_sync_scroll_bar(ta);
+  my_widget_invalidate((my_widget_t*)ta, NULL);
+}
+
+my_ret_t my_text_area_set_scroll_bar(my_widget_t* area, my_widget_t* bar) {
+  my_text_area_t* ta = (my_text_area_t*)area;
+  if (area == NULL) {
+    return MY_RET_INVALID_PARAMS;
+  }
+  ta->scroll_bar = bar;
+  if (bar != NULL) {
+    my_widget_on(bar, "changed", ta_on_scroll_bar_changed, ta);
+  }
+  ta_sync_scroll_bar(ta);
+  return MY_RET_OK;
+}
+
 static void ta_ensure_visible(my_text_area_t* ta) {
   my_widget_t* w = (my_widget_t*)ta;
   int32_t line_h = ta->font != NULL
@@ -254,6 +308,7 @@ static void ta_ensure_visible(my_text_area_t* ta) {
       ta->scroll_x = cy - inner_w;
     }
   }
+  ta_sync_scroll_bar(ta);
 }
 
 /* ---------------- key handling ---------------- */

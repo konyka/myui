@@ -233,6 +233,93 @@ static void test_stroke_width_precise(void) {
   my_lcd_destroy(lcd);
 }
 
+static void test_round_cap_pixels_beyond_endpoint(void) {
+  my_lcd_t* lcd = my_lcd_mem_create(NULL, 40, 40, MY_PIXEL_FORMAT_BGRA8888);
+  my_vgcanvas_t* vg = my_vgcanvas_soft_create(NULL, lcd);
+  bool found = false;
+  int32_t x, y;
+
+  my_vgcanvas_set_line_width(vg, 6);
+  my_vgcanvas_set_stroke_color(vg, my_color_rgb(255, 255, 255));
+
+  /* BUTT first: nothing beyond the endpoint x=30 */
+  my_vgcanvas_begin_frame(vg, NULL);
+  my_vgcanvas_begin_path(vg);
+  my_vgcanvas_move_to(vg, 6, 20);
+  my_vgcanvas_line_to(vg, 30, 20);
+  my_vgcanvas_stroke(vg);
+  my_vgcanvas_end_frame(vg);
+  TEST_ASSERT_EQ_INT(px_r(lcd, 33, 20), 0);
+
+  my_vgcanvas_set_line_cap(vg, MY_LINE_CAP_ROUND);
+  my_vgcanvas_begin_frame(vg, NULL);
+  my_vgcanvas_begin_path(vg);
+  my_vgcanvas_move_to(vg, 6, 20);
+  my_vgcanvas_line_to(vg, 30, 20);
+  my_vgcanvas_stroke(vg);
+  my_vgcanvas_end_frame(vg);
+  for (y = 16; y <= 24 && !found; y++) {
+    for (x = 31; x <= 36 && !found; x++) {
+      if (px_r(lcd, x, y) > 0) {
+        found = true;
+      }
+    }
+  }
+  TEST_ASSERT(found); /* round cap extends past the endpoint */
+
+  my_vgcanvas_destroy(vg);
+  my_lcd_destroy(lcd);
+}
+
+static void test_round_join_has_pixels_at_corner(void) {
+  my_lcd_t* lcd = my_lcd_mem_create(NULL, 40, 40, MY_PIXEL_FORMAT_BGRA8888);
+  my_vgcanvas_t* vg = my_vgcanvas_soft_create(NULL, lcd);
+  bool found = false;
+  int32_t x, y;
+
+  my_vgcanvas_set_line_width(vg, 6);
+  my_vgcanvas_set_line_join(vg, MY_LINE_JOIN_ROUND);
+  my_vgcanvas_set_stroke_color(vg, my_color_rgb(255, 255, 255));
+  my_vgcanvas_begin_frame(vg, NULL);
+  my_vgcanvas_begin_path(vg);
+  my_vgcanvas_move_to(vg, 6, 20);
+  my_vgcanvas_line_to(vg, 26, 20);
+  my_vgcanvas_line_to(vg, 26, 34);
+  my_vgcanvas_stroke(vg);
+  my_vgcanvas_end_frame(vg);
+
+  /* round join: the outer corner of the (26,20) vertex is filled */
+  for (y = 14; y <= 20 && !found; y++) {
+    for (x = 27; x <= 33 && !found; x++) {
+      if (px_r(lcd, x, y) > 0) {
+        found = true;
+      }
+    }
+  }
+  TEST_ASSERT(found);
+
+  my_vgcanvas_destroy(vg);
+  my_lcd_destroy(lcd);
+}
+
+static void test_cap_join_state_save_restore(void) {
+  my_lcd_t* lcd = my_lcd_mem_create(NULL, 8, 8, MY_PIXEL_FORMAT_BGRA8888);
+  my_vgcanvas_t* vg = my_vgcanvas_soft_create(NULL, lcd);
+  my_vgcanvas_set_line_cap(vg, MY_LINE_CAP_ROUND);
+  my_vgcanvas_save(vg);
+  my_vgcanvas_set_line_cap(vg, MY_LINE_CAP_BUTT);
+  my_vgcanvas_restore(vg);
+  /* restored: cap is ROUND again (draws without crashing) */
+  my_vgcanvas_set_line_width(vg, 2);
+  my_vgcanvas_begin_path(vg);
+  my_vgcanvas_move_to(vg, 2, 4);
+  my_vgcanvas_line_to(vg, 6, 4);
+  my_vgcanvas_stroke(vg);
+  my_vgcanvas_destroy(vg);
+  my_lcd_destroy(lcd);
+  TEST_ASSERT(1);
+}
+
 MYTEST_MAIN_BEGIN()
   MYTEST_RUN(test_diagonal_edge_has_intermediate_pixels);
   MYTEST_RUN(test_aa_off_has_no_intermediate_pixels);
@@ -242,4 +329,7 @@ MYTEST_MAIN_BEGIN()
   MYTEST_RUN(test_near_horizontal_edge_y_aa);
   MYTEST_RUN(test_stroke_diagonal_has_aa);
   MYTEST_RUN(test_stroke_width_precise);
+  MYTEST_RUN(test_round_cap_pixels_beyond_endpoint);
+  MYTEST_RUN(test_round_join_has_pixels_at_corner);
+  MYTEST_RUN(test_cap_join_state_save_restore);
 MYTEST_MAIN_END()
