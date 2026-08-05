@@ -149,3 +149,8 @@ PAL port 矩阵：
 | progress_bar | value [0,100]（展示型，OneWay 友好） |
 
 均可经 widget_target 绑定（text/visible/enable/x,y,w,h/value/hint）。
+
+## XML UI 加载器（M8a）
+
+- `my_xml.h/.c`：自研最小 XML parser（零依赖）：元素/属性（单双引号）/文本/注释/CDATA/五预定义转义/自闭合；单根；不做 DTD/命名空间/实体全集（未知实体报错）。小 DOM（`my_xml_node`：name/attrs/children/text/line），错误带行列号。
+- `my_ui_loader.h/.c`（编译选项 `MYUI_UI_XML` 默认 ON）：标签→控件工厂注册表（`my_ui_loader_register`；内置 window/button/label/edit/checkbox/slider/progress_bar）；通用属性 name/x/y/w/h/visible/enable/lp/layout 由 loader 统一应用，控件特有属性（text/hint/password/min/max/step/value/checked...）由工厂自取；`v:*` 属性按 `name=value;` 拼进 `bind_rules`（my_mvvm_bind 直接消费）；`<style>` 文本段喂给窗口 theme；`my_ui_load_str/my_ui_load_file`，未知标签报错带行号。demo_mvvm 主页已 XML 驱动。

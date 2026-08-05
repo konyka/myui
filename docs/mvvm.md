@@ -143,3 +143,17 @@ mc = my_mvvm_bind(wm, win, vm);   /* 之后一切自动 */
 | 容器 widget | items={arr, ItemTemplate=..} | array vm | 列表重建 |
 
 命令绑定：任意有 emitter 事件的控件（button "click"、edit "activate" 等），`v:on_<event>={cmd, Args=.., CloseWindow=.., ToPage=..}`。
+
+## XML 中的 v:* 绑定（M8a）
+
+```xml
+<window w="800" h="480" title="demo" layout="linear:v:8">
+  <style>button[ok].normal.bg_color=#A5D6A7</style>
+  <label name="count" lp="h:32" v:text="{count, Converter=int_to_str}"/>
+  <edit hint="your name" v:text="{name, Mode=TwoWay, Validator=not_empty}"/>
+  <button text="submit" v:on_click="{submit}"/>
+  <widget name="list" v:items="{persons, ItemTemplate=person_row}"/>
+</window>
+```
+
+所有 `v:` 前缀属性原样（含 `{}`）拼入 widget 的 bind_rules，`my_mvvm_bind(wm, win, vm)` 之后全自动。注意属性值必须加引号（XML 规则）。

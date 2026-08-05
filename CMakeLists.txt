@@ -8,6 +8,7 @@ project(myui VERSION 0.1.0 LANGUAGES C)
 option(MYUI_BUILD_TESTS "Build unit tests" ON)
 option(MYUI_BUILD_DEMOS "Build demos" ON)
 option(MYUI_FONT_STB "TrueType fonts via stb_truetype (OFF = bitmap font only)" ON)
+option(MYUI_UI_XML "XML UI loader (OFF trims parser + loader)" ON)
 set(MYUI_C_STANDARD "99" CACHE STRING "C standard to compile with (99/11/17/23)")
 set_property(CACHE MYUI_C_STANDARD PROPERTY STRINGS 99 11 17 23)
 

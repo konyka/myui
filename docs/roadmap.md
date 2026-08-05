@@ -13,4 +13,6 @@
 - **M7b edit 输入控件** ✅ 已完成：my_edit 单行输入（UTF-8 光标/选区/hint/readonly/max_len/password/点击定位/水平滚动）；分发器焦点切换发 focus/blur 事件；widget_target 映射 edit text/hint；MVVM TwoWay 表单端到端（键入→vm、vm→edit、validator 拒绝恢复）；demo_mvvm 真实表单（name edit + submit + greeting label）。
 - **M7c alpha 混合 + 抗锯齿** ✅ 已完成：fill_rect 全量 src-over（a<255 混合、a=255 快速路径，RGB565 展开-重打包，像素级公式断言）；soft 路径/圆角 x 向 4 子采样覆盖率 AA（运行时开关默认开，y 向不采样的权衡已注明）；GLES src-over 冒烟通过；golden 基准策略（旧场景 AA off、新增 AA 场景）。bench（-O0）：半透明矩形 2.03ms/帧、路径 AA on 1.00ms vs off 0.68ms。
 - **M7d 基础控件** ✅ 已完成：checkbox（两态+mixed 显示、对勾 stroke 绘制、value 可绑）、slider（grab 拖动/轨道点击/min-max-step、value 可绑）、progress_bar（展示型 OneWay）；widget_target 三控件 value 映射；slider↔progress MVVM 联动 e2e；demo_widgets 扩充（checkbox/slider/progress 一行，dummy dump 目检）。
-- **M7 完成**。M8+ 候选：XML UI 加载器、多行编辑、IME 与剪贴板、列表虚拟化、GLES AA 与 y 向 AA、文字 shaping、自定义 converter/validator 开放注册。**待有 SDK 环境**：iOS(uikit)、HarmonyOS、Android、Web、win32/sdl2 port、Metal backend、FreeBSD/linux_fb 实机复核。
+- **M7 完成**。
+- **M8a XML UI 加载器** ✅ 已完成：自研零依赖 XML parser（小 DOM、错误行列号、全套畸形输入测试）；UI 加载器（控件工厂注册表、布局/lp/v:*/style 内联、`MYUI_UI_XML` 可裁剪）；demo_mvvm 主页 XML 驱动。
+- **M8b+ 候选**：list_view 虚拟化、image 控件（stb_image）、y 向 AA 与 stroke AA、剪贴板 + edit Ctrl+C/X/V、光标闪烁、多行编辑、文字 shaping、converter/validator 开放注册、XML→C 生成器。**待有 SDK 环境**：iOS(uikit)、HarmonyOS、Android、Web、win32/sdl2 port、Metal backend、FreeBSD/linux_fb 实机复核。

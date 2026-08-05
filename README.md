@@ -9,6 +9,7 @@
 - **字体系统**：stb_truetype（TTF + LRU 字形缓存）+ 内置 8x8 位图字体兜底（`MYUI_FONT_STB=OFF` 嵌入式裁剪），soft/GLES2 双 backend 文本渲染
 - **控件系统**：引用计数控件树、linear 布局（px/%/flex）、事件分发（grab/焦点）、主题样式（文本加载）、属性动画、脏矩形局部重绘；内置 button/label/edit（单行输入）/checkbox/slider/progress_bar
 - **MVVM**：data/command/items/condition 绑定、converter/validator、navigator、声明式规则字符串，UI 适配经 binding_target 抽象（base 可独立单测）
+- **XML UI 加载器**：自研零依赖 parser + 控件工厂注册表，`v:*` 绑定/主题/布局内联，可裁剪（`MYUI_UI_XML=OFF`）
 - **TDD**：自研 mytest 最小框架，35 个 ctest 全绿；golden-image 渲染回归；性能基线（50 按钮全帧 2.25ms）
 
 ## 平台状态

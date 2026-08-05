@@ -101,3 +101,11 @@ cmake -S . -B build -DMYUI_FONT_STB=OFF -DMYUI_PAL=linux_fb
 - `MYUI_FONT_STB=OFF`：去掉 stb_truetype 与 TTF 加载（`my_font_stb_create` 返回 NULL），文本全部走内置 8x8 位图字体（约 760 字节数据）。
 - 渲染只保留 software backend + my_lcd_mem（或 from_buffer 直包显存）。
 - 该配置下 dummy/linux_fb 测试与全部控件可用；无字体依赖、无文件系统依赖。
+
+## 裁剪矩阵（M8a 更新）
+
+| 选项 | 默认 | OFF 的效果 |
+|------|------|-----------|
+| MYUI_FONT_STB | ON | 去掉 TTF/stb_truetype，只留内置 8x8 位图字体 |
+| MYUI_UI_XML | ON | 去掉 XML parser + UI 加载器（代码建 UI 或留 XML→C 生成器 TODO） |
+| MYUI_BUILD_TESTS/DEMOS | ON | 构建裁剪 |

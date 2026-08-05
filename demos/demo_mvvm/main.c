@@ -12,6 +12,9 @@
 
 #include "mymvvm/my_view_model_array.h"
 #include "mymvvm_myui/my_mvvm.h"
+#include "myui/my_ui_loader.h"
+
+#include "myc/my_str.h"
 #include "myui/widgets/my_button.h"
 #include "myui/widgets/my_edit.h"
 #include "myui/widgets/my_label.h"
@@ -165,16 +168,6 @@ static my_window_t* detail_page(my_pal_t* pal, const char* args, void* ctx) {
 
 /* ---------------- main page ---------------- */
 
-static my_widget_t* add_btn(my_widget_t* parent, const char* text,
-                            const char* rules, int32_t x, int32_t y, int32_t w) {
-  my_widget_t* b = my_button_create(NULL, text);
-  my_widget_set_rect(b, &(my_rect_t){x, y, w, 36});
-  my_widget_set_bind_rules(b, rules);
-  my_widget_add_child(parent, b);
-  my_widget_unref(b);
-  return b;
-}
-
 static my_ret_t on_submit(void* ctx, const char* args) {
   my_view_model_t* vm = (my_view_model_t*)ctx;
   my_value_t v;
@@ -196,42 +189,44 @@ static my_ret_t on_submit(void* ctx, const char* args) {
   return MY_RET_OK;
 }
 
-static void build_ui(app_t* app) {
-  my_widget_t* root = my_window_widget(app->win);
-  my_widget_t* count_label = my_label_create(NULL, "0");
-  my_widget_t* list = my_widget_create(NULL, "list");
-  my_widget_t* name_edit = my_edit_create(NULL);
-  my_widget_t* greet = my_label_create(NULL, "-");
+static const char* MAIN_PAGE_XML =
+    "<window w=\"800\" h=\"480\" title=\"myui demo_mvvm\">"
+    "<style>"
+    "button[ok].normal.bg_color=#A5D6A7 "
+    "</style>"
+    "<label name=\"count\" x=\"20\" y=\"20\" w=\"200\" h=\"32\" "
+    "v:text=\"{count, Converter=int_to_str}\"/>"
+    "<button x=\"20\" y=\"64\" w=\"90\" h=\"36\" text=\"+1\" "
+    "v:on_click=\"{inc}\"/>"
+    "<button x=\"120\" y=\"64\" w=\"90\" h=\"36\" text=\"-1\" "
+    "v:on_click=\"{dec}\"/>"
+    "<button x=\"240\" y=\"64\" w=\"120\" h=\"36\" text=\"detail\" "
+    "v:on_click=\"{goto, ToPage=detail}\"/>"
+    "<widget name=\"list\" x=\"20\" y=\"120\" w=\"300\" h=\"200\" "
+    "v:items=\"{persons, ItemTemplate=person_row}\"/>"
+    "<edit x=\"20\" y=\"380\" w=\"240\" h=\"32\" hint=\"your name\" "
+    "v:text=\"{name, Mode=TwoWay, Validator=not_empty}\"/>"
+    "<button x=\"280\" y=\"380\" w=\"120\" h=\"36\" text=\"submit\" "
+    "v:on_click=\"{submit}\"/>"
+    "<label x=\"420\" y=\"380\" w=\"240\" h=\"32\" v:text=\"{greeting}\"/>"
+    "</window>";
 
-  /* form row: name edit (TwoWay + validator) + submit button */
-  my_widget_set_rect(name_edit, &(my_rect_t){20, 380, 240, 32});
-  my_edit_set_hint(name_edit, "your name");
-  my_edit_set_font(name_edit, app->font, 16);
-  my_widget_set_bind_rules(name_edit,
-                           "v:text={name, Mode=TwoWay, Validator=not_empty}");
-  my_widget_add_child(root, name_edit);
-  my_widget_unref(name_edit);
-
-  add_btn(root, "submit", "v:on_click={submit}", 280, 380, 120);
-
-  my_widget_set_rect(greet, &(my_rect_t){420, 380, 240, 32});
-  my_widget_set_bind_rules(greet, "v:text={greeting}");
-  my_widget_add_child(root, greet);
-  my_widget_unref(greet);
-
-  my_widget_set_rect(count_label, &(my_rect_t){20, 20, 200, 32});
-  my_widget_set_bind_rules(count_label, "v:text={count, Converter=int_to_str}");
-  my_widget_add_child(root, count_label);
-  my_widget_unref(count_label);
-
-  add_btn(root, "+1", "v:on_click={inc}", 20, 64, 90);
-  add_btn(root, "-1", "v:on_click={dec}", 120, 64, 90);
-  add_btn(root, "detail", "v:on_click={goto, ToPage=detail}", 240, 64, 120);
-
-  my_widget_set_rect(list, &(my_rect_t){20, 120, 300, 200});
-  my_widget_set_bind_rules(list, "v:items={persons, ItemTemplate=person_row}");
-  my_widget_add_child(root, list);
-  my_widget_unref(list);
+static my_window_t* build_ui_xml(app_t* app) {
+  my_widget_t* win = my_ui_load_str(NULL, app->pal, MAIN_PAGE_XML, NULL);
+  if (win == NULL) {
+    return NULL;
+  }
+  {
+    /* the edit needs a font for click-to-locate measuring */
+    size_t i, n = my_widget_child_count(win);
+    for (i = 0; i < n; i++) {
+      my_widget_t* c = my_widget_get_child(win, i);
+      if (my_str_eq(c->widget_type, "edit")) {
+        my_edit_set_font(c, app->font, 16);
+      }
+    }
+  }
+  return (my_window_t*)win;
 }
 
 #ifdef MYUI_PAL_DUMMY
@@ -307,10 +302,13 @@ int main(void) {
   row_ctx.loop = app.loop;
   my_mvvm_register_template("person_row", build_person_row, &row_ctx);
 
-  app.win = my_window_create(NULL, app.pal, 800, 480, "myui demo_mvvm");
   app.font = create_default_font();
+  app.win = build_ui_xml(&app);
+  if (app.win == NULL) {
+    fprintf(stderr, "demo_mvvm: failed to load XML UI\n");
+    return 1;
+  }
   my_window_set_font(app.win, app.font, 16);
-  build_ui(&app);
   my_window_manager_open(app.wm, app.win);
   app.mc = my_mvvm_bind(app.wm, app.win, app.vm);
   my_widget_unref(my_window_widget(app.win));
