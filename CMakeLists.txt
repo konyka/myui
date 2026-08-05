@@ -69,6 +69,10 @@ add_subdirectory(src/myui)
 add_subdirectory(src/mymvvm)
 add_subdirectory(src/mymvvm_myui)
 
+# ui2c generator (host tool; see tests for the golden equivalence check)
+add_executable(ui2c tools/ui2c.c)
+target_link_libraries(ui2c PRIVATE myui)
+
 if(MYUI_BUILD_TESTS)
   enable_testing()
   add_subdirectory(tests)

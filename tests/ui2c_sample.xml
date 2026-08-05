@@ -1,0 +1,12 @@
+<window w="320" h="240" title="ui2c sample" layout="linear:v:4">
+  <style>button.normal.bg_color=#FF4081</style>
+  <label name="title" lp="h:24" text="hello" v:text="{title}"/>
+  <widget lp="h:40" layout="linear:h:8">
+    <button text="OK" lp="w:80 h:32" v:on_click="{save}"/>
+    <slider lp="w:1f h:24" min="0" max="10" step="1" value="5"/>
+  </widget>
+  <progress_bar lp="h:12" value="40"/>
+  <checkbox text="agree" checked="true"/>
+  <edit hint="name" lp="h:28"/>
+  <label lp="h:20" visible="false"/>
+</window>

@@ -46,6 +46,7 @@ typedef struct x11_pal_t {
   Atom atom_clipboard;
   Atom atom_utf8;
   Atom atom_targets;
+  Atom atom_clip_prop;
 } x11_pal_t;
 
 /* ---------------- window ---------------- */
@@ -669,16 +670,100 @@ static my_ret_t x11_clipboard_set(my_pal_t* pal, const char* text) {
   return MY_RET_OK;
 }
 
+/**
+ * @brief Fetch from an EXTERNAL selection owner: XConvertSelection +
+ * synchronous wait for SelectionNotify (~500ms). Other events are
+ * dispatched normally while waiting (reentrancy-safe: the app handler
+ * may paint/post; INCR incremental transfer is a TODO).
+ */
+static my_ret_t x11_clipboard_fetch(x11_pal_t* p, Atom target, char* buf,
+                                    size_t size) {
+  Display* dpy = p->display;
+  x11_window_t* w = (x11_window_t*)my_darray_get(p->windows, 0);
+  Atom prop = p->atom_clip_prop;
+  uint64_t deadline = x11_now_ms() + 500;
+  if (w == NULL) {
+    return MY_RET_NOT_FOUND;
+  }
+  XDeleteProperty(dpy, w->xwin, prop);
+  XConvertSelection(dpy, p->atom_clipboard, target, prop, w->xwin,
+                    CurrentTime);
+  while (x11_now_ms() < deadline) {
+    while (XPending(dpy) > 0) {
+      XEvent ev;
+      XNextEvent(dpy, &ev);
+      if (ev.type == SelectionNotify &&
+          ev.xselection.selection == p->atom_clipboard) {
+        if (ev.xselection.property == None) {
+          return MY_RET_NOT_SUPPORTED; /* owner cannot provide this target */
+        }
+        {
+          Atom actual;
+          int format;
+          unsigned long nitems, remaining;
+          unsigned char* data = NULL;
+          my_ret_t ret = MY_RET_FAIL;
+          if (XGetWindowProperty(dpy, w->xwin, prop, 0, 1 << 20, True,
+                                 AnyPropertyType, &actual, &format, &nitems,
+                                 &remaining, &data) == Success &&
+              data != NULL) {
+            size_t n = nitems < size - 1 ? nitems : size - 1;
+            memcpy(buf, data, n);
+            buf[n] = '\0';
+            XFree(data);
+            ret = MY_RET_OK;
+          } else if (data != NULL) {
+            XFree(data);
+          }
+          return ret;
+        }
+      } else {
+        x11_dispatch(p, &ev); /* keep the app responsive while waiting */
+      }
+    }
+    {
+      struct timeval tv;
+      fd_set rfds;
+      int fd = ConnectionNumber(dpy);
+      tv.tv_sec = 0;
+      tv.tv_usec = 10000;
+      FD_ZERO(&rfds);
+      FD_SET(fd, &rfds);
+      select(fd + 1, &rfds, NULL, NULL, &tv);
+    }
+  }
+  return MY_RET_NOT_FOUND; /* timeout */
+}
+
 static my_ret_t x11_clipboard_get(my_pal_t* pal, char* buf, size_t size) {
   x11_pal_t* p = (x11_pal_t*)pal;
+  Window owner;
   if (buf == NULL || size == 0) {
     return MY_RET_INVALID_PARAMS;
   }
-  if (p->clipboard == NULL) {
+  owner = XGetSelectionOwner(p->display, p->atom_clipboard);
+  if (owner != None && p->clipboard != NULL) {
+    /* we own it (or owned it recently): serve the cache */
+    size_t i, n = my_darray_size(p->windows);
+    bool ours = false;
+    for (i = 0; i < n; i++) {
+      if (((x11_window_t*)my_darray_get(p->windows, i))->xwin == owner) {
+        ours = true;
+      }
+    }
+    if (ours) {
+      snprintf(buf, size, "%s", p->clipboard);
+      return MY_RET_OK;
+    }
+  }
+  if (owner == None) {
     return MY_RET_NOT_FOUND;
   }
-  snprintf(buf, size, "%s", p->clipboard);
-  return MY_RET_OK;
+  /* external owner: prefer UTF8_STRING, fall back to STRING */
+  if (x11_clipboard_fetch(p, p->atom_utf8, buf, size) == MY_RET_OK) {
+    return MY_RET_OK;
+  }
+  return x11_clipboard_fetch(p, XA_STRING, buf, size);
 }
 
 static void x11_pal_destroy(my_pal_t* pal) {
@@ -716,6 +801,7 @@ my_pal_t* my_pal_x11_create(const my_allocator_t* allocator) {
   p->atom_clipboard = XInternAtom(display, "CLIPBOARD", False);
   p->atom_utf8 = XInternAtom(display, "UTF8_STRING", False);
   p->atom_targets = XInternAtom(display, "TARGETS", False);
+  p->atom_clip_prop = XInternAtom(display, "MYUI_CLIP_PROP", False);
   p->windows = my_darray_create(allocator, 0);
   if (p->windows == NULL) {
     XCloseDisplay(display);

@@ -183,3 +183,8 @@ PAL port 矩阵：
 - `my_scroll_bar`：value [0,1] + page_size [0,1]（滑块长，min 16px）；滑块拖拽（grab）、轨道点击翻页；"changed" 事件。容器显式挂接：`my_list_view_set_scroll_bar(lv, bar)` / `my_text_area_set_scroll_bar(ta, bar)`——双向同步（容器滚动 → value/page_size 更新；bar 拖拽 → 容器 offset 更新，无事件回环）。
 - list_view 变高行：adapter vtable 增加 `row_height(index)`（NULL = 固定行高，M8b 行为零回归）。变高模式用**前缀和缓存**（darray 存累计高度，滚动到哪儿惰性算到哪儿）；总高在未测完全部行数前用"已测部分 + 未测部分×已见平均高"估算（滚动条位置轻微非线性，Android ListView 式常规取舍，头注释说明）；可视区间二分查找 + 前向累计，回收复用逻辑不变。
 - stroke 圆 cap/join：`my_vgcanvas_set_line_cap/join`（BUTT/ROUND、MITER/ROUND，入 save/restore 状态）。soft 实现为 lw/2 圆盘点（cap 取端点、join 取内部顶点），走覆盖率路径自动 AA；关节处相邻段与圆盘重叠区域对半透明描边有轻微过混合（接受并注释，合并单轮廓是 TODO）；GLES 端存状态不生效（TODO）。
+
+## ui2c 与剪贴板协议收尾（M9d）
+
+- `tools/ui2c`：XML→C 生成器（宿主工具，输出 `my_widget_t* fn(allocator, pal)` 构建函数；golden 等价测试保证与运行时加载逐节点一致）；嵌入式走 `MYUI_UI_XML=OFF` + 离线生成 = 零解析开销零 parser 代码（见 porting.md）。
+- x11 剪贴板外部获取：`clipboard_get_text` 在 owner 为外部时 `XConvertSelection`（UTF8_STRING→STRING 回退）+ ~500ms 同步等待 SelectionNotify，等待期间其他事件照常分发（重入安全）；INCR 增量传输未做（TODO）。

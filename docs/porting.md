@@ -114,3 +114,15 @@ cmake -S . -B build -DMYUI_FONT_STB=OFF -DMYUI_PAL=linux_fb
 ## 剪贴板实现要点（M8c 新增 port 须知）
 
 pal vtable 的最后两项 `clipboard_set_text/get_text`：嵌入式/单窗口系统用内存字符串即可（照 dummy 10 行）；桌面系统注意 selection 是"惰性提供"协议（x11 参考实现含 SelectionRequest 应答样板；从外部获取需事件泵重入，建议照 x11 先实现本应用内往返）。
+
+## 嵌入式零解析路径（M9d：XML→C 生成器）
+
+不想带 XML parser 的目标：`MYUI_UI_XML=OFF` 编译框架（无 parser 代码），用宿主工具离线生成 C：
+
+```sh
+cmake --build build -t ui2c
+./build/ui2c my_page.xml my_page_create > my_page.c   # 编进应用
+# my_widget_t* w = my_page_create(MY_ALLOCATOR, pal);  与 my_ui_load_str 完全等价
+```
+
+tests/ui2c_sample.xml 的 golden 等价测试（运行时加载 vs 生成代码构建，逐节点递归比对）保证两条路径一致。

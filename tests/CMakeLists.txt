@@ -5,6 +5,7 @@ file(GLOB MYUI_TEST_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/*_tes
 set(MYUI_X11_TESTS
   "${CMAKE_CURRENT_SOURCE_DIR}/my_pal_x11_keymap_test.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/x11_smoke_test.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/x11_clipboard_external_test.c"
 )
 # gles2 smoke test needs EGL+GLES2 dev libraries
 set(MYUI_GLES2_TESTS
@@ -79,6 +80,21 @@ if(UNIX)
     add_test(NAME ${test_name} COMMAND ${test_name})
   endforeach()
 endif()
+
+# ui2c golden equivalence: generate C from a sample XML at build time and
+# compile it into the test binary
+set(UI2C_SAMPLE_XML ${CMAKE_CURRENT_SOURCE_DIR}/ui2c_sample.xml)
+set(UI2C_SAMPLE_C ${CMAKE_CURRENT_BINARY_DIR}/ui2c_sample_page.c)
+add_custom_command(
+  OUTPUT ${UI2C_SAMPLE_C}
+  COMMAND ui2c ${UI2C_SAMPLE_XML} ui2c_sample_create > ${UI2C_SAMPLE_C}
+  DEPENDS ui2c ${UI2C_SAMPLE_XML}
+  COMMENT "ui2c: generating ${UI2C_SAMPLE_C}")
+add_custom_target(ui2c_sample_gen DEPENDS ${UI2C_SAMPLE_C})
+add_dependencies(my_ui_loader_test ui2c_sample_gen)
+target_compile_definitions(my_ui_loader_test
+  PRIVATE MY_UI2C_SAMPLE_C="${UI2C_SAMPLE_C}"
+          MY_UI2C_SAMPLE_XML="${UI2C_SAMPLE_XML}")
 
 # image test needs 3rd/ include for stb_image_write
 target_include_directories(my_image_test PRIVATE ${CMAKE_SOURCE_DIR}/3rd)
