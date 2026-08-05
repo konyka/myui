@@ -61,6 +61,15 @@ static void test_x11_smoke(void) {
   my_pal_main_loop_add_timer(loop, on_quit_timer, loop, 100);
   TEST_ASSERT_EQ_INT(my_pal_main_loop_run(loop), MY_RET_OK);
 
+  /* clipboard: in-app roundtrip (owns CLIPBOARD selection) */
+  {
+    char cbuf[64];
+    TEST_ASSERT_EQ_INT(my_pal_clipboard_set_text(pal, "myui-x11"), MY_RET_OK);
+    TEST_ASSERT_EQ_INT(my_pal_clipboard_get_text(pal, cbuf, sizeof(cbuf)),
+                       MY_RET_OK);
+    TEST_ASSERT_EQ_STR(cbuf, "myui-x11");
+  }
+
   my_vgcanvas_destroy(vg);
   my_pal_main_loop_destroy(loop);
   my_pal_window_destroy(win);

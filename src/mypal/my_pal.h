@@ -155,6 +155,13 @@ typedef struct my_pal_vtable_t {
   /** @brief Register the single application event handler. */
   my_ret_t (*set_event_handler)(my_pal_t* pal, my_pal_event_handler_t handler,
                                 void* ctx);
+  /**
+   * @brief Clipboard (M8c). set stores UTF-8 text; get copies into buf
+   * (returns MY_RET_NOT_FOUND when empty, MY_RET_NOT_SUPPORTED when the
+   * port has no clipboard integration yet).
+   */
+  my_ret_t (*clipboard_set_text)(my_pal_t* pal, const char* text);
+  my_ret_t (*clipboard_get_text)(my_pal_t* pal, char* buf, size_t size);
   void (*destroy)(my_pal_t* pal);
 } my_pal_vtable_t;
 
@@ -181,6 +188,16 @@ static inline my_ret_t my_pal_set_event_handler(my_pal_t* pal,
                                                 my_pal_event_handler_t handler,
                                                 void* ctx) {
   return pal->vtable->set_event_handler(pal, handler, ctx);
+}
+
+static inline my_ret_t my_pal_clipboard_set_text(my_pal_t* pal,
+                                                 const char* text) {
+  return pal->vtable->clipboard_set_text(pal, text);
+}
+
+static inline my_ret_t my_pal_clipboard_get_text(my_pal_t* pal, char* buf,
+                                                 size_t size) {
+  return pal->vtable->clipboard_get_text(pal, buf, size);
 }
 
 static inline void my_pal_destroy(my_pal_t* pal) {

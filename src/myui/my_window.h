@@ -18,6 +18,7 @@ typedef struct my_window_t {
   my_widget_t base;                  /**< root widget of the window */
   const my_allocator_t* allocator;
   my_pal_t* pal;                     /**< borrowed */
+  my_pal_main_loop_t* loop;          /**< borrowed; set by wm open (M8c) */
   my_pal_window_t* pal_window;       /**< owned */
   my_vgcanvas_t* vg;                 /**< soft backend, or injected (tests) */
   bool vg_owned;
@@ -51,6 +52,15 @@ void my_window_paint(my_window_t* win);
  * window. Paints immediately when the dispatch left the window dirty.
  */
 my_ret_t my_window_on_pal_event(my_window_t* win, const my_event_t* event);
+
+/**
+ * @brief The pal of the window at the root of widget's tree (NULL when
+ * the widget is not under a my_window root).
+ */
+my_pal_t* my_window_pal_of_widget(my_widget_t* widget);
+
+/** @brief The main loop of the window at the root (NULL when unknown). */
+my_pal_main_loop_t* my_window_loop_of_widget(my_widget_t* widget);
 
 /** @brief Test hook: use this vgcanvas instead of creating a soft one. */
 void my_window_set_vgcanvas(my_window_t* win, my_vgcanvas_t* vg);

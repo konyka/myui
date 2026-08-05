@@ -14,6 +14,7 @@
 #include "myr/my_vgcanvas_soft.h"
 
 #include <math.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -58,7 +59,7 @@ typedef struct my_vgcanvas_soft_t {
   size_t contour_cap;
 
   my_dirty_rects_t dirty;
-  bool antialias; /**< scanline coverage AA on path fills (M7c, default on) */
+  int antialias_level; /**< 0=off 1=x4 2=x4*y2 (M8c, default 2) */
 } my_vgcanvas_soft_t;
 
 /* ---------------- growable arrays ---------------- */
@@ -98,12 +99,12 @@ static void soft_fill_device_rect(my_vgcanvas_soft_t* s, my_rect_t r,
   }
 }
 
-/* ---------------- coverage anti-aliasing (M7c) ----------------
- * Horizontal 4x subsampling on scanline edges: each edge pixel gets a
- * coverage of 0..4 subsamples (centers at (2k+1)/8) and is blended
- * src-over with alpha = color.a * cov / 4. Vertical direction is NOT
- * subsampled (cost control; visually already much smoother). Straight
- * horizontal/vertical edges always have full coverage (no regression).
+/* ---------------- coverage anti-aliasing (M7c x, M8c +y) ----------------
+ * AA levels: 0 = off (pixel-center hard edges, M1 behavior),
+ * 1 = x-direction 4x subsampling (subsample centers (2k+1)/8),
+ * 2 = x4 x y2 (scanline evaluated at +0.25 and +0.75). Edge pixels blend
+ * src-over with alpha = color.a * cov / maxcov. Axis-aligned straight
+ * edges always have full coverage (no visual/perf regression).
  */
 
 /** @brief Coverage 0..4 of a left-edge pixel whose fraction is f. */
@@ -128,67 +129,244 @@ static int cov_right(float f) {
   return n;
 }
 
-/** @brief Blend one pixel with coverage (skips when outside the clip). */
-static void soft_blend_pixel(my_vgcanvas_soft_t* s, int32_t x, int32_t y,
-                             int cov, my_color_t color) {
-  const my_rect_t* clip = &s->state.clip;
-  my_color_t c = color;
-  if (cov <= 0 || x < clip->x || x >= clip->x + clip->w || y < clip->y ||
-      y >= clip->y + clip->h) {
+static int float_cmp(const void* a, const void* b);
+
+/** @brief Per-row coverage/alpha buffers for one fill call. */
+typedef struct aa_rowbuf_t {
+  uint8_t* cov;
+  uint8_t* alpha;
+} aa_rowbuf_t;
+
+static void aa_add(uint8_t* cov, int32_t idx, int n) {
+  int v = cov[idx] + n;
+  cov[idx] = (uint8_t)(v > 8 ? 8 : v);
+}
+
+/** @brief Accumulate x-coverage (0..4 per pixel) of span [xl,xr] into cov. */
+static void span_accum(uint8_t* cov, int32_t base_x,
+                       int32_t width, float xl, float xr) {
+  int32_t x0 = base_x, x1 = base_x + width;
+  float fxl, fxr;
+  int32_t lpix, rpix, p;
+  if (xr <= xl) {
     return;
   }
-  c.a = (uint8_t)((color.a * cov) / 4);
-  my_lcd_blend_span(s->lcd, x, y, &c.a, 1, c);
-  my_dirty_rects_add(&s->dirty, &(my_rect_t){x, y, 1, 1});
+  fxl = xl - floorf(xl);
+  fxr = xr - floorf(xr);
+  lpix = (int32_t)floorf(xl);
+  rpix = (int32_t)floorf(xr);
+  if (lpix == rpix) {
+    int k, n = 0;
+    for (k = 0; k < 4; k++) {
+      float c = (float)(2 * k + 1) / 8.0f;
+      if (c >= fxl && c <= fxr) {
+        n++;
+      }
+    }
+    if (lpix >= x0 && lpix < x1) {
+      aa_add(cov, lpix - x0, n);
+    }
+    return;
+  }
+  if (lpix >= x0 && lpix < x1) {
+    aa_add(cov, lpix - x0, cov_left(fxl));
+  }
+  for (p = lpix + 1; p <= rpix - 1; p++) {
+    if (p >= x0 && p < x1) {
+      aa_add(cov, p - x0, 4);
+    }
+  }
+  if (fxr > 0.0f && rpix >= x0 && rpix < x1) {
+    aa_add(cov, rpix - x0, cov_right(fxr));
+  }
+}
+
+/** @brief Emit one device row from the coverage buffer. */
+static void emit_row(my_vgcanvas_soft_t* s, aa_rowbuf_t* rb, int32_t y,
+                     int32_t base_x, int32_t width, int maxcov,
+                     my_color_t color) {
+  int32_t i = 0;
+  int32_t first = -1, last = -1;
+  while (i < width) {
+    if (rb->cov[i] == 0) {
+      i++;
+      continue;
+    }
+    if ((int)rb->cov[i] == maxcov) {
+      int32_t start = i;
+      while (i < width && (int)rb->cov[i] == maxcov) {
+        i++;
+      }
+      soft_fill_device_rect(s, my_rect_init(base_x + start, y, i - start, 1),
+                            color);
+      if (first < 0) {
+        first = start;
+      }
+      last = i;
+    } else {
+      int32_t start = i, n = 0;
+      while (i < width && rb->cov[i] > 0 && (int)rb->cov[i] < maxcov) {
+        rb->alpha[n++] = (uint8_t)((color.a * rb->cov[i]) / maxcov);
+        i++;
+      }
+      if (n > 0) {
+        my_lcd_blend_span(s->lcd, base_x + start, y, rb->alpha, n, color);
+      }
+      if (first < 0) {
+        first = start;
+      }
+      last = i;
+    }
+  }
+  if (first >= 0) {
+    my_dirty_rects_add(&s->dirty, &(my_rect_t){base_x + first, y,
+                                               last - first, 1});
+  }
+}
+
+/** @brief Collect even-odd scanline intersections at yc (device space). */
+static size_t collect_intersections(my_vgcanvas_soft_t* s,
+                                    const path_point_t* pts,
+                                    const contour_t* contours,
+                                    size_t ncontours, float yc, float* xs,
+                                    size_t cap) {
+  size_t nxs = 0, ci, i;
+  for (ci = 0; ci < ncontours; ci++) {
+    const contour_t* c = &contours[ci];
+    for (i = 0; i < c->count; i++) {
+      size_t j = i + 1;
+      float x0, y0, x1, y1;
+      if (j == c->count) {
+        if (!c->closed) {
+          break;
+        }
+        j = 0;
+      }
+      x0 = pts[c->start + i].x + s->state.tx;
+      y0 = pts[c->start + i].y + s->state.ty;
+      x1 = pts[c->start + j].x + s->state.tx;
+      y1 = pts[c->start + j].y + s->state.ty;
+      if ((y0 <= yc) != (y1 <= yc) && nxs < cap) {
+        xs[nxs++] = x0 + (yc - y0) * (x1 - x0) / (y1 - y0);
+      }
+    }
+  }
+  return nxs;
 }
 
 /**
- * @brief Fill one scanline span [xl, xr] (device y): opaque interior
- * [ceil(xl), floor(xr)-1], coverage-blended edge pixels when AA is on.
+ * @brief Fill a set of polygon contours (even-odd) with the current AA
+ * level. Core of soft_fill/soft_stroke (M8c: shared).
  */
-static void soft_fill_span(my_vgcanvas_soft_t* s, int32_t y, float xl,
-                           float xr, my_color_t color) {
-  if (!s->antialias) {
-    /* hard edge: pixel-center rule (M1 behavior) */
-    int32_t xa = (int32_t)ceilf(xl - 0.5f);
-    int32_t xb = (int32_t)ceilf(xr - 0.5f);
-    if (xb > xa) {
-      soft_fill_device_rect(s, my_rect_init(xa, y, xb - xa, 1), color);
-    }
-    return;
+static my_ret_t fill_polys(my_vgcanvas_soft_t* s, const path_point_t* pts,
+                           size_t npts, const contour_t* contours,
+                           size_t ncontours, my_color_t color) {
+  const my_rect_t* clip = &s->state.clip;
+  float* xs;
+  size_t xs_cap;
+  int32_t y;
+  if (npts < 2 || ncontours == 0 || clip->w <= 0 || clip->h <= 0) {
+    return MY_RET_OK;
   }
-  {
-    float fxl = xl - floorf(xl);
-    float fxr = xr - floorf(xr);
-    int32_t lpix = (int32_t)floorf(xl);
-    int32_t rpix = (int32_t)floorf(xr);
-    if (lpix == rpix) {
-      /* sub-pixel span: coverage of centers inside [fxl, fxr] */
-      int k, n = 0;
-      for (k = 0; k < 4; k++) {
-        float c = (float)(2 * k + 1) / 8.0f;
-        if (c >= fxl && c <= fxr) {
-          n++;
+  xs_cap = npts;
+  xs = (float*)my_mem_alloc(s->allocator, xs_cap * sizeof(float));
+  if (xs == NULL) {
+    return MY_RET_OOM;
+  }
+  if (s->antialias_level <= 0) {
+    /* hard edges: pixel-center rule */
+    for (y = clip->y; y < clip->y + clip->h; y++) {
+      size_t nxs = collect_intersections(s, pts, contours, ncontours,
+                                         (float)y + 0.5f, xs, xs_cap);
+      size_t k;
+      qsort(xs, nxs, sizeof(float), float_cmp);
+      for (k = 0; k + 1 < nxs; k += 2) {
+        int32_t xa = (int32_t)ceilf(xs[k] - 0.5f);
+        int32_t xb = (int32_t)ceilf(xs[k + 1] - 0.5f);
+        if (xb > xa) {
+          soft_fill_device_rect(s, my_rect_init(xa, y, xb - xa, 1), color);
         }
       }
-      soft_blend_pixel(s, lpix, y, n, color);
-      return;
     }
-    if (fxl > 0.0f) {
-      soft_blend_pixel(s, lpix, y, cov_left(fxl), color);
+  } else {
+    aa_rowbuf_t rb;
+    int halves = s->antialias_level >= 2 ? 2 : 1;
+    static const float OFF1[1] = {0.5f};
+    static const float OFF2[2] = {0.25f, 0.75f};
+    const float* offs = halves == 2 ? OFF2 : OFF1;
+    rb.cov = (uint8_t*)my_mem_alloc(s->allocator, (size_t)clip->w * 2);
+    if (rb.cov == NULL) {
+      my_mem_free(s->allocator, xs);
+      return MY_RET_OOM;
     }
-    if (fxr > 0.0f) {
-      soft_blend_pixel(s, rpix, y, cov_right(fxr), color);
-    }
-    /* interior pixels fully covered: xl' <= p and p+1 <= xr' */
+    rb.alpha = rb.cov + clip->w;
     {
-      int32_t x0 = (fxl > 0.0f) ? lpix + 1 : lpix;
-      int32_t x1 = (fxr > 0.0f) ? rpix - 1 : rpix - 1;
-      if (x1 >= x0) {
-        soft_fill_device_rect(s, my_rect_init(x0, y, x1 - x0 + 1, 1), color);
+      /* limit the scan to the polygon's y range (clipped) */
+      float ymin = pts[0].y + s->state.ty, ymax = ymin;
+      size_t pi;
+      int32_t row0, row1;
+      for (pi = 1; pi < npts; pi++) {
+        float py = pts[pi].y + s->state.ty;
+        if (py < ymin) {
+          ymin = py;
+        }
+        if (py > ymax) {
+          ymax = py;
+        }
+      }
+      row0 = (int32_t)floorf(ymin) > clip->y ? (int32_t)floorf(ymin) : clip->y;
+      row1 = (int32_t)ceilf(ymax) < clip->y + clip->h ? (int32_t)ceilf(ymax)
+                                                      : clip->y + clip->h;
+      for (y = row0; y < row1; y++) {
+      float row_min = 0.0f, row_max = 0.0f;
+      int32_t bx0, bw;
+      int hh;
+      row_min = (float)(clip->x + clip->w);
+      row_max = (float)clip->x;
+      for (hh = 0; hh < halves; hh++) {
+        size_t nxs = collect_intersections(s, pts, contours, ncontours,
+                                           (float)y + offs[hh], xs, xs_cap);
+        if (nxs > 0) {
+          qsort(xs, nxs, sizeof(float), float_cmp);
+          if (xs[0] < row_min) {
+            row_min = xs[0];
+          }
+          if (xs[nxs - 1] > row_max) {
+            row_max = xs[nxs - 1];
+          }
+        }
+      }
+      if (row_max <= row_min) {
+        continue;
+      }
+      bx0 = (int32_t)floorf(row_min);
+      if (bx0 < clip->x) {
+        bx0 = clip->x;
+      }
+      bw = (int32_t)ceilf(row_max) - bx0;
+      if (bx0 + bw > clip->x + clip->w) {
+        bw = clip->x + clip->w - bx0;
+      }
+      if (bw <= 0) {
+        continue;
+      }
+      memset(rb.cov, 0, (size_t)bw);
+      for (hh = 0; hh < halves; hh++) {
+        size_t nxs = collect_intersections(s, pts, contours, ncontours,
+                                           (float)y + offs[hh], xs, xs_cap);
+        size_t k;
+        qsort(xs, nxs, sizeof(float), float_cmp);
+        for (k = 0; k + 1 < nxs; k += 2) {
+          span_accum(rb.cov, bx0, bw, xs[k], xs[k + 1]);
+        }
+      }
+      emit_row(s, &rb, y, bx0, bw, 4 * halves, color);
       }
     }
+    my_mem_free(s->allocator, rb.cov);
   }
+  my_mem_free(s->allocator, xs);
+  return MY_RET_OK;
 }
 
 /** @brief User-space rect -> device-space rect (origin floor, size exact). */
@@ -321,9 +499,60 @@ static my_ret_t soft_stroke_rect(my_vgcanvas_t* vg, const my_rectf_t* rect) {
 static void soft_fill_circle(my_vgcanvas_soft_t* s, int32_t cx, int32_t cy,
                              int32_t r, my_color_t color) {
   int32_t dy;
-  for (dy = -r; dy <= r; dy++) {
-    float fdx = sqrtf((float)(r * r - dy * dy));
-    soft_fill_span(s, cy + dy, (float)cx - fdx, (float)cx + fdx + 1.0f, color);
+  if (s->antialias_level <= 0) {
+    for (dy = -r; dy <= r; dy++) {
+      int32_t dx = (int32_t)floorf(sqrtf((float)(r * r - dy * dy)));
+      soft_fill_device_rect(s, my_rect_init(cx - dx, cy + dy, 2 * dx + 1, 1),
+                            color);
+    }
+    return;
+  }
+  {
+    int halves = s->antialias_level >= 2 ? 2 : 1;
+    static const float OFF1[1] = {0.5f};
+    static const float OFF2[2] = {0.25f, 0.75f};
+    const float* offs = halves == 2 ? OFF2 : OFF1;
+    const my_rect_t* clip = &s->state.clip;
+    int32_t y0 = cy - r > clip->y ? cy - r : clip->y;
+    int32_t y1 = cy + r < clip->y + clip->h - 1 ? cy + r : clip->y + clip->h - 1;
+    aa_rowbuf_t rb;
+    int32_t y;
+    if (clip->w <= 0) {
+      return;
+    }
+    rb.cov = (uint8_t*)my_mem_alloc(s->allocator, (size_t)clip->w * 2);
+    if (rb.cov == NULL) {
+      return;
+    }
+    rb.alpha = rb.cov + clip->w;
+    for (y = y0; y <= y1; y++) {
+      int hh;
+      float fx = (float)cx + 0.5f;
+      int32_t bx0 = (int32_t)floorf(fx - (float)r);
+      int32_t bw = (int32_t)ceilf(fx + (float)r) - bx0 + 1;
+      if (bx0 < clip->x) {
+        bw -= clip->x - bx0;
+        bx0 = clip->x;
+      }
+      if (bx0 + bw > clip->x + clip->w) {
+        bw = clip->x + clip->w - bx0;
+      }
+      if (bw <= 0) {
+        continue;
+      }
+      memset(rb.cov, 0, (size_t)bw);
+      for (hh = 0; hh < halves; hh++) {
+        float fdy = (float)y + offs[hh] - ((float)cy + 0.5f);
+        float fdx;
+        if (fdy * fdy > (float)(r * r)) {
+          continue;
+        }
+        fdx = sqrtf((float)(r * r) - fdy * fdy);
+        span_accum(rb.cov, bx0, bw, fx - fdx, fx + fdx);
+      }
+      emit_row(s, &rb, y, bx0, bw, 4 * halves, color);
+    }
+    my_mem_free(s->allocator, rb.cov);
   }
 }
 
@@ -419,114 +648,68 @@ static int float_cmp(const void* a, const void* b) {
 }
 
 /** @brief Fill one scanline (device y) with the even-odd rule. */
-static void soft_fill_scanline(my_vgcanvas_soft_t* s, int32_t y, float* xs,
-                               size_t xs_cap) {
-  float yc = (float)y + 0.5f;
-  size_t nxs = 0;
-  size_t ci, i, k;
-
-  for (ci = 0; ci < s->contour_count; ci++) {
-    const contour_t* c = &s->contours[ci];
-    size_t edges = c->count;
-    for (i = 0; i < edges; i++) {
-      size_t j = i + 1;
-      float x0, y0, x1, y1;
-      if (j == c->count) {
-        if (!c->closed) {
-          break;
-        }
-        j = 0;
-      }
-      x0 = s->points[c->start + i].x + s->state.tx;
-      y0 = s->points[c->start + i].y + s->state.ty;
-      x1 = s->points[c->start + j].x + s->state.tx;
-      y1 = s->points[c->start + j].y + s->state.ty;
-      if ((y0 <= yc) != (y1 <= yc) && nxs < xs_cap) {
-        xs[nxs++] = x0 + (yc - y0) * (x1 - x0) / (y1 - y0);
-      }
-    }
-  }
-
-  qsort(xs, nxs, sizeof(float), float_cmp);
-  for (k = 0; k + 1 < nxs; k += 2) {
-    soft_fill_span(s, y, xs[k], xs[k + 1], s->state.fill_color);
-  }
-}
-
 static my_ret_t soft_fill(my_vgcanvas_t* vg) {
   my_vgcanvas_soft_t* s = (my_vgcanvas_soft_t*)vg;
-  float* xs;
-  size_t xs_cap = s->point_count > 0 ? s->point_count : 1;
-  int32_t y;
-
-  if (s->point_count < 2) {
-    return MY_RET_OK;
-  }
-  xs = (float*)my_mem_alloc(s->allocator, xs_cap * sizeof(float));
-  if (xs == NULL) {
-    return MY_RET_OOM;
-  }
-  for (y = s->state.clip.y; y < s->state.clip.y + s->state.clip.h; y++) {
-    soft_fill_scanline(s, y, xs, xs_cap);
-  }
-  my_mem_free(s->allocator, xs);
-  return MY_RET_OK;
+  return fill_polys(s, s->points, s->point_count, s->contours,
+                    s->contour_count, s->state.fill_color);
 }
 
-/** @brief Bresenham line with a square line_width brush (approximation). */
-static void soft_draw_segment(my_vgcanvas_soft_t* s, float fx0, float fy0,
-                              float fx1, float fy1) {
-  int32_t x0 = soft_round(fx0 + s->state.tx);
-  int32_t y0 = soft_round(fy0 + s->state.ty);
-  int32_t x1 = soft_round(fx1 + s->state.tx);
-  int32_t y1 = soft_round(fy1 + s->state.ty);
-  int32_t dx = x1 > x0 ? x1 - x0 : x0 - x1;
-  int32_t dy = y1 > y0 ? y1 - y0 : y0 - y1;
-  int32_t sx = x0 < x1 ? 1 : -1;
-  int32_t sy = y0 < y1 ? 1 : -1;
-  int32_t err = dx - dy;
-  int32_t lw = soft_round(s->state.line_width);
-  int32_t half;
-
-  if (lw < 1) {
-    lw = 1;
-  }
-  half = lw / 2;
-
-  for (;;) {
-    soft_fill_device_rect(s, my_rect_init(x0 - half, y0 - half, lw, lw),
-                          s->state.stroke_color);
-    if (x0 == x1 && y0 == y1) {
-      break;
-    }
-    {
-      int32_t e2 = 2 * err;
-      if (e2 > -dy) {
-        err -= dy;
-        x0 += sx;
-      }
-      if (e2 < dx) {
-        err += dx;
-        y0 += sy;
-      }
-    }
-  }
-}
-
+/** @brief Stroke: each segment becomes a quad contour filled with the
+ * shared coverage path (blending + AA for free). Square caps/joins
+ * (round caps are a TODO); translucent strokes may over-blend at joints
+ * (segments are filled independently). */
 static my_ret_t soft_stroke(my_vgcanvas_t* vg) {
   my_vgcanvas_soft_t* s = (my_vgcanvas_soft_t*)vg;
+  float half = s->state.line_width / 2.0f;
+  float odd_off = 0.0f;
   size_t ci, i;
+  if (half < 0.5f) {
+    half = 0.5f;
+  }
+  /* odd integer widths: shift 0.5px so thin lines land on pixel centers */
+  if (((int32_t)s->state.line_width) % 2 == 1) {
+    odd_off = 0.5f;
+  }
   for (ci = 0; ci < s->contour_count; ci++) {
     const contour_t* c = &s->contours[ci];
-    for (i = 0; i + 1 < c->count; i++) {
-      soft_draw_segment(s, s->points[c->start + i].x, s->points[c->start + i].y,
-                        s->points[c->start + i + 1].x,
-                        s->points[c->start + i + 1].y);
-    }
-    if (c->closed && c->count > 1) {
-      soft_draw_segment(s, s->points[c->start + c->count - 1].x,
-                        s->points[c->start + c->count - 1].y,
-                        s->points[c->start].x, s->points[c->start].y);
+    size_t edges = c->count > 1 ? (c->closed ? c->count : c->count - 1) : 0;
+    for (i = 0; i < edges; i++) {
+      size_t j = (i + 1) % c->count;
+      float x0 = s->points[c->start + i].x + odd_off;
+      float y0 = s->points[c->start + i].y + odd_off;
+      float x1 = s->points[c->start + j].x + odd_off;
+      float y1 = s->points[c->start + j].y + odd_off;
+      float dx = x1 - x0, dy = y1 - y0;
+      float len = sqrtf(dx * dx + dy * dy);
+      float nx, ny;
+      path_point_t quad[4];
+      contour_t qcontour;
+      if (len < 0.001f) {
+        /* zero-length segment: small square stamp */
+        quad[0].x = x0 - half;
+        quad[0].y = y0 - half;
+        quad[1].x = x0 + half;
+        quad[1].y = y0 - half;
+        quad[2].x = x0 + half;
+        quad[2].y = y0 + half;
+        quad[3].x = x0 - half;
+        quad[3].y = y0 + half;
+      } else {
+        nx = -dy / len * half;
+        ny = dx / len * half;
+        quad[0].x = x0 + nx;
+        quad[0].y = y0 + ny;
+        quad[1].x = x1 + nx;
+        quad[1].y = y1 + ny;
+        quad[2].x = x1 - nx;
+        quad[2].y = y1 - ny;
+        quad[3].x = x0 - nx;
+        quad[3].y = y0 - ny;
+      }
+      qcontour.start = 0;
+      qcontour.count = 4;
+      qcontour.closed = true;
+      fill_polys(s, quad, 4, &qcontour, 1, s->state.stroke_color);
     }
   }
   return MY_RET_OK;
@@ -756,15 +939,25 @@ my_vgcanvas_t* my_vgcanvas_soft_create(const my_allocator_t* allocator,
   s->state.font_size = 16;
   s->state.clip =
       my_rect_init(0, 0, (int32_t)my_lcd_get_width(lcd), (int32_t)my_lcd_get_height(lcd));
-  s->antialias = true;
+  s->antialias_level = 2;
   my_dirty_rects_init(&s->dirty);
   return (my_vgcanvas_t*)s;
 }
 
 void my_vgcanvas_soft_set_antialias(my_vgcanvas_t* vg, bool enabled) {
+  my_vgcanvas_soft_set_antialias_level(vg, enabled ? 2 : 0);
+}
+
+void my_vgcanvas_soft_set_antialias_level(my_vgcanvas_t* vg, int level) {
   my_vgcanvas_soft_t* s = (my_vgcanvas_soft_t*)vg;
   if (s != NULL && s->base.vtable == &s_soft_vtable) {
-    s->antialias = enabled;
+    if (level < 0) {
+      level = 0;
+    }
+    if (level > 2) {
+      level = 2;
+    }
+    s->antialias_level = level;
   }
 }
 

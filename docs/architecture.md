@@ -159,3 +159,9 @@ PAL port 矩阵：
 
 - `my_list_view`：固定行高虚拟化。可视行数 + 1 行缓冲，滚出可视区的行进回收池（`pool` 持引用），新进可视区的行从池取出经 `bind_row` 重绑数据；滚动钳制、POINTER_WHEEL（新事件，x11 Button4/5、wayland axis、linux_fb REL_WHEEL 已接）与拖动滚动；右侧指示条。数据源抽象 `my_list_adapter_t`（get_count/create_row/bind_row）；items 绑定落在 list_view 上时 widget_target 自动装 adapter 走虚拟化（普通容器保持全量重建）；items_changed 全表刷新（增量 diff TODO）。10000 行实测只创建 ~22 个行控件。
 - `my_image` + `my_image_loader`：stb_image 后端（vendored 3rd/stb，`MYUI_IMAGE_STB` 可裁剪，OFF 显示占位框）；解码统一 RGBA8888，按路径 LRU 缓存（默认 8 项）；缩放 none/center/fit/fill（最近邻，双线性 TODO）；透明像素按控件主题 bg_color 预合成后走 lcd draw_pixels 快速路径；vgcanvas vtable 新增 `draw_image`（soft 实现格式特化 + 最近邻缩放 + 裁剪，GLES 端 NOT_SUPPORTED 留 TODO）。
+
+## AA 级别与剪贴板（M8c）
+
+- **AA 三级**（`my_vgcanvas_soft_set_antialias_level`）：0=关（像素中心硬边）、1=x 向 4 子采样、2=x4×y2（每条扫描线在 +0.25/+0.75 两次求值合并覆盖率）。默认 **2**——bench（-O0，8 大三角形/帧）：level0 0.72ms、level1 1.70ms、level2 2.41ms，2 级相对 1 级 +42%（< 2.5x 阈值）。`set_antialias(bool)` 兼容映射 false→0、true→2。覆盖率缓冲按行收紧到多边形包围盒（初版全幅扫描慢 10 倍，已修）。stroke 折线改为**法线扩展四边形条带**，与 fill 共用覆盖率路径（混合+AA 免费获得；奇数线宽偏移 0.5px 保证细线落在像素中心；方 cap/join，半透明描边关节处可能过混合，TODO）。
+- **剪贴板**：pal vtable 增加 `clipboard_set_text/get_text`（UTF-8）。dummy/linux_fb/wayland 为内存往返；x11 拥有 CLIPBOARD selection 并缓存、响应 SelectionRequest（UTF8_STRING/STRING/TARGETS）——**从外部应用获取是 TODO**（get 目前只返回自有缓存；接口语义已写清）。edit 接入 Ctrl+C/X/V（粘贴剔除换行、尊重 max_len、UTF-8 保留）。
+- **edit 光标闪烁**：500ms 主循环 timer（聚焦启动/失焦停止/销毁摘除），toggle 可见性并 invalidate。

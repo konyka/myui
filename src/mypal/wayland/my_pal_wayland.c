@@ -17,6 +17,7 @@
 #include "mypal/wayland/my_pal_wayland.h"
 
 #include <poll.h>
+#include <stdio.h>
 #include <string.h>
 #include <sys/mman.h>
 #include <time.h>
@@ -50,6 +51,7 @@ typedef struct wl_pal_t {
   my_darray_t* windows; /**< wl_window_t* registry */
   my_pal_event_handler_t handler;
   void* handler_ctx;
+  char* clipboard; /* in-memory; wl_data_device integration is a TODO */
 } wl_pal_t;
 
 static void dispatch_event(wl_pal_t* p, my_pal_window_t* win, my_event_t* e) {
@@ -760,11 +762,37 @@ static my_ret_t wl_set_event_handler(my_pal_t* pal,
   return MY_RET_OK;
 }
 
+static my_ret_t wl_clipboard_set(my_pal_t* pal, const char* text) {
+  wl_pal_t* p = (wl_pal_t*)pal;
+  size_t len = text != NULL ? strlen(text) : 0;
+  char* copy = (char*)my_mem_alloc(p->allocator, len + 1);
+  if (copy == NULL) {
+    return MY_RET_OOM;
+  }
+  memcpy(copy, text != NULL ? text : "", len + 1);
+  my_mem_free(p->allocator, p->clipboard);
+  p->clipboard = copy;
+  return MY_RET_OK;
+}
+
+static my_ret_t wl_clipboard_get(my_pal_t* pal, char* buf, size_t size) {
+  wl_pal_t* p = (wl_pal_t*)pal;
+  if (buf == NULL || size == 0) {
+    return MY_RET_INVALID_PARAMS;
+  }
+  if (p->clipboard == NULL) {
+    return MY_RET_NOT_FOUND;
+  }
+  snprintf(buf, size, "%s", p->clipboard);
+  return MY_RET_OK;
+}
+
 static void wl_pal_destroy(my_pal_t* pal) {
   wl_pal_t* p = (wl_pal_t*)pal;
   if (p == NULL) {
     return;
   }
+  my_mem_free(p->allocator, p->clipboard);
   my_darray_destroy(p->windows);
   if (p->xkb_state != NULL) {
     xkb_state_unref(p->xkb_state);
@@ -804,6 +832,8 @@ static const my_pal_vtable_t s_wl_pal_vtable = {wl_window_create,
                                                 wl_main_loop_create,
                                                 wl_time_now_ms,
                                                 wl_set_event_handler,
+                                                wl_clipboard_set,
+                                                wl_clipboard_get,
                                                 wl_pal_destroy};
 
 my_pal_t* my_pal_wayland_create(const my_allocator_t* allocator) {

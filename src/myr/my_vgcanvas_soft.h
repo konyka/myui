@@ -31,4 +31,10 @@ const my_dirty_rects_t* my_vgcanvas_soft_get_dirty_rects(my_vgcanvas_t* vg);
 /** @brief Access the soft backend's anti-alias flag (default on). */
 void my_vgcanvas_soft_set_antialias(my_vgcanvas_t* vg, bool enabled);
 
+/**
+ * @brief AA level: 0 = off, 1 = x-only (4x subsampling), 2 = x4 * y2
+ * (default 2). set_antialias(false) == level 0, true == level 2.
+ */
+void my_vgcanvas_soft_set_antialias_level(my_vgcanvas_t* vg, int level);
+
 #endif /* MY_VGCANVAS_SOFT_H */

@@ -16,6 +16,7 @@
 #include "mypal/x11/my_pal_x11.h"
 
 #include <pthread.h>
+#include <stdio.h>
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
@@ -23,8 +24,10 @@
 
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
+#include <X11/Xatom.h>
 
 #include "myc/my_darray.h"
+#include "myc/my_str.h"
 #include "mypal/x11/my_pal_x11_keymap.h"
 #include "myr/my_lcd_mem.h"
 
@@ -39,6 +42,10 @@ typedef struct x11_pal_t {
   my_darray_t* windows; /**< x11_window_t* registry for event routing */
   my_pal_event_handler_t handler;
   void* handler_ctx;
+  char* clipboard;        /**< cached text (we serve it when we own) */
+  Atom atom_clipboard;
+  Atom atom_utf8;
+  Atom atom_targets;
 } x11_pal_t;
 
 /* ---------------- window ---------------- */
@@ -383,6 +390,41 @@ static void x11_dispatch(x11_pal_t* p, const XEvent* xev) {
         p->handler(p->handler_ctx, (my_pal_window_t*)w, &e);
       }
       break;
+    case SelectionRequest:
+      /* serve our cached clipboard text (UTF8_STRING/STRING/TARGETS) */
+      {
+        XSelectionRequestEvent* req = (XSelectionRequestEvent*)&xev->xselectionrequest;
+        XSelectionEvent notify;
+        Atom target = req->target;
+        Atom prop = req->property;
+        if (prop == None) {
+          prop = target;
+        }
+        memset(&notify, 0, sizeof(notify));
+        notify.type = SelectionNotify;
+        notify.requestor = req->requestor;
+        notify.selection = req->selection;
+        notify.target = target;
+        notify.time = req->time;
+        notify.property = None;
+        if (target == p->atom_targets) {
+          Atom types[3];
+          types[0] = p->atom_targets;
+          types[1] = p->atom_utf8;
+          types[2] = XA_STRING;
+          XChangeProperty(p->display, req->requestor, prop, XA_ATOM, 32,
+                          PropModeReplace, (unsigned char*)types, 3);
+          notify.property = prop;
+        } else if ((target == p->atom_utf8 || target == XA_STRING) &&
+                   p->clipboard != NULL) {
+          XChangeProperty(p->display, req->requestor, prop, target, 8,
+                          PropModeReplace, (unsigned char*)p->clipboard,
+                          (int)strlen(p->clipboard));
+          notify.property = prop;
+        }
+        XSendEvent(p->display, req->requestor, False, 0, (XEvent*)&notify);
+      }
+      break;
     case ClientMessage:
       if (w != NULL && (Atom)xev->xclient.data.l[0] == p->wm_delete) {
         e.type = MY_EVENT_QUIT;
@@ -608,11 +650,43 @@ static my_ret_t x11_pal_set_event_handler(my_pal_t* pal,
   return MY_RET_OK;
 }
 
+static my_ret_t x11_clipboard_set(my_pal_t* pal, const char* text) {
+  x11_pal_t* p = (x11_pal_t*)pal;
+  char* copy = my_strdup(p->allocator, text);
+  x11_window_t* w;
+  if (text != NULL && copy == NULL) {
+    return MY_RET_OOM;
+  }
+  my_mem_free(p->allocator, p->clipboard);
+  p->clipboard = copy;
+  /* own the selection via the first window (in-app roundtrip; serving
+   * other apps works via SelectionRequest; requesting FROM other apps is
+   * a TODO -> get falls back to the cache) */
+  if (my_darray_size(p->windows) > 0) {
+    w = (x11_window_t*)my_darray_get(p->windows, 0);
+    XSetSelectionOwner(p->display, p->atom_clipboard, w->xwin, CurrentTime);
+  }
+  return MY_RET_OK;
+}
+
+static my_ret_t x11_clipboard_get(my_pal_t* pal, char* buf, size_t size) {
+  x11_pal_t* p = (x11_pal_t*)pal;
+  if (buf == NULL || size == 0) {
+    return MY_RET_INVALID_PARAMS;
+  }
+  if (p->clipboard == NULL) {
+    return MY_RET_NOT_FOUND;
+  }
+  snprintf(buf, size, "%s", p->clipboard);
+  return MY_RET_OK;
+}
+
 static void x11_pal_destroy(my_pal_t* pal) {
   x11_pal_t* p = (x11_pal_t*)pal;
   if (p == NULL) {
     return;
   }
+  my_mem_free(p->allocator, p->clipboard);
   my_darray_destroy(p->windows);
   XCloseDisplay(p->display);
   my_mem_free(p->allocator, p);
@@ -620,7 +694,8 @@ static void x11_pal_destroy(my_pal_t* pal) {
 
 static const my_pal_vtable_t s_x11_pal_vtable = {
     x11_window_create, x11_main_loop_create, x11_pal_time_now_ms,
-    x11_pal_set_event_handler, x11_pal_destroy};
+    x11_pal_set_event_handler, x11_clipboard_set, x11_clipboard_get,
+    x11_pal_destroy};
 
 my_pal_t* my_pal_x11_create(const my_allocator_t* allocator) {
   x11_pal_t* p;
@@ -638,6 +713,9 @@ my_pal_t* my_pal_x11_create(const my_allocator_t* allocator) {
   p->display = display;
   p->screen = DefaultScreen(display);
   p->wm_delete = XInternAtom(display, "WM_DELETE_WINDOW", False);
+  p->atom_clipboard = XInternAtom(display, "CLIPBOARD", False);
+  p->atom_utf8 = XInternAtom(display, "UTF8_STRING", False);
+  p->atom_targets = XInternAtom(display, "TARGETS", False);
   p->windows = my_darray_create(allocator, 0);
   if (p->windows == NULL) {
     XCloseDisplay(display);

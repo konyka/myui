@@ -110,3 +110,7 @@ cmake -S . -B build -DMYUI_FONT_STB=OFF -DMYUI_PAL=linux_fb
 | MYUI_IMAGE_STB | ON | 去掉 stb_image 解码，image 控件显示占位框 |
 | MYUI_UI_XML | ON | 去掉 XML parser + UI 加载器（代码建 UI 或留 XML→C 生成器 TODO） |
 | MYUI_BUILD_TESTS/DEMOS | ON | 构建裁剪 |
+
+## 剪贴板实现要点（M8c 新增 port 须知）
+
+pal vtable 的最后两项 `clipboard_set_text/get_text`：嵌入式/单窗口系统用内存字符串即可（照 dummy 10 行）；桌面系统注意 selection 是"惰性提供"协议（x11 参考实现含 SelectionRequest 应答样板；从外部获取需事件泵重入，建议照 x11 先实现本应用内往返）。

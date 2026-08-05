@@ -144,10 +144,102 @@ static void test_rounded_corner_aa(void) {
   my_lcd_destroy(lcd);
 }
 
+static void test_near_horizontal_edge_y_aa(void) {
+  /* shallow slope (~10 deg): level 1 leaves top/bottom edges mostly hard,
+   * level 2 (y2) produces intermediate values along the shallow edge */
+  my_lcd_t* lcd = my_lcd_mem_create(NULL, 40, 20, MY_PIXEL_FORMAT_BGRA8888);
+  my_vgcanvas_t* vg = my_vgcanvas_soft_create(NULL, lcd);
+  int partial_l2 = 0;
+  int32_t x, y;
+
+  my_vgcanvas_soft_set_antialias_level(vg, 2);
+  my_vgcanvas_begin_frame(vg, NULL);
+  my_vgcanvas_set_fill_color(vg, my_color_rgb(255, 255, 255));
+  my_vgcanvas_begin_path(vg);
+  my_vgcanvas_move_to(vg, 2, 16);
+  my_vgcanvas_line_to(vg, 38, 8);
+  my_vgcanvas_line_to(vg, 38, 18);
+  my_vgcanvas_line_to(vg, 2, 18);
+  my_vgcanvas_close_path(vg);
+  my_vgcanvas_fill(vg);
+  my_vgcanvas_end_frame(vg);
+
+  for (y = 6; y < 18; y++) {
+    for (x = 2; x < 38; x++) {
+      uint8_t r = px_r(lcd, x, y);
+      if (r > 0 && r < 255) {
+        partial_l2++;
+      }
+    }
+  }
+  TEST_ASSERT(partial_l2 > 10); /* shallow top edge shows y-coverage */
+
+  my_vgcanvas_destroy(vg);
+  my_lcd_destroy(lcd);
+}
+
+static void test_stroke_diagonal_has_aa(void) {
+  my_lcd_t* lcd = my_lcd_mem_create(NULL, 32, 32, MY_PIXEL_FORMAT_BGRA8888);
+  my_vgcanvas_t* vg = my_vgcanvas_soft_create(NULL, lcd);
+  bool found_partial = false;
+  int32_t x, y;
+
+  my_vgcanvas_soft_set_antialias_level(vg, 2);
+  my_vgcanvas_begin_frame(vg, NULL);
+  my_vgcanvas_set_stroke_color(vg, my_color_rgb(255, 255, 255));
+  my_vgcanvas_set_line_width(vg, 2);
+  my_vgcanvas_begin_path(vg);
+  my_vgcanvas_move_to(vg, 4, 28);
+  my_vgcanvas_line_to(vg, 28, 6);
+  my_vgcanvas_stroke(vg);
+  my_vgcanvas_end_frame(vg);
+
+  for (y = 4; y < 30 && !found_partial; y++) {
+    for (x = 4; x < 30; x++) {
+      uint8_t r = px_r(lcd, x, y);
+      if (r > 0 && r < 255) {
+        found_partial = true;
+      }
+    }
+  }
+  TEST_ASSERT(found_partial);
+
+  my_vgcanvas_destroy(vg);
+  my_lcd_destroy(lcd);
+}
+
+static void test_stroke_width_precise(void) {
+  my_lcd_t* lcd = my_lcd_mem_create(NULL, 32, 32, MY_PIXEL_FORMAT_BGRA8888);
+  my_vgcanvas_t* vg = my_vgcanvas_soft_create(NULL, lcd);
+  my_vgcanvas_soft_set_antialias_level(vg, 0); /* hard edges for exact math */
+
+  my_vgcanvas_begin_frame(vg, NULL);
+  my_vgcanvas_set_stroke_color(vg, my_color_rgb(255, 255, 255));
+  my_vgcanvas_set_line_width(vg, 3);
+  my_vgcanvas_begin_path(vg);
+  my_vgcanvas_move_to(vg, 4, 16);
+  my_vgcanvas_line_to(vg, 28, 16);
+  my_vgcanvas_stroke(vg);
+  my_vgcanvas_end_frame(vg);
+
+  /* 3px horizontal line at y=16 covers rows 15..17, not 14/18 */
+  TEST_ASSERT_EQ_INT(px_r(lcd, 16, 15), 255);
+  TEST_ASSERT_EQ_INT(px_r(lcd, 16, 16), 255);
+  TEST_ASSERT_EQ_INT(px_r(lcd, 16, 17), 255);
+  TEST_ASSERT_EQ_INT(px_r(lcd, 16, 14), 0);
+  TEST_ASSERT_EQ_INT(px_r(lcd, 16, 18), 0);
+
+  my_vgcanvas_destroy(vg);
+  my_lcd_destroy(lcd);
+}
+
 MYTEST_MAIN_BEGIN()
   MYTEST_RUN(test_diagonal_edge_has_intermediate_pixels);
   MYTEST_RUN(test_aa_off_has_no_intermediate_pixels);
   MYTEST_RUN(test_straight_edges_full_coverage);
   MYTEST_RUN(test_coverage_blend_formula);
   MYTEST_RUN(test_rounded_corner_aa);
+  MYTEST_RUN(test_near_horizontal_edge_y_aa);
+  MYTEST_RUN(test_stroke_diagonal_has_aa);
+  MYTEST_RUN(test_stroke_width_precise);
 MYTEST_MAIN_END()

@@ -68,11 +68,11 @@ int main(void) {
            "avg %.3f ms/frame\n",
            BENCH_FRAMES, t1 - t0, (t1 - t0) / BENCH_FRAMES);
 
-    /* AA on/off comparison on path fills */
+    /* AA level comparison on path fills */
     {
       int pass;
-      for (pass = 0; pass < 2; pass++) {
-        my_vgcanvas_soft_set_antialias(vg2, pass == 0);
+      for (pass = 0; pass < 3; pass++) {
+        my_vgcanvas_soft_set_antialias_level(vg2, 2 - pass); /* 2, 1, 0 */
         t0 = now_ms();
         for (f = 0; f < BENCH_FRAMES; f++) {
           my_vgcanvas_begin_frame(vg2, NULL);
@@ -88,9 +88,9 @@ int main(void) {
           my_vgcanvas_end_frame(vg2);
         }
         t1 = now_ms();
-        printf("bench_render: 8 triangles x %d frames AA=%s: total %.1f ms, "
+        printf("bench_render: 8 triangles x %d frames AA_level=%d: total %.1f ms, "
                "avg %.3f ms/frame\n",
-               BENCH_FRAMES, pass == 0 ? "on" : "off", t1 - t0,
+               BENCH_FRAMES, 2 - pass, t1 - t0,
                (t1 - t0) / BENCH_FRAMES);
       }
     }

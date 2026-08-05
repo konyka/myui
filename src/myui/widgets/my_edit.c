@@ -7,6 +7,7 @@
 #include <string.h>
 
 #include "myc/my_str.h"
+#include "myui/my_window.h"
 
 #define EDIT_PAD_X 4
 #define EDIT_PAD_Y 2
@@ -237,6 +238,52 @@ static my_ret_t edit_on_key(my_edit_t* e, const my_event_t* event) {
     my_widget_invalidate((my_widget_t*)e, NULL);
     return MY_RET_OK;
   }
+  if (ctrl && (key == 'c' || key == 'C' || key == 'x' || key == 'X')) {
+    my_pal_t* pal = my_window_pal_of_widget((my_widget_t*)e);
+    if (pal != NULL && has_selection(e)) {
+      size_t a = e->cursor < e->anchor ? e->cursor : e->anchor;
+      size_t b = e->cursor < e->anchor ? e->anchor : e->cursor;
+      size_t n = b - a;
+      char* buf = (char*)my_mem_alloc(e->allocator, n + 1);
+      if (buf != NULL) {
+        memcpy(buf, e->text + a, n);
+        buf[n] = '\0';
+        my_pal_clipboard_set_text(pal, buf);
+        my_mem_free(e->allocator, buf);
+      }
+      if (key == 'x' || key == 'X') {
+        user_delete_range(e, a, b); /* cut */
+      }
+    }
+    return MY_RET_OK;
+  }
+  if (ctrl && (key == 'v' || key == 'V')) {
+    my_pal_t* pal = my_window_pal_of_widget((my_widget_t*)e);
+    if (pal != NULL && !e->readonly) {
+      char buf[256];
+      if (my_pal_clipboard_get_text(pal, buf, sizeof(buf)) == MY_RET_OK) {
+        /* paste: strip newlines (single-line edit), one codepoint at a
+         * time so max_len applies */
+        const char* q = buf;
+        while (*q != '\0') {
+          size_t cp_len;
+          if (*q == '\n' || *q == '\r') {
+            q++;
+            continue;
+          }
+          cp_len = my_str_utf8_char_len(q);
+          if (e->max_len > 0 &&
+              (e->text != NULL ? utf8_cp_count(e->text) : 0) + 1 > e->max_len) {
+            break;
+          }
+          user_insert(e, q, cp_len);
+          q += cp_len;
+        }
+        ensure_cursor_visible(e);
+      }
+    }
+    return MY_RET_OK;
+  }
   switch (key) {
     case MY_KEY_LEFT:
     case MY_KEY_RIGHT: {
@@ -320,11 +367,26 @@ static my_ret_t edit_on_event(my_widget_t* widget, const my_event_t* event) {
   }
 }
 
+static my_ret_t edit_blink_tick(void* ctx) {
+  my_edit_t* e = (my_edit_t*)ctx;
+  e->cursor_visible = !e->cursor_visible;
+  my_widget_invalidate((my_widget_t*)e, NULL);
+  return MY_RET_OK; /* repeat */
+}
+
 static void edit_on_focus(void* ctx, const char* event, void* data) {
   my_edit_t* e = (my_edit_t*)ctx;
+  my_pal_main_loop_t* loop;
   (void)event;
   (void)data;
   e->focused = true;
+  e->cursor_visible = true;
+  loop = my_window_loop_of_widget((my_widget_t*)e);
+  if (loop != NULL && e->blink_timer_id == 0) {
+    e->blink_timer_id = my_pal_main_loop_add_timer(loop, edit_blink_tick, e,
+                                                   500);
+    e->blink_loop = e->blink_timer_id > 0 ? loop : NULL;
+  }
   my_widget_invalidate((my_widget_t*)e, NULL);
 }
 
@@ -333,6 +395,12 @@ static void edit_on_blur(void* ctx, const char* event, void* data) {
   (void)event;
   (void)data;
   e->focused = false;
+  e->cursor_visible = true; /* hidden anyway when unfocused */
+  if (e->blink_timer_id > 0 && e->blink_loop != NULL) {
+    my_pal_main_loop_remove_timer(e->blink_loop, e->blink_timer_id);
+    e->blink_timer_id = 0;
+    e->blink_loop = NULL;
+  }
   my_widget_invalidate((my_widget_t*)e, NULL);
 }
 
@@ -388,8 +456,8 @@ static void edit_on_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
                           (float)text_y);
   }
 
-  /* cursor (steady; blinking is a TODO) */
-  if (e->focused) {
+  /* cursor (blinks at 500ms when focused) */
+  if (e->focused && e->cursor_visible) {
     int32_t cx = shown != NULL ? text_px(e, shown, e->cursor) : 0;
     my_vgcanvas_set_fill_color(vg, my_color_from_rgba32(fg));
     my_vgcanvas_fill_rect(vg, &(my_rectf_t){(float)(EDIT_PAD_X + cx - e->scroll_x),
@@ -404,6 +472,9 @@ static const my_widget_vtable_t s_edit_vtable = {edit_on_paint, edit_on_event,
 
 static void edit_destroy_chain(my_object_t* obj) {
   my_edit_t* e = (my_edit_t*)obj;
+  if (e->blink_timer_id > 0 && e->blink_loop != NULL) {
+    my_pal_main_loop_remove_timer(e->blink_loop, e->blink_timer_id);
+  }
   my_mem_free(e->allocator, e->text);
   my_mem_free(e->allocator, e->masked);
   my_mem_free(e->allocator, e->hint);
@@ -424,6 +495,7 @@ my_widget_t* my_edit_create(const my_allocator_t* allocator) {
   ((my_object_t*)e)->destroy = edit_destroy_chain;
   e->allocator = allocator;
   e->font_size = 16;
+  e->cursor_visible = true;
   ((my_widget_t*)e)->focusable = true;
   ((my_widget_t*)e)->widget_type = "edit";
   my_widget_on((my_widget_t*)e, "focus", edit_on_focus, e);

@@ -90,6 +90,7 @@ my_ret_t my_window_manager_open(my_window_manager_t* wm, my_window_t* win) {
     return MY_RET_OOM;
   }
   ((my_widget_t*)win)->anim_mgr = wm->anim_mgr;
+  win->loop = wm->loop;
   my_pal_window_show(win->pal_window);
   my_widget_invalidate((my_widget_t*)win, NULL);
   return MY_RET_OK;

@@ -16,6 +16,7 @@ typedef struct dummy_pal_t {
   uint64_t now_ms;                    /**< injectable fake clock */
   my_pal_event_handler_t handler;
   void* handler_ctx;
+  char* clipboard;                    /**< in-memory clipboard text */
 } dummy_pal_t;
 
 static dummy_pal_t* pal_from(my_pal_t* pal) {
@@ -276,16 +277,41 @@ static my_ret_t dummy_set_event_handler(my_pal_t* pal,
   return MY_RET_OK;
 }
 
+static my_ret_t dummy_clipboard_set(my_pal_t* pal, const char* text) {
+  dummy_pal_t* p = pal_from(pal);
+  char* copy = my_strdup(p->allocator, text);
+  if (text != NULL && copy == NULL) {
+    return MY_RET_OOM;
+  }
+  my_mem_free(p->allocator, p->clipboard);
+  p->clipboard = copy;
+  return MY_RET_OK;
+}
+
+static my_ret_t dummy_clipboard_get(my_pal_t* pal, char* buf, size_t size) {
+  dummy_pal_t* p = pal_from(pal);
+  if (buf == NULL || size == 0) {
+    return MY_RET_INVALID_PARAMS;
+  }
+  if (p->clipboard == NULL) {
+    return MY_RET_NOT_FOUND;
+  }
+  snprintf(buf, size, "%s", p->clipboard);
+  return MY_RET_OK;
+}
+
 static void dummy_pal_destroy(my_pal_t* pal) {
   dummy_pal_t* p = pal_from(pal);
   if (p != NULL) {
+    my_mem_free(p->allocator, p->clipboard);
     my_mem_free(p->allocator, p);
   }
 }
 
 static const my_pal_vtable_t s_dummy_pal_vtable = {
     dummy_window_create, dummy_main_loop_create, dummy_time_now_ms,
-    dummy_set_event_handler, dummy_pal_destroy};
+    dummy_set_event_handler, dummy_clipboard_set, dummy_clipboard_get,
+    dummy_pal_destroy};
 
 my_pal_t* my_pal_dummy_create(const my_allocator_t* allocator) {
   dummy_pal_t* p = (dummy_pal_t*)my_mem_calloc(allocator, 1, sizeof(dummy_pal_t));

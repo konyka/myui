@@ -13,6 +13,7 @@
 #ifndef MY_EDIT_H
 #define MY_EDIT_H
 
+#include "mypal/my_pal.h"
 #include "myui/my_widget.h"
 
 /** @brief Single-line text edit (IS-A widget). */
@@ -29,6 +30,9 @@ typedef struct my_edit_t {
   bool readonly;
   bool password;
   bool focused;
+  bool cursor_visible; /**< blink state (M8c) */
+  uint32_t blink_timer_id;
+  my_pal_main_loop_t* blink_loop; /**< weak while timer active */
   my_font_t* font;     /**< borrowed; for click-to-locate measuring */
   int32_t font_size;
 } my_edit_t;

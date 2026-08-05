@@ -8,6 +8,7 @@
 
 #include "mypal/linux_fb/my_pal_linux_fb.h"
 
+#include <stdio.h>
 #include <string.h>
 #include <time.h>
 
@@ -85,6 +86,7 @@ typedef struct fb_pal_t {
   my_pixel_format_t format;
   my_pal_event_handler_t handler;
   void* handler_ctx;
+  char* clipboard;
 } fb_pal_t;
 
 static uint64_t fb_now_ms(void) {
@@ -401,11 +403,37 @@ static my_ret_t fb_set_event_handler(my_pal_t* pal,
   return MY_RET_OK;
 }
 
+static my_ret_t fb_clipboard_set(my_pal_t* pal, const char* text) {
+  fb_pal_t* p = (fb_pal_t*)pal;
+  size_t len = text != NULL ? strlen(text) : 0;
+  char* copy = (char*)my_mem_alloc(p->allocator, len + 1);
+  if (copy == NULL) {
+    return MY_RET_OOM;
+  }
+  memcpy(copy, text != NULL ? text : "", len + 1);
+  my_mem_free(p->allocator, p->clipboard);
+  p->clipboard = copy;
+  return MY_RET_OK;
+}
+
+static my_ret_t fb_clipboard_get(my_pal_t* pal, char* buf, size_t size) {
+  fb_pal_t* p = (fb_pal_t*)pal;
+  if (buf == NULL || size == 0) {
+    return MY_RET_INVALID_PARAMS;
+  }
+  if (p->clipboard == NULL) {
+    return MY_RET_NOT_FOUND;
+  }
+  snprintf(buf, size, "%s", p->clipboard);
+  return MY_RET_OK;
+}
+
 static void fb_pal_destroy(my_pal_t* pal) {
   fb_pal_t* p = (fb_pal_t*)pal;
   if (p == NULL) {
     return;
   }
+  my_mem_free(p->allocator, p->clipboard);
   if (p->fb_map != NULL) {
     p->osal.munmap(p->osal.ctx, p->fb_map, p->fb_size);
   }
@@ -422,6 +450,8 @@ static const my_pal_vtable_t s_fb_pal_vtable = {fb_window_create,
                                                 fb_main_loop_create,
                                                 fb_time_now_ms,
                                                 fb_set_event_handler,
+                                                fb_clipboard_set,
+                                                fb_clipboard_get,
                                                 fb_pal_destroy};
 
 my_pal_t* my_pal_linux_fb_create(const my_allocator_t* allocator,

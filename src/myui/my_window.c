@@ -4,6 +4,7 @@
  */
 #include "myui/my_window.h"
 
+#include "myc/my_str.h"
 #include "myr/my_vgcanvas_soft.h"
 #include "myui/my_animator.h"
 #include "myui/my_layout.h"
@@ -171,6 +172,34 @@ void my_window_paint(my_window_t* win) {
 }
 
 /* ---------------- event routing ---------------- */
+
+my_pal_t* my_window_pal_of_widget(my_widget_t* widget) {
+  my_widget_t* root = widget;
+  if (widget == NULL) {
+    return NULL;
+  }
+  while (root->parent != NULL) {
+    root = root->parent;
+  }
+  if (my_str_eq(root->widget_type, "window")) {
+    return ((my_window_t*)root)->pal;
+  }
+  return NULL;
+}
+
+my_pal_main_loop_t* my_window_loop_of_widget(my_widget_t* widget) {
+  my_widget_t* root = widget;
+  if (widget == NULL) {
+    return NULL;
+  }
+  while (root->parent != NULL) {
+    root = root->parent;
+  }
+  if (my_str_eq(root->widget_type, "window")) {
+    return ((my_window_t*)root)->loop;
+  }
+  return NULL;
+}
 
 my_ret_t my_window_on_pal_event(my_window_t* win, const my_event_t* event) {
   my_widget_t* root;
