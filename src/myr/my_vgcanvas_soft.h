@@ -37,4 +37,8 @@ void my_vgcanvas_soft_set_antialias(my_vgcanvas_t* vg, bool enabled);
  */
 void my_vgcanvas_soft_set_antialias_level(my_vgcanvas_t* vg, int level);
 
+/** @brief draw_image sampling filter (default MY_SCALE_FILTER_BILINEAR). */
+void my_vgcanvas_soft_set_scale_filter(my_vgcanvas_t* vg,
+                                       my_scale_filter_t filter);
+
 #endif /* MY_VGCANVAS_SOFT_H */

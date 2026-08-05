@@ -60,6 +60,7 @@ typedef struct my_vgcanvas_soft_t {
 
   my_dirty_rects_t dirty;
   int antialias_level; /**< 0=off 1=x4 2=x4*y2 (M8c, default 2) */
+  my_scale_filter_t scale_filter; /**< draw_image sampling (M9b) */
 } my_vgcanvas_soft_t;
 
 /* ---------------- growable arrays ---------------- */
@@ -790,6 +791,30 @@ static my_ret_t soft_measure_text(my_vgcanvas_t* vg, const char* text,
   return my_font_measure(s->state.font, text, s->state.font_size, w, h);
 }
 
+/** @brief Bilinear sample at source coords (already pixel-center mapped:
+ * gx = (dst+0.5)*w/dw - 0.5). Edges clamped. */
+static void sample_bilinear(const uint8_t* rgba, int32_t w, int32_t h, float gx,
+                            float gy, uint8_t out[4]) {
+  int32_t x0 = (int32_t)floorf(gx), y0 = (int32_t)floorf(gy);
+  float ax = gx - (float)x0, ay = gy - (float)y0;
+  int32_t x1, y1, c;
+  if (x0 < 0) { x0 = 0; ax = 0.0f; }
+  if (y0 < 0) { y0 = 0; ay = 0.0f; }
+  x1 = x0 + 1 < w ? x0 + 1 : w - 1;
+  y1 = y0 + 1 < h ? y0 + 1 : h - 1;
+  if (x0 >= w) { x0 = w - 1; x1 = w - 1; ax = 0.0f; }
+  if (y0 >= h) { y0 = h - 1; y1 = h - 1; ay = 0.0f; }
+  for (c = 0; c < 4; c++) {
+    float v00 = (float)rgba[((size_t)y0 * (size_t)w + (size_t)x0) * 4u + c];
+    float v10 = (float)rgba[((size_t)y0 * (size_t)w + (size_t)x1) * 4u + c];
+    float v01 = (float)rgba[((size_t)y1 * (size_t)w + (size_t)x0) * 4u + c];
+    float v11 = (float)rgba[((size_t)y1 * (size_t)w + (size_t)x1) * 4u + c];
+    float top = v00 + (v10 - v00) * ax;
+    float bot = v01 + (v11 - v01) * ax;
+    out[c] = (uint8_t)(top + (bot - top) * ay + 0.5f);
+  }
+}
+
 /** @brief Pack one RGBA pixel into the lcd's native format (over bg). */
 static void pack_native(my_pixel_format_t fmt, const uint8_t* rgba,
                         const my_color_t* bg, uint8_t* out) {
@@ -872,15 +897,27 @@ static my_ret_t soft_draw_image(my_vgcanvas_t* vg, const uint8_t* rgba,
       sy = h - 1;
     }
     for (dx = clipped.x; dx < clipped.x + clipped.w; dx++) {
-      int32_t sx = (int32_t)((int64_t)(dx - dev.x) * w / (dev.w > 0 ? dev.w : 1));
-      if (sx < 0) {
-        sx = 0;
+      if (s->scale_filter == MY_SCALE_FILTER_BILINEAR) {
+        uint8_t px4[4];
+        float fx = ((float)(dx - dev.x) + 0.5f) * (float)w /
+                       (float)(dev.w > 0 ? dev.w : 1) -
+                   0.5f;
+        float fy = ((float)(dy - dev.y) + 0.5f) * (float)h /
+                       (float)(dev.h > 0 ? dev.h : 1) -
+                   0.5f;
+        sample_bilinear(rgba, w, h, fx, fy, px4);
+        pack_native(fmt, px4, bg, out);
+      } else {
+        int32_t sx = (int32_t)((int64_t)(dx - dev.x) * w / (dev.w > 0 ? dev.w : 1));
+        if (sx < 0) {
+          sx = 0;
+        }
+        if (sx >= w) {
+          sx = w - 1;
+        }
+        pack_native(fmt, rgba + ((size_t)sy * (size_t)w + (size_t)sx) * 4u, bg,
+                    out);
       }
-      if (sx >= w) {
-        sx = w - 1;
-      }
-      pack_native(fmt, rgba + ((size_t)sy * (size_t)w + (size_t)sx) * 4u, bg,
-                  out);
       out += bpp;
     }
     ret = my_lcd_draw_pixels(s->lcd, row, clipped.x, dy,
@@ -940,8 +977,17 @@ my_vgcanvas_t* my_vgcanvas_soft_create(const my_allocator_t* allocator,
   s->state.clip =
       my_rect_init(0, 0, (int32_t)my_lcd_get_width(lcd), (int32_t)my_lcd_get_height(lcd));
   s->antialias_level = 2;
+  s->scale_filter = MY_SCALE_FILTER_BILINEAR;
   my_dirty_rects_init(&s->dirty);
   return (my_vgcanvas_t*)s;
+}
+
+void my_vgcanvas_soft_set_scale_filter(my_vgcanvas_t* vg,
+                                       my_scale_filter_t filter) {
+  my_vgcanvas_soft_t* s = (my_vgcanvas_soft_t*)vg;
+  if (s != NULL && s->base.vtable == &s_soft_vtable) {
+    s->scale_filter = filter;
+  }
 }
 
 void my_vgcanvas_soft_set_antialias(my_vgcanvas_t* vg, bool enabled) {

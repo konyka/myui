@@ -136,6 +136,21 @@ static uint32_t real_create_texture(void* ctx, const uint8_t* alpha, int32_t w,
   return (uint32_t)tex;
 }
 
+static uint32_t real_create_texture_rgba(void* ctx, const uint8_t* rgba,
+                                         int32_t w, int32_t h) {
+  GLuint tex;
+  (void)ctx;
+  glGenTextures(1, &tex);
+  glBindTexture(GL_TEXTURE_2D, tex);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, (GLsizei)w, (GLsizei)h, 0, GL_RGBA,
+               GL_UNSIGNED_BYTE, rgba);
+  return (uint32_t)tex;
+}
+
 static void real_delete_texture(void* ctx, uint32_t texture) {
   GLuint tex = (GLuint)texture;
   (void)ctx;
@@ -170,8 +185,8 @@ const my_gl_t* my_gl_real_default(void) {
                                real_delete_program, real_use_program,
                                real_uniform2f,     real_uniform4f,
                                real_draw_arrays,   real_create_texture,
-                               real_delete_texture, real_draw_textured,
-                               NULL};
+                               real_create_texture_rgba, real_delete_texture,
+                               real_draw_textured, NULL};
   return &real;
 }
 

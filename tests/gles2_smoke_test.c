@@ -136,6 +136,28 @@ static void test_gles2_real_render(void) {
     my_font_destroy(font);
   }
 
+  /* draw_image: 2x2 four-quadrant image scaled up 16x */
+  {
+    static const uint8_t quad_img[2 * 2 * 4] = {
+        255, 0, 0, 255,   0, 255, 0, 255,
+        0, 0, 255, 255,   255, 255, 0, 255};
+    my_vgcanvas_begin_frame(vg, NULL);
+    TEST_ASSERT_EQ_INT(my_vgcanvas_draw_image(vg, quad_img, 2, 2,
+                                              &(my_rectf_t){0, 0, 32, 32},
+                                              NULL),
+                       MY_RET_OK);
+    my_vgcanvas_end_frame(vg);
+    glFinish();
+    glReadPixels(8, 64 - 1 - 8, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, px);
+    TEST_ASSERT(px[0] > 200 && px[1] < 60); /* top-left: red */
+    glReadPixels(24, 64 - 1 - 8, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, px);
+    TEST_ASSERT(px[1] > 200 && px[0] < 60); /* top-right: green */
+    glReadPixels(8, 64 - 1 - 24, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, px);
+    TEST_ASSERT(px[2] > 200); /* bottom-left: blue */
+    glReadPixels(24, 64 - 1 - 24, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, px);
+    TEST_ASSERT(px[0] > 200 && px[1] > 200 && px[2] < 60); /* yellow */
+  }
+
   my_vgcanvas_destroy(vg);
 }
 

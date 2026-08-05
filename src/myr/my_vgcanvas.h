@@ -30,6 +30,12 @@
 
 typedef struct my_vgcanvas_t my_vgcanvas_t;
 
+/** @brief Image scaling filter (draw_image, M9b). */
+typedef enum my_scale_filter_t {
+  MY_SCALE_FILTER_NEAREST = 0,
+  MY_SCALE_FILTER_BILINEAR
+} my_scale_filter_t;
+
 /** @brief vgcanvas vtable (frozen interface for all render backends). */
 typedef struct my_vgcanvas_vtable_t {
   /** @brief Begin a frame; dirty hints the redraw region (may be NULL). */

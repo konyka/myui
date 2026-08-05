@@ -4,6 +4,8 @@
  */
 #include "myui/widgets/my_image.h"
 
+#include "myr/my_vgcanvas_soft.h"
+
 #include <string.h>
 
 #include "myc/my_str.h"
@@ -103,9 +105,11 @@ static bool cache_get(my_image_loader_t* loader, const char* path,
 static my_ret_t image_on_paint_blit(my_widget_t* widget, my_vgcanvas_t* vg,
                                     const cached_image_t* img, int32_t dx,
                                     int32_t dy, int32_t dw, int32_t dh) {
+  my_image_t* im = (my_image_t*)widget;
   uint32_t bg = my_widget_style_get_color(widget, MY_STATE_NORMAL, "bg_color",
                                           0x00000000u);
   my_color_t bgc = my_color_from_rgba32(bg);
+  my_vgcanvas_soft_set_scale_filter(vg, im->scale_filter);
   return my_vgcanvas_draw_image(vg, img->pixels, img->w, img->h,
                                 &(my_rectf_t){(float)dx, (float)dy, (float)dw,
                                               (float)dh},
@@ -195,6 +199,7 @@ my_widget_t* my_image_create(const my_allocator_t* allocator) {
   ((my_object_t*)im)->destroy = image_destroy_chain;
   im->allocator = allocator;
   im->scale_mode = MY_IMAGE_SCALE_FIT;
+  im->scale_filter = MY_SCALE_FILTER_BILINEAR;
   ((my_widget_t*)im)->enable = false;
   ((my_widget_t*)im)->widget_type = "image";
   return (my_widget_t*)im;
@@ -221,6 +226,16 @@ my_ret_t my_image_set_scale_mode(my_widget_t* image, my_image_scale_t mode) {
     return MY_RET_INVALID_PARAMS;
   }
   ((my_image_t*)image)->scale_mode = mode;
+  my_widget_invalidate(image, NULL);
+  return MY_RET_OK;
+}
+
+my_ret_t my_image_set_scale_filter(my_widget_t* image,
+                                   my_scale_filter_t filter) {
+  if (image == NULL) {
+    return MY_RET_INVALID_PARAMS;
+  }
+  ((my_image_t*)image)->scale_filter = filter;
   my_widget_invalidate(image, NULL);
   return MY_RET_OK;
 }

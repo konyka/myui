@@ -20,6 +20,7 @@ typedef struct mock_gl_t {
   int32_t scissor[4];
   int draw_calls;
   int create_texture_calls;
+  int create_texture_rgba_calls;
   int delete_texture_calls;
   int textured_draw_calls;
   int32_t last_draw_count;
@@ -122,6 +123,16 @@ static uint32_t mock_create_texture(void* ctx, const uint8_t* alpha, int32_t w,
   return (uint32_t)m->create_texture_calls;
 }
 
+static uint32_t mock_create_texture_rgba(void* ctx, const uint8_t* rgba,
+                                         int32_t w, int32_t h) {
+  mock_gl_t* m = (mock_gl_t*)ctx;
+  (void)rgba;
+  (void)w;
+  (void)h;
+  m->create_texture_rgba_calls++;
+  return 100u + (uint32_t)m->create_texture_rgba_calls;
+}
+
 static void mock_delete_texture(void* ctx, uint32_t tex) {
   mock_gl_t* m = (mock_gl_t*)ctx;
   (void)tex;
@@ -155,6 +166,7 @@ static void mock_gl_init(mock_gl_t* m) {
   m->gl.uniform4f = mock_uniform4f;
   m->gl.draw_arrays_triangles = mock_draw_arrays;
   m->gl.create_texture = mock_create_texture;
+  m->gl.create_texture_rgba = mock_create_texture_rgba;
   m->gl.delete_texture = mock_delete_texture;
   m->gl.draw_textured_quads = mock_draw_textured;
   m->gl.ctx = m;
@@ -281,6 +293,33 @@ static void test_draw_text_not_supported(void) {
   my_vgcanvas_destroy(vg);
 }
 
+static void test_draw_image_mock(void) {
+  mock_gl_t gl;
+  my_vgcanvas_t* vg;
+  static uint8_t img[4 * 4 * 4]; /* 4x4 */
+  mock_gl_init(&gl);
+  vg = my_vgcanvas_gles2_create_with_gl(NULL, 100, 80, &gl.gl);
+  memset(img, 200, sizeof(img));
+
+  my_vgcanvas_begin_frame(vg, NULL);
+  TEST_ASSERT_EQ_INT(my_vgcanvas_draw_image(vg, img, 4, 4,
+                                            &(my_rectf_t){10, 20, 8, 8}, NULL),
+                     MY_RET_OK);
+  TEST_ASSERT_EQ_INT(gl.create_texture_rgba_calls, 1);
+  TEST_ASSERT_EQ_INT(gl.textured_draw_calls, 1);
+  TEST_ASSERT_EQ_INT(gl.last_draw_count, 6);
+  TEST_ASSERT(gl.first_xy[0] == 10.0f && gl.first_xy[1] == 20.0f);
+
+  /* second draw of the same bitmap: texture cache hit */
+  my_vgcanvas_draw_image(vg, img, 4, 4, &(my_rectf_t){0, 0, 4, 4}, NULL);
+  TEST_ASSERT_EQ_INT(gl.create_texture_rgba_calls, 1);
+  TEST_ASSERT_EQ_INT(gl.textured_draw_calls, 2);
+
+  /* destroy frees cached textures */
+  my_vgcanvas_destroy(vg);
+  TEST_ASSERT_EQ_INT(gl.delete_texture_calls, 1);
+}
+
 static void test_draw_text_with_font(void) {
   mock_gl_t gl;
   my_vgcanvas_t* vg;
@@ -365,6 +404,7 @@ MYTEST_MAIN_BEGIN()
   MYTEST_RUN(test_path_triangle_even_odd_spans);
   MYTEST_RUN(test_stroke_polyline_segments);
   MYTEST_RUN(test_draw_text_not_supported);
+  MYTEST_RUN(test_draw_image_mock);
   MYTEST_RUN(test_draw_text_with_font);
   MYTEST_RUN(test_null_params);
   MYTEST_RUN(test_no_leak_with_debug_allocator);

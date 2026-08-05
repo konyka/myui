@@ -29,12 +29,16 @@ typedef struct my_image_t {
   const my_allocator_t* allocator;
   char* path;                     /**< owned */
   my_image_scale_t scale_mode;
+  my_scale_filter_t scale_filter; /**< sampling filter (M9b) */
   my_image_loader_t* loader;      /**< borrowed; NULL = default stb loader */
 } my_image_t;
 
 my_widget_t* my_image_create(const my_allocator_t* allocator);
 my_ret_t my_image_set_image(my_widget_t* image, const char* path);
 my_ret_t my_image_set_scale_mode(my_widget_t* image, my_image_scale_t mode);
+/** @brief Sampling filter for soft-backend scaling (BILINEAR default). */
+my_ret_t my_image_set_scale_filter(my_widget_t* image,
+                                   my_scale_filter_t filter);
 /** @brief Override the loader (borrowed; NULL resets to the stb default). */
 my_ret_t my_image_set_loader(my_widget_t* image, my_image_loader_t* loader);
 

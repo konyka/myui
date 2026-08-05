@@ -6,6 +6,7 @@
  * Registered in ctest with label "bench".
  */
 #include <stdio.h>
+#include <string.h>
 #include <time.h>
 
 #include "mypal/dummy/my_pal_dummy.h"
@@ -91,6 +92,28 @@ int main(void) {
         printf("bench_render: 8 triangles x %d frames AA_level=%d: total %.1f ms, "
                "avg %.3f ms/frame\n",
                BENCH_FRAMES, 2 - pass, t1 - t0,
+               (t1 - t0) / BENCH_FRAMES);
+      }
+    }
+    /* image scaling: 480x270 -> 800x600, nearest vs bilinear */
+    {
+      static uint8_t big_img[270 * 480 * 4];
+      int pass;
+      memset(big_img, 128, sizeof(big_img));
+      for (pass = 0; pass < 2; pass++) {
+        my_vgcanvas_soft_set_scale_filter(
+            vg2, pass == 0 ? MY_SCALE_FILTER_NEAREST : MY_SCALE_FILTER_BILINEAR);
+        t0 = now_ms();
+        for (f = 0; f < BENCH_FRAMES; f++) {
+          my_vgcanvas_begin_frame(vg2, NULL);
+          my_vgcanvas_draw_image(vg2, big_img, 480, 270,
+                                 &(my_rectf_t){0, 0, 800, 600}, NULL);
+          my_vgcanvas_end_frame(vg2);
+        }
+        t1 = now_ms();
+        printf("bench_render: 480x270->800x600 %s x %d frames: total %.1f ms, "
+               "avg %.3f ms/frame\n",
+               pass == 0 ? "nearest " : "bilinear", BENCH_FRAMES, t1 - t0,
                (t1 - t0) / BENCH_FRAMES);
       }
     }

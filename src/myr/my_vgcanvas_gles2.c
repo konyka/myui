@@ -36,6 +36,12 @@ static const char* VS_TEXT_SRC =
     "  v_uv = a_uv;\n"
     "}\n";
 
+static const char* FS_IMG_SRC =
+    "precision mediump float;\n"
+    "uniform sampler2D u_tex;\n"
+    "varying vec2 v_uv;\n"
+    "void main(void) { gl_FragColor = texture2D(u_tex, v_uv); }\n";
+
 static const char* FS_TEXT_SRC =
     "precision mediump float;\n"
     "uniform vec4 u_color;\n"
@@ -46,6 +52,7 @@ static const char* FS_TEXT_SRC =
     "}\n";
 
 #define GLES_TEX_CACHE_SIZE 64
+#define GLES_IMG_TEX_CACHE_SIZE 16
 
 /* ---------------- state ---------------- */
 
@@ -66,6 +73,17 @@ typedef struct gles_tex_entry_t {
   uint32_t texture; /**< 0 = empty */
 } gles_tex_entry_t;
 
+/** @brief Image texture cache entry: keyed by (ptr, w, h); the caller must
+ * keep the bitmap alive while it may be used (my_image's decode cache
+ * holds images for many frames, so this is safe in practice). */
+typedef struct gles_img_tex_entry_t {
+  const uint8_t* ptr;
+  int32_t w;
+  int32_t h;
+  uint32_t texture; /**< 0 = empty */
+  uint64_t last_used;
+} gles_img_tex_entry_t;
+
 typedef struct path_point_t {
   float x;
   float y;
@@ -85,7 +103,10 @@ typedef struct my_vgcanvas_gles2_t {
   int32_t fb_h;
   uint32_t program;
   uint32_t text_program; /**< lazy: created on first draw_text */
+  uint32_t img_program;  /**< lazy: created on first draw_image */
   gles_tex_entry_t tex_cache[GLES_TEX_CACHE_SIZE];
+  gles_img_tex_entry_t img_tex_cache[GLES_IMG_TEX_CACHE_SIZE];
+  uint64_t img_tex_tick;
   gles_state_t state;
 
   gles_state_t* stack;
@@ -589,16 +610,79 @@ static my_ret_t gles_set_font(my_vgcanvas_t* vg, my_font_t* font,
   return MY_RET_OK;
 }
 
+static uint32_t gles_image_texture(my_vgcanvas_gles2_t* s, const uint8_t* rgba,
+                                   int32_t w, int32_t h) {
+  size_t i;
+  gles_img_tex_entry_t* lru = &s->img_tex_cache[0];
+  for (i = 0; i < GLES_IMG_TEX_CACHE_SIZE; i++) {
+    gles_img_tex_entry_t* e = &s->img_tex_cache[i];
+    if (e->texture == 0) {
+      lru = e;
+      continue;
+    }
+    if (e->last_used < lru->last_used) {
+      lru = e;
+    }
+    if (e->ptr == rgba && e->w == w && e->h == h) {
+      e->last_used = ++s->img_tex_tick;
+      return e->texture;
+    }
+  }
+  if (lru->texture != 0) {
+    s->gl.delete_texture(s->gl.ctx, lru->texture);
+  }
+  lru->texture = s->gl.create_texture_rgba(s->gl.ctx, rgba, w, h);
+  lru->ptr = rgba;
+  lru->w = w;
+  lru->h = h;
+  lru->last_used = ++s->img_tex_tick;
+  return lru->texture;
+}
+
 static my_ret_t gles_draw_image(my_vgcanvas_t* vg, const uint8_t* rgba,
                                 int32_t w, int32_t h, const my_rectf_t* dst,
                                 const my_color_t* bg) {
-  (void)vg;
-  (void)rgba;
-  (void)w;
-  (void)h;
-  (void)dst;
-  (void)bg;
-  return MY_RET_NOT_SUPPORTED; /* RGBA texture path: TODO (M8b note) */
+  my_vgcanvas_gles2_t* s = (my_vgcanvas_gles2_t*)vg;
+  uint32_t tex;
+  float quad[24];
+  if (rgba == NULL || dst == NULL || w <= 0 || h <= 0) {
+    return MY_RET_INVALID_PARAMS;
+  }
+  if (s->gl.create_texture_rgba == NULL) {
+    return MY_RET_NOT_SUPPORTED;
+  }
+  /* bg compositing: paint bg rect first, then blend the textured quad */
+  if (bg != NULL && bg->a > 0) {
+    vbuf_t b;
+    vbuf_reset(&b, s);
+    vbuf_rect(&b, dst->x, dst->y, dst->x + dst->w, dst->y + dst->h);
+    if (b.count > 0) {
+      gles_draw(s, s->verts, (int32_t)(b.count / 2), *bg);
+    }
+  }
+  if (s->img_program == 0) {
+    s->img_program = s->gl.create_program(s->gl.ctx, VS_TEXT_SRC, FS_IMG_SRC);
+    if (s->img_program == 0) {
+      return MY_RET_FAIL;
+    }
+  }
+  tex = gles_image_texture(s, rgba, w, h);
+  if (tex == 0) {
+    return MY_RET_OOM;
+  }
+  {
+    float x0 = dst->x + s->state.tx, y0 = dst->y + s->state.ty;
+    float x1 = x0 + dst->w, y1 = y0 + dst->h;
+    const float verts[6][4] = {{x0, y0, 0, 0}, {x1, y0, 1, 0}, {x1, y1, 1, 1},
+                               {x0, y0, 0, 0}, {x1, y1, 1, 1}, {x0, y1, 0, 1}};
+    memcpy(quad, verts, sizeof(quad));
+  }
+  s->gl.use_program(s->gl.ctx, s->img_program);
+  s->gl.uniform2f(s->gl.ctx, s->img_program, "u_resolution", (float)s->fb_w,
+                  (float)s->fb_h);
+  s->gl.draw_textured_quads(s->gl.ctx, s->img_program, tex, quad, 6);
+  s->gl.use_program(s->gl.ctx, s->program);
+  return MY_RET_OK;
 }
 
 static my_ret_t gles_measure_text(my_vgcanvas_t* vg, const char* text,
@@ -622,9 +706,17 @@ static void gles_destroy(my_vgcanvas_t* vg) {
           s->gl.delete_texture(s->gl.ctx, s->tex_cache[i].texture);
         }
       }
+      for (i = 0; i < GLES_IMG_TEX_CACHE_SIZE; i++) {
+        if (s->img_tex_cache[i].texture != 0) {
+          s->gl.delete_texture(s->gl.ctx, s->img_tex_cache[i].texture);
+        }
+      }
     }
     if (s->text_program != 0 && s->gl.delete_program != NULL) {
       s->gl.delete_program(s->gl.ctx, s->text_program);
+    }
+    if (s->img_program != 0 && s->gl.delete_program != NULL) {
+      s->gl.delete_program(s->gl.ctx, s->img_program);
     }
     if (s->program != 0 && s->gl.delete_program != NULL) {
       s->gl.delete_program(s->gl.ctx, s->program);

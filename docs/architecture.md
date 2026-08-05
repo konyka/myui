@@ -172,3 +172,8 @@ PAL port 矩阵：
 - 状态机：光标 (row,col) 按 codepoint；上下移动保持目标列（goal_col，水平移动/点击/编辑时重置——实现上 ta_move_to 不更新 goal，调用点按需设置）；Home/End/Ctrl+Home/End；Enter 拆行、行首 Backspace 合行；Shift 扩选、Ctrl+A、选区删除先行；Ctrl+C/X/V 经 PAL 剪贴板（**保留换行**，与单行 edit 相反）。
 - 视图：scroll_x/scroll_y 保光标可见（行高 = 字体 line_height）；绘制仅可视行区间（逐行 draw_text + 按行分段选区高亮 + 闪烁光标复用 edit 的 timer 机制）；hint 空文档显示；word wrap/行号/撤销重做 = TODO。
 - MVVM：widget_target 映射 text_area 的 text（TwoWay）/hint；XML 标签 `<text_area>`。
+
+## draw_image 后端矩阵与缩放滤波（M9b）
+
+- **soft**：最近邻（默认关闭）或双线性（默认开）采样，alpha 按控件主题 bg 预合成后走 draw_pixels。双线性用像素中心映射 `(dst+0.5)*w/dw-0.5`、四邻域加权（float，未走定点——-O0 下 480x270→800x600 为 15.5ms/帧 vs 最近邻 2.2ms（7x）；**嵌入式建议 `MY_SCALE_FILTER_NEAREST`**，桌面默认 BILINEAR；缩小时的盒式预降采样是 TODO）。`my_vgcanvas_soft_set_scale_filter` + `my_image_set_scale_filter` 透传。
+- **gles2**：draw_image 已实现——RGBA8888 上传纹理（`create_texture_rgba`），专用 FS（直接采样不过调制色），quad + scissor；纹理按 (ptr,w,h) 键 LRU 16 项（调用方须保证位图生命周期，my_image 的解码 LRU 语义自洽，头注释注明）；EGL 冒烟四象限读回断言通过。bg 参数先画背景矩形再混合 quad。
