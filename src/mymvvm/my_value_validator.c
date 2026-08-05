@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "myc/my_error.h"
 #include "myc/my_str.h"
 
 /* ---------------- not_empty ---------------- */
@@ -125,9 +126,66 @@ void my_value_validator_range_destroy(my_value_validator_t* validator) {
   }
 }
 
+/* ---------------- custom registry (startup-time, single-threaded) ---- */
+
+#define MY_VALIDATOR_MAX_CUSTOM 16
+
+typedef struct validator_entry_t {
+  char name[24];
+  const my_value_validator_t* validator;
+} validator_entry_t;
+
+static validator_entry_t g_validators[MY_VALIDATOR_MAX_CUSTOM];
+static size_t g_validator_count = 0;
+
+my_ret_t my_value_validator_register(const char* name,
+                                     const my_value_validator_t* validator) {
+  size_t i;
+  if (name == NULL || validator == NULL || strlen(name) >= 24) {
+    return MY_RET_INVALID_PARAMS;
+  }
+  for (i = 0; i < g_validator_count; i++) {
+    if (my_str_eq(g_validators[i].name, name)) {
+      g_validators[i].validator = validator;
+      return MY_RET_OK;
+    }
+  }
+  if (my_value_validator_find(name) != NULL) {
+    MY_LOGW("validator '%s' overridden by custom registration", name);
+  }
+  if (g_validator_count >= MY_VALIDATOR_MAX_CUSTOM) {
+    return MY_RET_OOM;
+  }
+  strncpy(g_validators[g_validator_count].name, name, 23);
+  g_validators[g_validator_count].validator = validator;
+  g_validator_count++;
+  return MY_RET_OK;
+}
+
+my_ret_t my_value_validator_unregister(const char* name) {
+  size_t i;
+  if (name == NULL) {
+    return MY_RET_INVALID_PARAMS;
+  }
+  for (i = 0; i < g_validator_count; i++) {
+    if (my_str_eq(g_validators[i].name, name)) {
+      g_validators[i] = g_validators[g_validator_count - 1];
+      g_validator_count--;
+      return MY_RET_OK;
+    }
+  }
+  return MY_RET_NOT_FOUND;
+}
+
 const my_value_validator_t* my_value_validator_find(const char* name) {
+  size_t i;
   if (name == NULL || *name == '\0') {
     return NULL;
+  }
+  for (i = 0; i < g_validator_count; i++) { /* custom first */
+    if (my_str_eq(g_validators[i].name, name)) {
+      return g_validators[i].validator;
+    }
   }
   if (my_str_eq(name, "not_empty")) {
     return &NOT_EMPTY;

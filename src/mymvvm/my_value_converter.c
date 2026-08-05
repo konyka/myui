@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "myc/my_error.h"
 #include "myc/my_str.h"
 
 /* ---------------- upper / lower ---------------- */
@@ -96,9 +97,66 @@ static const my_value_converter_t INT_TO_STR = {int_to_str_convert,
 static const my_value_converter_t BOOL_NEGATE = {bool_negate_convert,
                                                  bool_negate_convert, NULL};
 
+/* ---------------- custom registry (startup-time, single-threaded) ---- */
+
+#define MY_CONVERTER_MAX_CUSTOM 16
+
+typedef struct converter_entry_t {
+  char name[24];
+  const my_value_converter_t* converter;
+} converter_entry_t;
+
+static converter_entry_t g_converters[MY_CONVERTER_MAX_CUSTOM];
+static size_t g_converter_count = 0;
+
+my_ret_t my_value_converter_register(const char* name,
+                                     const my_value_converter_t* converter) {
+  size_t i;
+  if (name == NULL || converter == NULL || strlen(name) >= 24) {
+    return MY_RET_INVALID_PARAMS;
+  }
+  for (i = 0; i < g_converter_count; i++) {
+    if (my_str_eq(g_converters[i].name, name)) {
+      g_converters[i].converter = converter;
+      return MY_RET_OK;
+    }
+  }
+  if (my_value_converter_find(name) != NULL) {
+    MY_LOGW("converter '%s' overridden by custom registration", name);
+  }
+  if (g_converter_count >= MY_CONVERTER_MAX_CUSTOM) {
+    return MY_RET_OOM;
+  }
+  strncpy(g_converters[g_converter_count].name, name, 23);
+  g_converters[g_converter_count].converter = converter;
+  g_converter_count++;
+  return MY_RET_OK;
+}
+
+my_ret_t my_value_converter_unregister(const char* name) {
+  size_t i;
+  if (name == NULL) {
+    return MY_RET_INVALID_PARAMS;
+  }
+  for (i = 0; i < g_converter_count; i++) {
+    if (my_str_eq(g_converters[i].name, name)) {
+      g_converters[i] = g_converters[g_converter_count - 1];
+      g_converter_count--;
+      return MY_RET_OK;
+    }
+  }
+  return MY_RET_NOT_FOUND;
+}
+
 const my_value_converter_t* my_value_converter_find(const char* name) {
+  size_t i;
   if (name == NULL || *name == '\0') {
     return NULL;
+  }
+  for (i = 0; i < g_converter_count; i++) { /* custom first */
+    if (my_str_eq(g_converters[i].name, name)) {
+      return g_converters[i].converter;
+    }
   }
   if (my_str_eq(name, "upper")) {
     return &UPPER;

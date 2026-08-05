@@ -36,9 +36,20 @@ my_value_validator_t* my_value_validator_range_create(
 void my_value_validator_range_destroy(my_value_validator_t* validator);
 
 /**
- * @brief Find a parameterless validator by name ("not_empty").
- * Parameterized ones (range) are created by the rule parser.
+ * @brief Find a validator by name: custom registry first, then built-ins
+ * ("not_empty"). Parameterized ones (range) are created by the parser.
  */
 const my_value_validator_t* my_value_validator_find(const char* name);
+
+/**
+ * @brief Register a custom validator by name (borrowed ref; max 16).
+ * Same-name registration replaces (including built-ins, with a warning).
+ * Startup-time, single-threaded only (no locking by design).
+ */
+my_ret_t my_value_validator_register(const char* name,
+                                     const my_value_validator_t* validator);
+
+/** @brief Remove a custom registration (built-ins are not removable). */
+my_ret_t my_value_validator_unregister(const char* name);
 
 #endif /* MY_VALUE_VALIDATOR_H */

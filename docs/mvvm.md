@@ -161,3 +161,26 @@ mc = my_mvvm_bind(wm, win, vm);   /* 之后一切自动 */
 ## list_view 的 items 绑定（M8b）
 
 `v:items="{persons, ItemTemplate=row}"` 写在 `<list_view>`（或 list_view 控件）上时走**虚拟化**路径：widget_target 检测到目标 widget_type 为 list_view 就安装一个 adapter（行 = 容器 + 模板构建的内容子控件，回收重绑），不再全量建子控件。写在普通容器上保持全量重建（小列表）。数据变化（items_changed）时全表刷新。
+
+## 自定义 converter/validator 注册（M8d）
+
+```c
+/* cents <-> "12.34" */
+static my_ret_t money_convert(void* ctx, my_value_t* value) {
+  char buf[32];
+  if (value->type != MY_VALUE_INT32) return MY_RET_OK;
+  snprintf(buf, sizeof(buf), "%d.%02d",
+           (int)(my_value_get_int32(value) / 100),
+           (int)(my_value_get_int32(value) % 100));
+  return my_value_set_str(value, buf);
+}
+static const my_value_converter_t MONEY = {money_convert, NULL /* no back */, NULL};
+
+/* 启动期（单线程，无锁）注册一次，之后规则字符串即可引用： */
+my_value_converter_register("money", &MONEY);
+/* v:text="{price, Converter=money}"  -> 1299 显示为 "12.99" */
+```
+
+- `my_value_converter_register/unregister`、`my_value_validator_register/unregister`；自定义表**优先于内置**（同名覆盖内置，打 `MY_LOGW` 警告；unregister 后回落内置）。
+- 规则引用未注册的名称：bind 返回 `MY_RET_FAIL`（converter）/ `MY_RET_NOT_FOUND`（validator），行为已测试固化。
+- 自定义表上限各 16 项；注册仅允许启动期单线程调用（无锁，头注释注明）。

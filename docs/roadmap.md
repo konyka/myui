@@ -17,4 +17,17 @@
 - **M8a XML UI 加载器** ✅ 已完成：自研零依赖 XML parser（小 DOM、错误行列号、全套畸形输入测试）；UI 加载器（控件工厂注册表、布局/lp/v:*/style 内联、`MYUI_UI_XML` 可裁剪）；demo_mvvm 主页 XML 驱动。
 - **M8b list_view 虚拟化 + image 控件** ✅ 已完成：my_list_view（固定行高、可视行+缓冲、回收池复用、wheel/拖动滚动、滚动条指示；10000 行仅建 ~22 行控件，滚动 0.002ms/次）；POINTER_WHEEL 事件四 port 接入；my_list_adapter 抽象 + items 绑定自动虚拟化；my_image（stb_image、按路径 LRU 缓存 8 项、4 种缩放、alpha 预合成、可裁剪）；bench 数值已刷新。
 - **M8c 渲染质量 + 剪贴板** ✅ 已完成：y 向 AA（x4y2，bench 1.42x < 2.5x 阈值故 level2 默认开；level0/1/2 = 0.72/1.70/2.41ms 每帧）；stroke 四边形条带化（共享覆盖率路径，奇数线宽半像素对齐）；剪贴板（pal 接口 + dummy/linux_fb/wayland 内存实现 + x11 selection 拥有与应答，外部获取 TODO）+ edit Ctrl+C/X/V；edit 光标 500ms 闪烁。
-- **M8d+ 候选**：多行编辑、文字 shaping、converter/validator 开放注册、XML→C 生成器、GLES draw_image（RGBA 纹理）。**待有 SDK 环境**：iOS(uikit)、HarmonyOS、Android、Web、win32/sdl2 port、Metal backend、FreeBSD/linux_fb 实机复核。
+- **M8d MVVM 开放注册 + 收尾** ✅ 已完成：converter/validator 自定义注册（自定义优先、覆盖告警、unregister 回落）；文档总收尾；bench 汇总见下。
+
+## 性能基线汇总（GCC 16，-O0 Debug，本机）
+
+| 场景 | 数值 |
+|------|------|
+| 50 按钮全帧重绘 | 2.40 ms/帧 |
+| 100 半透明矩形全帧 | 2.01 ms/帧 |
+| 路径填充 AA level0/1/2 | 0.72 / 1.67 / 2.39 ms/帧 |
+| 1051 控件构建 / 全树 relayout | 0.30 / 0.05 ms |
+| 10 万次 hit_test | 28.7 ms |
+| list_view 万行滚动 | 0.002 ms/次（仅 ~22 行控件） |
+
+- **M9+ 候选**：多行编辑、IME、x11 外部剪贴板获取、文字 shaping/Bidi、GLES draw_image 与 GLES AA、双线性缩放、变高列表与增量 diff、XML→C 生成器、滚动条拖拽、stroke 圆 cap/join。**待有 SDK 环境**：iOS(uikit)、HarmonyOS、Android、Web、win32/sdl2 port、Metal backend、FreeBSD/linux_fb 实机复核。

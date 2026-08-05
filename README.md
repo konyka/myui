@@ -34,7 +34,7 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
-选项：`MYUI_C_STANDARD=99|11|17|23`、`MYUI_BUILD_TESTS=ON/OFF`。无 X11 时自动使用 dummy port（headless 可开发可测试）。
+选项（`cmake -LH` 可查）：`MYUI_C_STANDARD=99|11|17|23`、`MYUI_PAL=auto|x11|dummy|linux_fb|wayland`、`MYUI_FONT_STB`、`MYUI_IMAGE_STB`、`MYUI_UI_XML`、`MYUI_BUILD_TESTS`、`MYUI_BUILD_DEMOS`。无 X11 时自动使用 dummy port（headless 可开发可测试）。
 
 交叉编译：`cmake -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-<android|emscripten|harmonyos|ios>.cmake`（未经 SDK 验证，M7+ 落实）。
 

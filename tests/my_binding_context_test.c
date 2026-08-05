@@ -3,7 +3,9 @@
  * @brief Unit tests for the binding context with a recording mock target.
  */
 #include "mymvvm/my_binding_context.h"
+#include "mymvvm/my_value_converter.h"
 
+#include <stdio.h>
 #include <string.h>
 
 #include "mytest.h"
@@ -336,6 +338,45 @@ static void test_bad_rule_and_null(void) {
   my_view_model_unref(vm);
 }
 
+static my_ret_t money_convert(void* ctx, my_value_t* value) {
+  char buf[32];
+  (void)ctx;
+  if (value->type != MY_VALUE_INT32) {
+    return MY_RET_OK;
+  }
+  snprintf(buf, sizeof(buf), "%d.%02d", (int)(my_value_get_int32(value) / 100),
+           (int)(my_value_get_int32(value) % 100));
+  return my_value_set_str(value, buf);
+}
+
+static const my_value_converter_t MONEY_CONV = {money_convert, NULL, NULL};
+
+static void test_custom_converter_in_rule(void) {
+  my_view_model_t* vm = my_view_model_dummy_create(NULL);
+  mock_target_t target;
+  my_binding_context_t* ctx;
+  mock_init(&target);
+
+  my_value_converter_register("money", &MONEY_CONV);
+  set_vm_int(vm, "price", 1299);
+
+  ctx = my_binding_context_create(NULL, vm);
+  TEST_ASSERT_EQ_INT(my_binding_context_bind(ctx, &target.base,
+                                             "v:text={price, Converter=money}"),
+                     MY_RET_OK);
+  TEST_ASSERT_EQ_STR(target.text, "12.99");
+
+  /* unregister: new binds referencing it fail cleanly */
+  my_value_converter_unregister("money");
+  TEST_ASSERT_EQ_INT(my_binding_context_bind(ctx, &target.base,
+                                             "v:text={price, Converter=money}"),
+                     MY_RET_FAIL);
+
+  my_binding_context_destroy(ctx);
+  mock_destroy(&target);
+  my_view_model_unref(vm);
+}
+
 static void test_no_leak_with_debug_allocator(void) {
   my_allocator_t* dbg = my_allocator_debug_create(NULL);
   my_view_model_t* vm = my_view_model_dummy_create(dbg);
@@ -375,5 +416,6 @@ MYTEST_MAIN_BEGIN()
   MYTEST_RUN(test_set_view_model_rewires);
   MYTEST_RUN(test_update_to_vm_manual);
   MYTEST_RUN(test_bad_rule_and_null);
+  MYTEST_RUN(test_custom_converter_in_rule);
   MYTEST_RUN(test_no_leak_with_debug_allocator);
 MYTEST_MAIN_END()
