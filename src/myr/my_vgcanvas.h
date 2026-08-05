@@ -76,6 +76,16 @@ typedef struct my_vgcanvas_vtable_t {
   /** @brief Measure text with the current font/size (NOT_SUPPORTED without). */
   my_ret_t (*measure_text)(my_vgcanvas_t* vg, const char* text, int32_t* w,
                            int32_t* h);
+
+  /**
+   * @brief Blit an RGBA8888 image into dst (user space), nearest-neighbor
+   * scaled. When bg != NULL each source pixel is first composited over bg
+   * (src * a + bg * (1-a)); the result is written opaquely. May return
+   * MY_RET_NOT_SUPPORTED on backends without image support.
+   */
+  my_ret_t (*draw_image)(my_vgcanvas_t* vg, const uint8_t* rgba, int32_t w,
+                         int32_t h, const my_rectf_t* dst,
+                         const my_color_t* bg);
 } my_vgcanvas_vtable_t;
 
 /** @brief vgcanvas base "class": first member of every backend. */
@@ -183,6 +193,13 @@ static inline my_ret_t my_vgcanvas_measure_text(my_vgcanvas_t* vg,
                                                 const char* text, int32_t* w,
                                                 int32_t* h) {
   return vg->vtable->measure_text(vg, text, w, h);
+}
+
+static inline my_ret_t my_vgcanvas_draw_image(my_vgcanvas_t* vg,
+                                              const uint8_t* rgba, int32_t w,
+                                              int32_t h, const my_rectf_t* dst,
+                                              const my_color_t* bg) {
+  return vg->vtable->draw_image(vg, rgba, w, h, dst, bg);
 }
 
 #endif /* MY_VGCANVAS_H */

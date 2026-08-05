@@ -217,6 +217,13 @@ static void fb_dispatch_input(fb_pal_t* p, const fb_input_event_t* ev,
       e.u.pointer.y = *cur_y;
       break;
     case EV_REL:
+      if (ev->code == 0x08) { /* REL_WHEEL */
+        e.type = MY_EVENT_POINTER_WHEEL;
+        e.u.pointer.x = *cur_x;
+        e.u.pointer.y = *cur_y;
+        e.u.pointer.delta = ev->value;
+        break;
+      }
       if (ev->code == REL_X) {
         *cur_x += ev->value;
       } else if (ev->code == REL_Y) {

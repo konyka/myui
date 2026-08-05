@@ -154,6 +154,16 @@ static my_ret_t rec_draw_text(my_vgcanvas_t* vg, const char* text, float x,
   return MY_RET_OK;
 }
 
+static my_ret_t rec_draw_image(my_vgcanvas_t* vg, const uint8_t* rgba,
+                               int32_t w, int32_t h, const my_rectf_t* dst,
+                               const my_color_t* bg) {
+  (void)rgba;
+  (void)bg;
+  rec_op((rec_vg_t*)vg, "draw_image %d %d %g %g %g %g", (int)w, (int)h,
+         (double)dst->x, (double)dst->y, (double)dst->w, (double)dst->h);
+  return MY_RET_OK;
+}
+
 static void rec_destroy(my_vgcanvas_t* vg) {
   (void)vg; /* stack-allocated, nothing to free */
 }
@@ -179,7 +189,7 @@ static const my_vgcanvas_vtable_t REC_VG_VTABLE = {
     rec_set_line_width, rec_fill_rect, rec_stroke_rect, rec_fill_rounded_rect,
     rec_begin_path,  rec_move_to,    rec_line_to,    rec_close_path,
     rec_fill,        rec_stroke,     rec_draw_text,  rec_destroy,
-    rec_set_font,    rec_measure_text};
+    rec_set_font,    rec_measure_text, rec_draw_image};
 
 static void rec_vg_init(rec_vg_t* r) {
   memset(r, 0, sizeof(*r));

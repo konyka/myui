@@ -21,6 +21,8 @@ static const char* event_name_of(my_event_type_t type) {
       return "pointer_move";
     case MY_EVENT_POINTER_UP:
       return "pointer_up";
+    case MY_EVENT_POINTER_WHEEL:
+      return "pointer_wheel";
     case MY_EVENT_KEY_DOWN:
       return "key_down";
     case MY_EVENT_KEY_UP:
@@ -90,6 +92,10 @@ bool my_event_dispatch(my_event_dispatcher_t* dispatcher,
       }
       set_focus(dispatcher, NULL); /* click on empty space: blur */
       return false;
+    case MY_EVENT_POINTER_WHEEL:
+      target = my_widget_hit_test(dispatcher->root, event->u.pointer.x,
+                                  event->u.pointer.y);
+      return target != NULL ? deliver(target, event) : false;
     case MY_EVENT_POINTER_MOVE:
       target = dispatcher->grabbed;
       if (target == NULL) {

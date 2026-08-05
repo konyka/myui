@@ -18,6 +18,7 @@ typedef enum my_event_type_t {
   MY_EVENT_POINTER_DOWN, /**< mouse/touch press */
   MY_EVENT_POINTER_MOVE,
   MY_EVENT_POINTER_UP,
+  MY_EVENT_POINTER_WHEEL, /**< wheel/scroll: pointer.delta (rows, +up -down) */
   MY_EVENT_KEY_DOWN,
   MY_EVENT_KEY_UP,
   MY_EVENT_RESIZE, /**< window size changed */
@@ -77,6 +78,7 @@ typedef struct my_event_t {
       int32_t y;
       uint8_t button; /**< 1 = left, 2 = middle, 3 = right */
       uint8_t modifiers; /**< my_keymod_t bitmask */
+      int32_t delta; /**< POINTER_WHEEL: scroll delta in rows */
     } pointer;
     struct {
       uint32_t key;       /**< my_key_t or ASCII */

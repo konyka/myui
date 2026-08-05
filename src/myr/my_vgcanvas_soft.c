@@ -15,6 +15,7 @@
 
 #include <math.h>
 #include <stdlib.h>
+#include <string.h>
 
 typedef struct soft_state_t {
   my_color_t fill_color;
@@ -606,6 +607,112 @@ static my_ret_t soft_measure_text(my_vgcanvas_t* vg, const char* text,
   return my_font_measure(s->state.font, text, s->state.font_size, w, h);
 }
 
+/** @brief Pack one RGBA pixel into the lcd's native format (over bg). */
+static void pack_native(my_pixel_format_t fmt, const uint8_t* rgba,
+                        const my_color_t* bg, uint8_t* out) {
+  uint8_t r = rgba[0], g = rgba[1], b = rgba[2], a = rgba[3];
+  if (bg != NULL && a < 255) {
+    r = (uint8_t)(((uint32_t)r * a + (uint32_t)bg->r * (255u - a)) / 255u);
+    g = (uint8_t)(((uint32_t)g * a + (uint32_t)bg->g * (255u - a)) / 255u);
+    b = (uint8_t)(((uint32_t)b * a + (uint32_t)bg->b * (255u - a)) / 255u);
+    a = 255;
+  }
+  switch (fmt) {
+    case MY_PIXEL_FORMAT_RGB565: {
+      uint16_t v = (uint16_t)(((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3));
+      memcpy(out, &v, 2);
+      break;
+    }
+    case MY_PIXEL_FORMAT_RGB888:
+      out[0] = r;
+      out[1] = g;
+      out[2] = b;
+      break;
+    case MY_PIXEL_FORMAT_ARGB8888:
+      out[0] = a;
+      out[1] = r;
+      out[2] = g;
+      out[3] = b;
+      break;
+    case MY_PIXEL_FORMAT_BGRA8888:
+      out[0] = b;
+      out[1] = g;
+      out[2] = r;
+      out[3] = a;
+      break;
+    case MY_PIXEL_FORMAT_MONO:
+    default:
+      out[0] = (uint8_t)(((uint32_t)r * 299 + (uint32_t)g * 587 +
+                          (uint32_t)b * 114) / 1000u >= 128u
+                             ? 1
+                             : 0);
+      break;
+  }
+}
+
+static my_ret_t soft_draw_image(my_vgcanvas_t* vg, const uint8_t* rgba,
+                                int32_t w, int32_t h, const my_rectf_t* dst,
+                                const my_color_t* bg) {
+  my_vgcanvas_soft_t* s = (my_vgcanvas_soft_t*)vg;
+  my_pixel_format_t fmt;
+  my_rect_t dev, clipped;
+  uint32_t bpp;
+  uint8_t* row = NULL;
+  int32_t dy;
+  my_ret_t ret = MY_RET_OK;
+  if (rgba == NULL || dst == NULL || w <= 0 || h <= 0) {
+    return MY_RET_INVALID_PARAMS;
+  }
+  fmt = my_lcd_get_format(s->lcd);
+  if (fmt == MY_PIXEL_FORMAT_MONO) {
+    return MY_RET_NOT_SUPPORTED; /* 1bpp dithering: TODO */
+  }
+  bpp = my_pixel_format_bpp(fmt) / 8u;
+  dev = my_rect_init((int32_t)floorf(dst->x + s->state.tx),
+                     (int32_t)floorf(dst->y + s->state.ty),
+                     (int32_t)floorf(dst->w), (int32_t)floorf(dst->h));
+  if (!my_rect_intersect(&dev, &s->state.clip, &clipped)) {
+    return MY_RET_OK;
+  }
+  row = (uint8_t*)my_mem_alloc(s->allocator, (size_t)clipped.w * bpp);
+  if (row == NULL) {
+    return MY_RET_OOM;
+  }
+  for (dy = clipped.y; dy < clipped.y + clipped.h; dy++) {
+    int32_t sy = (int32_t)((int64_t)(dy - dev.y) * h / (dev.h > 0 ? dev.h : 1));
+    int32_t dx;
+    uint8_t* out = row;
+    if (sy < 0) {
+      sy = 0;
+    }
+    if (sy >= h) {
+      sy = h - 1;
+    }
+    for (dx = clipped.x; dx < clipped.x + clipped.w; dx++) {
+      int32_t sx = (int32_t)((int64_t)(dx - dev.x) * w / (dev.w > 0 ? dev.w : 1));
+      if (sx < 0) {
+        sx = 0;
+      }
+      if (sx >= w) {
+        sx = w - 1;
+      }
+      pack_native(fmt, rgba + ((size_t)sy * (size_t)w + (size_t)sx) * 4u, bg,
+                  out);
+      out += bpp;
+    }
+    ret = my_lcd_draw_pixels(s->lcd, row, clipped.x, dy,
+                             (uint32_t)clipped.w, 1);
+    if (ret != MY_RET_OK) {
+      break;
+    }
+  }
+  my_mem_free(s->allocator, row);
+  if (ret == MY_RET_OK) {
+    my_dirty_rects_add(&s->dirty, &clipped);
+  }
+  return ret;
+}
+
 /* ---------------- lifecycle ---------------- */
 
 static void soft_destroy(my_vgcanvas_t* vg) {
@@ -624,7 +731,8 @@ static const my_vgcanvas_vtable_t s_soft_vtable = {
     soft_set_stroke_color, soft_set_line_width, soft_fill_rect,  soft_stroke_rect,
     soft_fill_rounded_rect, soft_begin_path, soft_move_to,       soft_line_to,
     soft_close_path,       soft_fill,        soft_stroke,        soft_draw_text,
-    soft_destroy,          soft_set_font,    soft_measure_text};
+    soft_destroy,          soft_set_font,    soft_measure_text,
+    soft_draw_image};
 
 my_vgcanvas_t* my_vgcanvas_soft_create(const my_allocator_t* allocator,
                                        my_lcd_t* lcd) {

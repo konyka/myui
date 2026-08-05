@@ -344,6 +344,15 @@ static void x11_dispatch(x11_pal_t* p, const XEvent* xev) {
       break;
     case ButtonPress:
     case ButtonRelease:
+      if (w != NULL && (xev->xbutton.button == 4 || xev->xbutton.button == 5) &&
+          xev->type == ButtonPress) {
+        e.type = MY_EVENT_POINTER_WHEEL;
+        e.u.pointer.x = xev->xbutton.x;
+        e.u.pointer.y = xev->xbutton.y;
+        e.u.pointer.delta = xev->xbutton.button == 4 ? 1 : -1;
+        p->handler(p->handler_ctx, (my_pal_window_t*)w, &e);
+        break;
+      }
       if (w != NULL && xev->xbutton.button <= 3) {
         e.type = xev->type == ButtonPress ? MY_EVENT_POINTER_DOWN
                                           : MY_EVENT_POINTER_UP;

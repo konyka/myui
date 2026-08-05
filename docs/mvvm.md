@@ -157,3 +157,7 @@ mc = my_mvvm_bind(wm, win, vm);   /* 之后一切自动 */
 ```
 
 所有 `v:` 前缀属性原样（含 `{}`）拼入 widget 的 bind_rules，`my_mvvm_bind(wm, win, vm)` 之后全自动。注意属性值必须加引号（XML 规则）。
+
+## list_view 的 items 绑定（M8b）
+
+`v:items="{persons, ItemTemplate=row}"` 写在 `<list_view>`（或 list_view 控件）上时走**虚拟化**路径：widget_target 检测到目标 widget_type 为 list_view 就安装一个 adapter（行 = 容器 + 模板构建的内容子控件，回收重绑），不再全量建子控件。写在普通容器上保持全量重建（小列表）。数据变化（items_changed）时全表刷新。

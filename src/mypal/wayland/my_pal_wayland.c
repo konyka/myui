@@ -335,9 +335,27 @@ static void on_pointer_button(void* data, struct wl_pointer* ptr,
   dispatch_event(p, (my_pal_window_t*)w, &e);
 }
 
+static void on_pointer_axis(void* data, struct wl_pointer* ptr, uint32_t time,
+                            uint32_t axis, wl_fixed_t value) {
+  wl_pal_t* p = (wl_pal_t*)data;
+  wl_window_t* w = find_by_surface(p, g_last_surface);
+  my_event_t e;
+  (void)ptr;
+  (void)time;
+  if (w == NULL || axis != WL_POINTER_AXIS_VERTICAL_SCROLL) {
+    return;
+  }
+  e = my_event_init(MY_EVENT_POINTER_WHEEL);
+  e.u.pointer.x = w->pointer_x;
+  e.u.pointer.y = w->pointer_y;
+  e.u.pointer.delta = wl_fixed_to_int(value) < 0 ? 1 : -1;
+  dispatch_event(p, (my_pal_window_t*)w, &e);
+}
+
 static const struct wl_pointer_listener POINTER_LISTENER = {
     .enter = on_pointer_enter, .leave = on_pointer_leave,
-    .motion = on_pointer_motion, .button = on_pointer_button};
+    .motion = on_pointer_motion, .button = on_pointer_button,
+    .axis = on_pointer_axis};
 
 static void on_kb_keymap(void* data, struct wl_keyboard* kb, uint32_t format,
                          int32_t fd, uint32_t size) {

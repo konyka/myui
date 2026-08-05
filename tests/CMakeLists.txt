@@ -80,6 +80,9 @@ if(UNIX)
   endforeach()
 endif()
 
+# image test needs 3rd/ include for stb_image_write
+target_include_directories(my_image_test PRIVATE ${CMAKE_SOURCE_DIR}/3rd)
+
 # golden-image tests need the reference directory path
 target_compile_definitions(my_golden_test
   PRIVATE MY_GOLDEN_DIR="${CMAKE_CURRENT_SOURCE_DIR}/golden")

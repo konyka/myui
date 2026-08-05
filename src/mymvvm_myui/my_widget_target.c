@@ -12,6 +12,7 @@
 #include "myui/widgets/my_checkbox.h"
 #include "myui/widgets/my_edit.h"
 #include "myui/widgets/my_label.h"
+#include "myui/widgets/my_list_view.h"
 #include "myui/widgets/my_progress_bar.h"
 #include "myui/widgets/my_slider.h"
 
@@ -151,6 +152,51 @@ static my_ret_t target_off_event(my_binding_target_t* t, uint32_t id) {
 
 /* ---------------- items ---------------- */
 
+/* items binding on a list_view: virtualized via an adapter (M8b) */
+typedef struct items_adapter_t {
+  my_list_adapter_t base;
+  const my_allocator_t* allocator;
+  const my_item_template_t* tmpl;
+  size_t count;
+  my_item_props_fn_t props;
+  void* props_ctx;
+} items_adapter_t;
+
+static size_t items_adapter_count(my_list_adapter_t* adapter) {
+  return ((items_adapter_t*)adapter)->count;
+}
+
+static my_widget_t* items_adapter_create_row(my_list_adapter_t* adapter) {
+  items_adapter_t* a = (items_adapter_t*)adapter;
+  return my_widget_create(a->allocator, "row");
+}
+
+static void items_adapter_bind_row(my_list_adapter_t* adapter,
+                                   my_widget_t* row, size_t index) {
+  items_adapter_t* a = (items_adapter_t*)adapter;
+  my_widget_t* content;
+  while (my_widget_child_count(row) > 0) {
+    my_widget_remove_child(row, my_widget_get_child(row, 0));
+  }
+  content = a->tmpl->build(row, index, a->props, a->props_ctx, a->tmpl->ctx);
+  if (content != NULL) {
+    my_widget_set_rect(content, &(my_rect_t){0, 0, row->rect.w, row->rect.h});
+    my_widget_add_child(row, content);
+    my_widget_unref(content);
+  }
+}
+
+static const my_list_adapter_vtable_t ITEMS_ADAPTER_VTABLE = {
+    items_adapter_count, items_adapter_create_row, items_adapter_bind_row};
+
+static void items_adapter_destroy(my_widget_target_t* wt) {
+  items_adapter_t* a = (items_adapter_t*)wt->items_adapter;
+  if (a != NULL) {
+    my_mem_free(wt->allocator, a);
+    wt->items_adapter = NULL;
+  }
+}
+
 static my_ret_t target_rebuild_items(my_binding_target_t* t,
                                      const char* item_template, size_t count,
                                      my_item_props_fn_t props,
@@ -159,6 +205,28 @@ static my_ret_t target_rebuild_items(my_binding_target_t* t,
   my_widget_t* container = wt->widget;
   size_t i;
   const my_item_template_t* tmpl = my_mvvm_find_template(item_template);
+
+  /* list_view: virtualized path (M8b) */
+  if (my_str_eq(container->widget_type, "list_view")) {
+    items_adapter_t* a;
+    if (tmpl == NULL) {
+      return MY_RET_NOT_FOUND;
+    }
+    a = (items_adapter_t*)my_mem_calloc(wt->allocator, 1,
+                                        sizeof(items_adapter_t));
+    if (a == NULL) {
+      return MY_RET_OOM;
+    }
+    a->base.vtable = &ITEMS_ADAPTER_VTABLE;
+    a->allocator = wt->allocator;
+    a->tmpl = tmpl;
+    a->count = count;
+    a->props = props;
+    a->props_ctx = props_ctx;
+    items_adapter_destroy(wt); /* replace previous */
+    wt->items_adapter = a;
+    return my_list_view_set_adapter(container, (my_list_adapter_t*)a);
+  }
 
   while (my_widget_child_count(container) > 0) {
     my_widget_remove_child(container, my_widget_get_child(container, 0));
@@ -203,6 +271,7 @@ my_widget_target_t* my_widget_target_create(const my_allocator_t* allocator,
 
 void my_widget_target_destroy(my_widget_target_t* target) {
   if (target != NULL) {
+    items_adapter_destroy(target);
     my_value_reset(&target->value);
     my_mem_free(target->allocator, target);
   }

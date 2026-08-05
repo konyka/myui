@@ -10,6 +10,7 @@
 #include "myui/widgets/my_button.h"
 #include "myui/widgets/my_edit.h"
 #include "myui/widgets/my_label.h"
+#include "myui/widgets/my_list_view.h"
 #include "myui/widgets/my_progress_bar.h"
 #include "myui/widgets/my_slider.h"
 
@@ -411,6 +412,42 @@ static void test_slider_progress_mvvm_e2e(void) {
   app_destroy(&a);
 }
 
+static void test_items_binding_on_list_view_is_virtualized(void) {
+  app_ctx_t a;
+  my_view_model_array_t* arr;
+  my_widget_t* list;
+  int i;
+  app_init(&a);
+  a.vm = my_view_model_dummy_create(NULL);
+  arr = my_view_model_array_dummy_create(NULL);
+  for (i = 0; i < 1000; i++) {
+    my_view_model_array_dummy_push(arr, person("p"));
+  }
+  set_vm_ptr(a.vm, "persons", arr);
+  my_mvvm_register_template("person_item", build_person_row, NULL);
+
+  list = my_list_view_create(NULL);
+  my_widget_set_rect(list, &(my_rect_t){0, 60, 200, 120}); /* 5 rows visible */
+  my_widget_set_bind_rules(list, "v:items={persons, ItemTemplate=person_item}");
+  my_widget_add_child(my_window_widget(a.win), list);
+  my_widget_unref(list);
+
+  a.mc = my_mvvm_bind(a.wm, a.win, a.vm);
+  TEST_ASSERT_NOT_NULL(a.mc);
+
+  /* 1000 data rows but only a handful of row widgets exist */
+  TEST_ASSERT(my_widget_child_count(list) <= 8);
+  TEST_ASSERT(my_list_view_rows_created_total(list) <= 8);
+
+  /* scroll deep: rows get rebound to far indexes, no mass creation */
+  my_list_view_set_scroll_offset(list, 24 * 500);
+  TEST_ASSERT(my_widget_child_count(list) <= 8);
+  TEST_ASSERT(my_list_view_rows_created_total(list) <= 16);
+
+  my_view_model_array_unref(arr);
+  app_destroy(&a);
+}
+
 static void test_no_leak_with_debug_allocator(void) {
   my_allocator_t* dbg = my_allocator_debug_create(NULL);
   my_pal_t* pal = my_pal_dummy_create(dbg);
@@ -465,5 +502,6 @@ MYTEST_MAIN_BEGIN()
   MYTEST_RUN(test_edit_two_way_end_to_end);
   MYTEST_RUN(test_edit_validator_rejects);
   MYTEST_RUN(test_slider_progress_mvvm_e2e);
+  MYTEST_RUN(test_items_binding_on_list_view_is_virtualized);
   MYTEST_RUN(test_no_leak_with_debug_allocator);
 MYTEST_MAIN_END()

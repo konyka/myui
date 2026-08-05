@@ -23,6 +23,7 @@ typedef struct my_widget_target_t {
   const my_allocator_t* allocator;
   my_widget_t* widget; /**< weak */
   my_value_t value;    /**< generic "value" property slot */
+  void* items_adapter; /**< owned when widget is a list_view (M8b) */
 } my_widget_target_t;
 
 /** @brief Wrap a widget (weak ref) as a binding target. */

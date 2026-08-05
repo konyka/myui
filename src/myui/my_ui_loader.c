@@ -15,7 +15,9 @@
 #include "myui/widgets/my_button.h"
 #include "myui/widgets/my_checkbox.h"
 #include "myui/widgets/my_edit.h"
+#include "myui/widgets/my_image.h"
 #include "myui/widgets/my_label.h"
+#include "myui/widgets/my_list_view.h"
 #include "myui/widgets/my_progress_bar.h"
 #include "myui/widgets/my_slider.h"
 
@@ -158,6 +160,41 @@ static my_widget_t* make_progress(const my_allocator_t* a,
   return w;
 }
 
+static my_widget_t* make_list_view(const my_allocator_t* a,
+                                   const my_xml_node_t* n) {
+  my_widget_t* w = my_list_view_create(a);
+  if (w != NULL && my_xml_node_attr(n, "row_height") != NULL) {
+    my_list_view_set_row_height(w, attr_int(n, "row_height", 24));
+  }
+  return w;
+}
+
+static my_widget_t* make_image(const my_allocator_t* a, const my_xml_node_t* n) {
+  my_widget_t* w = my_image_create(a);
+  const char* src;
+  const char* scale;
+  if (w == NULL) {
+    return NULL;
+  }
+  src = my_xml_node_attr(n, "src");
+  if (src != NULL) {
+    my_image_set_image(w, src);
+  }
+  scale = my_xml_node_attr(n, "scale");
+  if (scale != NULL) {
+    if (my_str_eq(scale, "none")) {
+      my_image_set_scale_mode(w, MY_IMAGE_SCALE_NONE);
+    } else if (my_str_eq(scale, "center")) {
+      my_image_set_scale_mode(w, MY_IMAGE_SCALE_CENTER);
+    } else if (my_str_eq(scale, "fill")) {
+      my_image_set_scale_mode(w, MY_IMAGE_SCALE_FILL);
+    } else {
+      my_image_set_scale_mode(w, MY_IMAGE_SCALE_FIT);
+    }
+  }
+  return w;
+}
+
 static void register_builtins(void) {
   static bool done = false;
   if (done) {
@@ -171,6 +208,8 @@ static void register_builtins(void) {
   my_ui_loader_register("checkbox", make_checkbox);
   my_ui_loader_register("slider", make_slider);
   my_ui_loader_register("progress_bar", make_progress);
+  my_ui_loader_register("list_view", make_list_view);
+  my_ui_loader_register("image", make_image);
 }
 
 /* ---------------- generic attribute application ---------------- */

@@ -154,3 +154,8 @@ PAL port 矩阵：
 
 - `my_xml.h/.c`：自研最小 XML parser（零依赖）：元素/属性（单双引号）/文本/注释/CDATA/五预定义转义/自闭合；单根；不做 DTD/命名空间/实体全集（未知实体报错）。小 DOM（`my_xml_node`：name/attrs/children/text/line），错误带行列号。
 - `my_ui_loader.h/.c`（编译选项 `MYUI_UI_XML` 默认 ON）：标签→控件工厂注册表（`my_ui_loader_register`；内置 window/button/label/edit/checkbox/slider/progress_bar）；通用属性 name/x/y/w/h/visible/enable/lp/layout 由 loader 统一应用，控件特有属性（text/hint/password/min/max/step/value/checked...）由工厂自取；`v:*` 属性按 `name=value;` 拼进 `bind_rules`（my_mvvm_bind 直接消费）；`<style>` 文本段喂给窗口 theme；`my_ui_load_str/my_ui_load_file`，未知标签报错带行号。demo_mvvm 主页已 XML 驱动。
+
+## list_view 虚拟化与 image 控件（M8b）
+
+- `my_list_view`：固定行高虚拟化。可视行数 + 1 行缓冲，滚出可视区的行进回收池（`pool` 持引用），新进可视区的行从池取出经 `bind_row` 重绑数据；滚动钳制、POINTER_WHEEL（新事件，x11 Button4/5、wayland axis、linux_fb REL_WHEEL 已接）与拖动滚动；右侧指示条。数据源抽象 `my_list_adapter_t`（get_count/create_row/bind_row）；items 绑定落在 list_view 上时 widget_target 自动装 adapter 走虚拟化（普通容器保持全量重建）；items_changed 全表刷新（增量 diff TODO）。10000 行实测只创建 ~22 个行控件。
+- `my_image` + `my_image_loader`：stb_image 后端（vendored 3rd/stb，`MYUI_IMAGE_STB` 可裁剪，OFF 显示占位框）；解码统一 RGBA8888，按路径 LRU 缓存（默认 8 项）；缩放 none/center/fit/fill（最近邻，双线性 TODO）；透明像素按控件主题 bg_color 预合成后走 lcd draw_pixels 快速路径；vgcanvas vtable 新增 `draw_image`（soft 实现格式特化 + 最近邻缩放 + 裁剪，GLES 端 NOT_SUPPORTED 留 TODO）。

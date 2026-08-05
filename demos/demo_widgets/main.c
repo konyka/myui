@@ -17,9 +17,43 @@
 #include "myui/my_window_manager.h"
 #include "myui/widgets/my_button.h"
 #include "myui/widgets/my_checkbox.h"
+#include "myui/widgets/my_image.h"
+
+#include "stb/stb_image_write.h"
 #include "myui/widgets/my_label.h"
+#include "myui/widgets/my_list_view.h"
 #include "myui/widgets/my_progress_bar.h"
 #include "myui/widgets/my_slider.h"
+
+/* simple code-driven adapter for the demo list_view (500 rows) */
+static size_t demo_row_count(my_list_adapter_t* adapter) {
+  (void)adapter;
+  return 500;
+}
+
+static my_widget_t* demo_create_row(my_list_adapter_t* adapter) {
+  (void)adapter;
+  return my_widget_create(NULL, "row");
+}
+
+static void demo_bind_row(my_list_adapter_t* adapter, my_widget_t* row,
+                          size_t index) {
+  char text[32];
+  my_widget_t* label;
+  (void)adapter;
+  while (my_widget_child_count(row) > 0) {
+    my_widget_remove_child(row, my_widget_get_child(row, 0));
+  }
+  snprintf(text, sizeof(text), "row %zu", index);
+  label = my_label_create(NULL, text);
+  my_widget_set_rect(label, &(my_rect_t){4, 2, 180, 20});
+  my_widget_add_child(row, label);
+  my_widget_unref(label);
+}
+
+static const my_list_adapter_vtable_t DEMO_ADAPTER = {
+    demo_row_count, demo_create_row, demo_bind_row};
+static my_list_adapter_t g_demo_adapter = {&DEMO_ADAPTER};
 
 /** @brief Prefer a system TTF (stb backend), fall back to the 8x8 font. */
 static my_font_t* create_default_font(void) {
@@ -180,6 +214,23 @@ static void build_ui(app_t* app) {
     my_widget_add_child(row2, bar);
     my_widget_unref(bar);
   }
+
+  /* list_view (500 virtualized rows) + image */
+  {
+    my_widget_t* lv = my_list_view_create(NULL);
+    my_widget_t* img = my_image_create(NULL);
+    my_widget_set_layout_params(lv, "h:150");
+    my_list_view_set_row_height(lv, 24);
+    my_list_view_set_adapter(lv, &g_demo_adapter);
+    my_widget_add_child(root, lv);
+    my_widget_unref(lv);
+
+    my_widget_set_layout_params(img, "h:96");
+    my_image_set_image(img, "/tmp/myui_demo.png");
+    my_image_set_scale_mode(img, MY_IMAGE_SCALE_FIT);
+    my_widget_add_child(root, img);
+    my_widget_unref(img);
+  }
 }
 
 #ifdef MYUI_PAL_DUMMY
@@ -233,6 +284,21 @@ int main(void) {
   app.pal = my_pal_create(NULL);
   app.loop = my_pal_main_loop_create(app.pal);
   app.wm = my_window_manager_create(NULL, app.pal, app.loop);
+  /* test image: generated at runtime, no binary assets */
+  {
+    uint8_t px[64 * 48 * 4];
+    int x, y;
+    for (y = 0; y < 48; y++) {
+      for (x = 0; x < 64; x++) {
+        uint8_t* q = px + (y * 64 + x) * 4;
+        q[0] = (uint8_t)(x * 4);
+        q[1] = (uint8_t)(y * 5);
+        q[2] = 160;
+        q[3] = ((x / 8 + y / 8) % 2) ? 255 : 90; /* checker alpha */
+      }
+    }
+    stbi_write_png("/tmp/myui_demo.png", 64, 48, 4, px, 64 * 4);
+  }
   app.light = make_light_theme();
   app.dark = make_dark_theme();
   if (app.pal == NULL || app.loop == NULL || app.wm == NULL || app.light == NULL ||

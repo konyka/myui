@@ -589,6 +589,18 @@ static my_ret_t gles_set_font(my_vgcanvas_t* vg, my_font_t* font,
   return MY_RET_OK;
 }
 
+static my_ret_t gles_draw_image(my_vgcanvas_t* vg, const uint8_t* rgba,
+                                int32_t w, int32_t h, const my_rectf_t* dst,
+                                const my_color_t* bg) {
+  (void)vg;
+  (void)rgba;
+  (void)w;
+  (void)h;
+  (void)dst;
+  (void)bg;
+  return MY_RET_NOT_SUPPORTED; /* RGBA texture path: TODO (M8b note) */
+}
+
 static my_ret_t gles_measure_text(my_vgcanvas_t* vg, const char* text,
                                   int32_t* w, int32_t* h) {
   my_vgcanvas_gles2_t* s = (my_vgcanvas_gles2_t*)vg;
@@ -631,7 +643,8 @@ static const my_vgcanvas_vtable_t s_gles_vtable = {
     gles_set_stroke_color, gles_set_line_width, gles_fill_rect,  gles_stroke_rect,
     gles_fill_rounded_rect, gles_begin_path, gles_move_to,       gles_line_to,
     gles_close_path,       gles_fill,        gles_stroke,        gles_draw_text,
-    gles_destroy,          gles_set_font,    gles_measure_text};
+    gles_destroy,          gles_set_font,    gles_measure_text,
+    gles_draw_image};
 
 my_vgcanvas_t* my_vgcanvas_gles2_create_with_gl(const my_allocator_t* allocator,
                                                 int32_t width, int32_t height,
