@@ -16,6 +16,7 @@
 #include "myui/widgets/my_label.h"
 #include "myui/widgets/my_progress_bar.h"
 #include "myui/widgets/my_slider.h"
+#include "myui/widgets/my_text_area.h"
 
 #include "mytest.h"
 
@@ -87,12 +88,14 @@ static void test_widget_specific_attrs(void) {
       "<slider min=\"10\" max=\"20\" step=\"5\" value=\"15\"/>"
       "<progress_bar value=\"60\"/>"
       "<checkbox text=\"c\" checked=\"true\"/>"
+      "<text_area hint=\"notes\" text=\"l1\\nl2\" readonly=\"false\"/>"
       "</window>",
       NULL);
   my_widget_t* edit = my_widget_get_child(root, 0);
   my_widget_t* slider = my_widget_get_child(root, 1);
   my_widget_t* bar = my_widget_get_child(root, 2);
   my_widget_t* cb = my_widget_get_child(root, 3);
+  my_widget_t* ta = my_widget_get_child(root, 4);
 
   TEST_ASSERT_NOT_NULL(root);
   TEST_ASSERT_EQ_STR(((my_edit_t*)edit)->hint, "name");
@@ -101,6 +104,8 @@ static void test_widget_specific_attrs(void) {
   TEST_ASSERT(my_slider_get_value(slider) == 15.0f);
   TEST_ASSERT(my_progress_bar_get_value(bar) == 60.0f);
   TEST_ASSERT(my_checkbox_get_checked(cb));
+  TEST_ASSERT_EQ_STR(my_text_area_get_text(ta), "l1\\nl2"); /* XML attr is literal */
+  TEST_ASSERT_EQ_STR(((my_text_area_t*)ta)->hint, "notes");
 
   my_widget_unref(root);
   my_pal_destroy(pal);

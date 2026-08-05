@@ -39,7 +39,7 @@ static void rec_op(rec_vg_t* r, const char* fmt, ...) {
 }
 
 /** @brief Count recorded ops whose text contains needle. */
-static int rec_count(rec_vg_t* r, const char* needle) {
+static inline int rec_count(rec_vg_t* r, const char* needle) {
   int i, n = 0;
   for (i = 0; i < r->n_ops; i++) {
     if (strstr(r->ops[i], needle) != NULL) {
@@ -50,7 +50,7 @@ static int rec_count(rec_vg_t* r, const char* needle) {
 }
 
 /** @brief Whether any recorded op contains needle. */
-static bool rec_has(rec_vg_t* r, const char* needle) {
+static inline bool rec_has(rec_vg_t* r, const char* needle) {
   return rec_count(r, needle) > 0;
 }
 

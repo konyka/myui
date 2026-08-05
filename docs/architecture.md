@@ -165,3 +165,10 @@ PAL port 矩阵：
 - **AA 三级**（`my_vgcanvas_soft_set_antialias_level`）：0=关（像素中心硬边）、1=x 向 4 子采样、2=x4×y2（每条扫描线在 +0.25/+0.75 两次求值合并覆盖率）。默认 **2**——bench（-O0，8 大三角形/帧）：level0 0.72ms、level1 1.70ms、level2 2.41ms，2 级相对 1 级 +42%（< 2.5x 阈值）。`set_antialias(bool)` 兼容映射 false→0、true→2。覆盖率缓冲按行收紧到多边形包围盒（初版全幅扫描慢 10 倍，已修）。stroke 折线改为**法线扩展四边形条带**，与 fill 共用覆盖率路径（混合+AA 免费获得；奇数线宽偏移 0.5px 保证细线落在像素中心；方 cap/join，半透明描边关节处可能过混合，TODO）。
 - **剪贴板**：pal vtable 增加 `clipboard_set_text/get_text`（UTF-8）。dummy/linux_fb/wayland 为内存往返；x11 拥有 CLIPBOARD selection 并缓存、响应 SelectionRequest（UTF8_STRING/STRING/TARGETS）——**从外部应用获取是 TODO**（get 目前只返回自有缓存；接口语义已写清）。edit 接入 Ctrl+C/X/V（粘贴剔除换行、尊重 max_len、UTF-8 保留）。
 - **edit 光标闪烁**：500ms 主循环 timer（聚焦启动/失焦停止/销毁摘除），toggle 可见性并 invalidate。
+
+## text_area 多行编辑（M9a）
+
+- 数据模型：单一 UTF-8 字节缓冲 + 行起点偏移缓存（darray 存 size_t 值）；编辑只从**被编辑行**起局部重建偏移（二进制查找行、O（编辑点后字节数） 摊销）；10k 行实测：载入 0.13ms、2000 次光标移动 0.09ms、100 次插入 0.09ms。
+- 状态机：光标 (row,col) 按 codepoint；上下移动保持目标列（goal_col，水平移动/点击/编辑时重置——实现上 ta_move_to 不更新 goal，调用点按需设置）；Home/End/Ctrl+Home/End；Enter 拆行、行首 Backspace 合行；Shift 扩选、Ctrl+A、选区删除先行；Ctrl+C/X/V 经 PAL 剪贴板（**保留换行**，与单行 edit 相反）。
+- 视图：scroll_x/scroll_y 保光标可见（行高 = 字体 line_height）；绘制仅可视行区间（逐行 draw_text + 按行分段选区高亮 + 闪烁光标复用 edit 的 timer 机制）；hint 空文档显示；word wrap/行号/撤销重做 = TODO。
+- MVVM：widget_target 映射 text_area 的 text（TwoWay）/hint；XML 标签 `<text_area>`。

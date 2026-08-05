@@ -30,4 +30,5 @@
 | 10 万次 hit_test | 28.7 ms |
 | list_view 万行滚动 | 0.002 ms/次（仅 ~22 行控件） |
 
-- **M9+ 候选**：多行编辑、IME、x11 外部剪贴板获取、文字 shaping/Bidi、GLES draw_image 与 GLES AA、双线性缩放、变高列表与增量 diff、XML→C 生成器、滚动条拖拽、stroke 圆 cap/join。**待有 SDK 环境**：iOS(uikit)、HarmonyOS、Android、Web、win32/sdl2 port、Metal backend、FreeBSD/linux_fb 实机复核。
+- **M9a text_area 多行编辑** ✅ 已完成：行偏移缓存（局部重建，10k 行：载入 0.13ms/2000 次移动 0.09ms/100 次插入 0.09ms）；目标列语义；选区/剪贴板（保留换行）；滚动保光标；MVVM TwoWay + XML 标签；demo_widgets 接入。
+- **M9b+ 候选**：x11 外部剪贴板获取、文字 shaping/Bidi、GLES draw_image 与 GLES AA、双线性缩放、变高列表与增量 diff、XML→C 生成器、滚动条拖拽、stroke 圆 cap/join。**待有 SDK 环境**：iOS(uikit)、HarmonyOS、Android、Web、win32/sdl2 port、Metal backend、FreeBSD/linux_fb 实机复核。

@@ -20,6 +20,7 @@
 #include "myui/widgets/my_list_view.h"
 #include "myui/widgets/my_progress_bar.h"
 #include "myui/widgets/my_slider.h"
+#include "myui/widgets/my_text_area.h"
 
 /* ---------------- factory registry ---------------- */
 
@@ -151,6 +152,29 @@ static my_widget_t* make_slider(const my_allocator_t* a,
   return w;
 }
 
+static my_widget_t* make_text_area(const my_allocator_t* a,
+                                   const my_xml_node_t* n) {
+  my_widget_t* w = my_text_area_create(a);
+  const char* hint;
+  if (w == NULL) {
+    return NULL;
+  }
+  hint = my_xml_node_attr(n, "hint");
+  if (hint != NULL) {
+    my_text_area_set_hint(w, hint);
+  }
+  if (attr_bool(n, "readonly", false)) {
+    my_text_area_set_readonly(w, true);
+  }
+  if (my_xml_node_attr(n, "max_len") != NULL) {
+    my_text_area_set_max_len(w, (size_t)attr_int(n, "max_len", 0));
+  }
+  if (my_xml_node_attr(n, "text") != NULL) {
+    my_text_area_set_text(w, my_xml_node_attr(n, "text"));
+  }
+  return w;
+}
+
 static my_widget_t* make_progress(const my_allocator_t* a,
                                   const my_xml_node_t* n) {
   my_widget_t* w = my_progress_bar_create(a);
@@ -208,6 +232,7 @@ static void register_builtins(void) {
   my_ui_loader_register("checkbox", make_checkbox);
   my_ui_loader_register("slider", make_slider);
   my_ui_loader_register("progress_bar", make_progress);
+  my_ui_loader_register("text_area", make_text_area);
   my_ui_loader_register("list_view", make_list_view);
   my_ui_loader_register("image", make_image);
 }

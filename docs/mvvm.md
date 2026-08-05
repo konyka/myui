@@ -134,6 +134,7 @@ mc = my_mvvm_bind(wm, win, vm);   /* 之后一切自动 */
 | 控件类型 | 可绑 prop | 类型 | 说明 |
 |----------|-----------|------|------|
 | button/label/edit | text | string | edit 支持 TwoWay（"changed" 回写） |
+| text_area | text / hint | string | TwoWay；粘贴保留换行 |
 | edit | hint | string | OneWay |
 | checkbox | value | bool | TwoWay（toggle 发 "changed"） |
 | slider | value | double | TwoWay（拖动发 "changed"） |

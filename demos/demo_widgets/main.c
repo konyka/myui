@@ -24,6 +24,7 @@
 #include "myui/widgets/my_list_view.h"
 #include "myui/widgets/my_progress_bar.h"
 #include "myui/widgets/my_slider.h"
+#include "myui/widgets/my_text_area.h"
 
 /* simple code-driven adapter for the demo list_view (500 rows) */
 static size_t demo_row_count(my_list_adapter_t* adapter) {
@@ -76,6 +77,8 @@ static my_font_t* create_default_font(void) {
 #include "mypal/dummy/my_pal_dummy.h"
 #include "myr/my_lcd_mem.h"
 #endif
+
+static my_font_t* app_font = NULL;
 
 typedef struct app_t {
   my_pal_t* pal;
@@ -231,6 +234,19 @@ static void build_ui(app_t* app) {
     my_widget_add_child(root, img);
     my_widget_unref(img);
   }
+
+  /* multi-line text area demo */
+  {
+    my_widget_t* ta = my_text_area_create(NULL);
+    my_widget_set_layout_params(ta, "h:1f");
+    my_text_area_set_font(ta, app_font, 16);
+    my_text_area_set_text(ta, "line one\nline two\nline three\n"
+                              "edit me: click, type, arrows work\n"
+                              "line five\nline six\nline seven");
+    my_widget_set_bind_rules(ta, "v:text={note, Mode=TwoWay}");
+    my_widget_add_child(root, ta);
+    my_widget_unref(ta);
+  }
 }
 
 #ifdef MYUI_PAL_DUMMY
@@ -307,11 +323,11 @@ int main(void) {
     return 1;
   }
 
-  app.win = my_window_create(NULL, app.pal, 800, 480, "myui demo_widgets");
+  app.win = my_window_create(NULL, app.pal, 800, 560, "myui demo_widgets");
   my_window_set_theme(app.win, app.light, false);
   {
-    my_font_t* font = create_default_font();
-    my_window_set_font(app.win, font, 16);
+    app_font = create_default_font();
+    my_window_set_font(app.win, app_font, 16);
     my_value_t v;
     app.vm = my_view_model_dummy_create(NULL);
     my_value_init(&v, NULL);

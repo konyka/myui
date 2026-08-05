@@ -15,6 +15,7 @@
 #include "myui/widgets/my_list_view.h"
 #include "myui/widgets/my_progress_bar.h"
 #include "myui/widgets/my_slider.h"
+#include "myui/widgets/my_text_area.h"
 
 /* ---------------- properties ---------------- */
 
@@ -33,11 +34,17 @@ static my_ret_t target_set_prop(my_binding_target_t* t, const char* name,
     if (my_str_eq(w->widget_type, "edit")) {
       return my_edit_set_text(w, s);
     }
+    if (my_str_eq(w->widget_type, "text_area")) {
+      return my_text_area_set_text(w, s);
+    }
     return MY_RET_NOT_SUPPORTED;
   }
   if (strcmp(name, "hint") == 0) {
     if (my_str_eq(w->widget_type, "edit")) {
       return my_edit_set_hint(w, my_value_get_str(v));
+    }
+    if (my_str_eq(w->widget_type, "text_area")) {
+      return my_text_area_set_hint(w, my_value_get_str(v));
     }
     return MY_RET_NOT_SUPPORTED;
   }
@@ -108,6 +115,8 @@ static my_ret_t target_get_prop(my_binding_target_t* t, const char* name,
       s = ((my_label_t*)w)->text;
     } else if (my_str_eq(w->widget_type, "edit")) {
       s = my_edit_get_text(w);
+    } else if (my_str_eq(w->widget_type, "text_area")) {
+      s = my_text_area_get_text(w);
     }
     return my_value_set_str(v, s);
   }
