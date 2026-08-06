@@ -166,6 +166,9 @@ static my_widget_t* make_text_area(const my_allocator_t* a,
   if (attr_bool(n, "readonly", false)) {
     my_text_area_set_readonly(w, true);
   }
+  if (attr_bool(n, "wrap", false)) {
+    my_text_area_set_wrap(w, true);
+  }
   if (my_xml_node_attr(n, "max_len") != NULL) {
     my_text_area_set_max_len(w, (size_t)attr_int(n, "max_len", 0));
   }

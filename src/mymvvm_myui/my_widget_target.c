@@ -68,6 +68,14 @@ static my_ret_t target_set_prop(my_binding_target_t* t, const char* name,
       return my_progress_bar_set_value(w, (float)d);
     }
   }
+  if (strcmp(name, "wrap") == 0) {
+    if (my_str_eq(w->widget_type, "text_area")) {
+      return my_text_area_set_wrap(w, v->type == MY_VALUE_BOOL
+                                        ? my_value_get_bool(v)
+                                        : false);
+    }
+    return MY_RET_NOT_SUPPORTED;
+  }
   if (strcmp(name, "visible") == 0) {
     return my_widget_set_visible(w, v->type == MY_VALUE_BOOL
                                       ? my_value_get_bool(v)
@@ -119,6 +127,12 @@ static my_ret_t target_get_prop(my_binding_target_t* t, const char* name,
       s = my_text_area_get_text(w);
     }
     return my_value_set_str(v, s);
+  }
+  if (strcmp(name, "wrap") == 0) {
+    if (my_str_eq(w->widget_type, "text_area")) {
+      return my_value_set_bool(v, ((my_text_area_t*)w)->wrap);
+    }
+    return MY_RET_NOT_SUPPORTED;
   }
   if (strcmp(name, "visible") == 0) {
     return my_value_set_bool(v, w->visible);

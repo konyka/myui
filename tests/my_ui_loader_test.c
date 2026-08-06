@@ -128,7 +128,7 @@ static void test_widget_specific_attrs(void) {
       "<slider min=\"10\" max=\"20\" step=\"5\" value=\"15\"/>"
       "<progress_bar value=\"60\"/>"
       "<checkbox text=\"c\" checked=\"true\"/>"
-      "<text_area hint=\"notes\" text=\"l1\\nl2\" readonly=\"false\"/>"
+      "<text_area hint=\"notes\" text=\"l1\\nl2\" readonly=\"false\" wrap=\"true\"/>"
       "</window>",
       NULL);
   my_widget_t* edit = my_widget_get_child(root, 0);

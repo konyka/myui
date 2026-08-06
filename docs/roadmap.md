@@ -23,6 +23,8 @@
 - **M9b 图像质量** ✅ 已完成：GLES draw_image（RGBA 纹理 + (ptr,w,h) LRU 16 项 + 专用采样着色器，EGL 四象限读回通过）；soft 双线性缩放（像素中心映射，默认开；bench：480x270→800x600 最近邻 2.2ms vs 双线性 15.5ms/帧（7x，-O0）——嵌入式建议 NEAREST，已写进 architecture.md）。
 - **M9c 滚动条 + 变高列表 + 圆 cap/join** ✅ 已完成：my_scroll_bar（拖拽/翻页/min-thumb/主题态）；list_view/text_area 显式挂接双向同步；变高行前缀和缓存 + 估算总高（200 次变高滚动 ≤200 行控件）；stroke ROUND cap/join（覆盖率圆盘，过混合注释）+ golden 场景。
 - **M9d XML→C 生成器 + 剪贴板收尾** ✅ 已完成：tools/ui2c（XML→C 构建函数，golden 等价测试：运行时加载 vs 生成代码逐节点比对）；x11 外部剪贴板获取（XConvertSelection + 500ms 同步等待 + 事件重入分发，INCR 留 TODO；双进程外部 owner 实跑通过）。
+- **M10a 撤销/重做 + 键盘导航** ✅ 已完成：my_undo_stack（文本补丁 + 打字/退格批合并，容量 100，程序 set_text 清栈）；edit/text_area Ctrl+Z/Y；Tab 焦点环、PageUp/Down 翻页、scroll_bar 键盘微调。
+- **M10b text_area word wrap** ✅ 已完成：视觉行缓存（编辑行局部重建、resize 全量、wrap off 零回归）；贪心折行（溢出空格前断开并消费 / 最后空格后断开 / 硬折，非 UAX#14）；Up/Down/Home/End 视觉行语义、`(row,col)`→视觉行二分查找、wrap 下禁水平滚动；XML `wrap` 属性 + MVVM wrap 绑定。bench（-O0，万行 ~80cp → 25843 视觉行）：载入+构建 1.57ms、1000 次视觉移动 0.10ms、滚动重绘 0.30ms/帧。
 
 ## 性能基线汇总（M9 刷新，GCC 16，-O0 Debug，本机）
 
@@ -33,7 +35,8 @@
 | 路径 AA level0/1/2 | 0.71 / 1.70 / 2.39 ms/帧 |
 | 480x270→800x600 图片 nearest/bilinear | 2.44 / 16.26 ms/帧 |
 | text_area 万行：载入/2000 移动/100 插入 | 0.13 / 0.09 / 0.09 ms |
+| text_area wrap 万行长行：载入+构建/1000 视觉移动/滚动帧 | 1.57 / 0.10 / 0.30 ms |
 | list_view 万行滚动（固定/变高） | 0.002 ms/次（~22 行控件） |
 | 1051 控件构建 / relayout / 10 万 hit_test | 0.30 / 0.05 / 29.0 ms |
 
-- **M10+ 候选**：文字 shaping/Bidi、IME、撤销/重做栈、word wrap、INCR 增量剪贴板、wayland-egl 窗口、GLES AA 与 round cap/join、盒式预降采样、变高行动态行高失效 API、滚动条键盘翻页、stroke 关节单轮廓合并。**SDK 顺延**：iOS/HarmonyOS/Android/Web/win32/sdl2 port、Metal backend、FreeBSD/linux_fb 实机复核。x11 外部剪贴板获取、文字 shaping/Bidi、GLES draw_image 与 GLES AA、双线性缩放、变高列表与增量 diff、XML→C 生成器、滚动条拖拽、stroke 圆 cap/join。**待有 SDK 环境**：iOS(uikit)、HarmonyOS、Android、Web、win32/sdl2 port、Metal backend、FreeBSD/linux_fb 实机复核。
+- **M10+ 候选**：文字 shaping/Bidi、IME、INCR 增量剪贴板、wayland-egl 窗口、GLES AA 与 round cap/join、盒式预降采样、变高行动态行高失效 API、UAX#14 断行、wrap 下撤销的视觉位置、两端对齐、stroke 关节单轮廓合并。**SDK 顺延**：iOS/HarmonyOS/Android/Web/win32/sdl2 port、Metal backend、FreeBSD/linux_fb 实机复核。x11 外部剪贴板获取、文字 shaping/Bidi、GLES draw_image 与 GLES AA、双线性缩放、变高列表与增量 diff、XML→C 生成器、滚动条拖拽、stroke 圆 cap/join。**待有 SDK 环境**：iOS(uikit)、HarmonyOS、Android、Web、win32/sdl2 port、Metal backend、FreeBSD/linux_fb 实机复核。

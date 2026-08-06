@@ -13,6 +13,7 @@
 #include "myui/widgets/my_list_view.h"
 #include "myui/widgets/my_progress_bar.h"
 #include "myui/widgets/my_slider.h"
+#include "myui/widgets/my_text_area.h"
 
 #include "mytest.h"
 
@@ -95,6 +96,24 @@ static void test_widget_target_props(void) {
 
   my_widget_target_destroy(t);
   my_widget_unref(btn);
+
+  /* text_area-specific bool prop: wrap */
+  {
+    my_widget_t* ta = my_text_area_create(NULL);
+    my_widget_target_t* tt = my_widget_target_create(NULL, ta);
+    my_value_reset(&v);
+    my_value_init(&v, NULL);
+    my_value_set_bool(&v, true);
+    TEST_ASSERT_EQ_INT(my_binding_target_set_prop(&tt->base, "wrap", &v),
+                       MY_RET_OK);
+    TEST_ASSERT(((my_text_area_t*)ta)->wrap);
+    my_value_reset(&v);
+    my_value_init(&v, NULL);
+    my_binding_target_get_prop(&tt->base, "wrap", &v);
+    TEST_ASSERT(my_value_get_bool(&v));
+    my_widget_target_destroy(tt);
+    my_widget_unref(ta);
+  }
 }
 
 /* ---------------- end-to-end bind ---------------- */

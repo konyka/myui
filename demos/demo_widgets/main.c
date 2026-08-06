@@ -255,7 +255,13 @@ static void build_ui(app_t* app) {
     my_text_area_set_font(ta, app_font, 16);
     my_text_area_set_text(ta, "line one\nline two\nline three\n"
                               "edit me: click, type, arrows work\n"
+                              "a long line that wraps: the quick brown fox "
+                              "jumps over the lazy dog, pack my box with "
+                              "five dozen liquor jugs and keep going. How "
+                              "vexingly quick daft zebras jump! Bright "
+                              "vixens jump; dozy fowl quack and quack\n"
                               "line five\nline six\nline seven");
+    my_text_area_set_wrap(ta, true);
     my_widget_set_bind_rules(ta, "v:text={note, Mode=TwoWay}");
     my_widget_add_child(root, ta);
     my_widget_unref(ta);

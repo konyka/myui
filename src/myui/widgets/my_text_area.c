@@ -4,6 +4,8 @@
  */
 #include "myui/widgets/my_text_area.h"
 
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "myc/my_str.h"
@@ -30,7 +32,12 @@ static void ta_offsets_push(my_text_area_t* ta, size_t offset) {
 }
 
 /** @brief Rebuild line offsets from `row` to the end of the buffer. */
+static void ta_vlines_rebuild_from(my_text_area_t* ta, size_t from);
+
 static void ta_rebuild_from(my_text_area_t* ta, size_t row) {
+  if (ta->wrap) {
+    ta_vlines_rebuild_from(ta, row); /* visual lines follow the edit */
+  }
   size_t pos, line;
   if (row == 0) {
     my_darray_clear(ta->line_offsets);
@@ -106,6 +113,201 @@ static size_t ta_line_cp_len(const my_text_area_t* ta, size_t row) {
   }
   return len;
 }
+
+/* ---------------- visual lines (word wrap, M10b) ----------------
+ * Physical lines (newline-separated) map to visual lines (wrapped to
+ * the content width). Break rule: advance per codepoint; on overflow
+ * break after the last space inside the visual line when one exists,
+ * otherwise hard-break between any two codepoints (NOT full UAX#14 —
+ * CJK/English mixes break anywhere, documented).
+ */
+
+static float ta_cp_width(const my_text_area_t* ta, const char* s) {
+  if (ta->font != NULL) {
+    my_glyph_t g;
+    uint32_t cp;
+    const char* p = s;
+    cp = my_utf8_next(&p);
+    if (my_font_get_glyph(ta->font, cp, ta->font_size, &g) == MY_RET_OK) {
+      return (float)g.advance;
+    }
+  }
+  return (float)TA_CELL_W;
+}
+
+static float ta_inner_width(const my_text_area_t* ta) {
+  float w = (float)(((my_widget_t*)ta)->rect.w - 2 * TA_PAD_X);
+  return w > 1.0f ? w : 1.0f;
+}
+
+static void ta_vlines_drop_from(my_text_area_t* ta, size_t phys) {
+  while (my_darray_size(ta->vlines) > 0) {
+    my_visual_line_t* last =
+        (my_visual_line_t*)my_darray_get(ta->vlines,
+                                         my_darray_size(ta->vlines) - 1);
+    if (last->phys < phys) {
+      break;
+    }
+    my_darray_remove_at(ta->vlines, my_darray_size(ta->vlines) - 1);
+    my_mem_free(ta->allocator, last);
+  }
+}
+
+static my_ret_t ta_vline_push(my_text_area_t* ta, size_t phys, size_t start,
+                              size_t len) {
+  my_visual_line_t* v =
+      (my_visual_line_t*)my_mem_calloc(ta->allocator, 1,
+                                       sizeof(my_visual_line_t));
+  if (v == NULL) {
+    return MY_RET_OOM;
+  }
+  v->phys = phys;
+  v->start_cp = start;
+  v->len_cp = len;
+  return my_darray_push(ta->vlines, v);
+}
+
+/** @brief Rebuild visual lines for physical rows [from, end). */
+static void ta_vlines_rebuild_from(my_text_area_t* ta, size_t from) {
+  size_t pi, n;
+  if (ta->vlines == NULL) {
+    ta->vlines = my_darray_create(ta->allocator, 0);
+    if (ta->vlines == NULL) {
+      return;
+    }
+    from = 0;
+  }
+  ta_vlines_drop_from(ta, from);
+  n = ta_line_count(ta);
+  for (pi = from; pi < n; pi++) {
+    size_t line_len = ta_line_cp_len(ta, pi);
+    size_t vstart = 0, col = 0;
+    size_t last_space = (size_t)-1;
+    float w = 0.0f, inner = ta_inner_width(ta);
+    size_t start_off = ta_line_start(ta, pi);
+    size_t off = start_off;
+
+    if (line_len == 0) {
+      ta_vline_push(ta, pi, 0, 0); /* empty physical line: one empty vline */
+      continue;
+    }
+    while (col < line_len) {
+      size_t cp_len = my_str_utf8_char_len(ta->text + off);
+      float cpw = ta_cp_width(ta, ta->text + off);
+      if (w + cpw > inner && col > vstart) {
+        size_t vlen;
+        if (ta->text[off] == ' ') {
+          /* the overflowing char is itself a space: break before it --
+           * everything so far fits, and the space is consumed below */
+          vlen = col - vstart;
+        } else if (last_space != (size_t)-1 && last_space > vstart) {
+          vlen = last_space + 1 - vstart; /* break after the space */
+        } else {
+          vlen = col - vstart; /* hard break between any codepoints */
+        }
+        ta_vline_push(ta, pi, vstart, vlen);
+        vstart += vlen;
+        /* recompute width of [vstart, col): nothing wider needed later */
+        {
+          size_t bo = start_off, bc = 0;
+          w = 0.0f;
+          while (bc < col) {
+            float cw = ta_cp_width(ta, ta->text + bo);
+            if (bc >= vstart) {
+              w += cw;
+            }
+            bo += my_str_utf8_char_len(ta->text + bo);
+            bc++;
+          }
+        }
+        last_space = (size_t)-1;
+        if (ta->text[off] == ' ') {
+          /* the overflowing char is a space: consume it entirely (no
+           * visual line ever starts with whitespace) -- skip its width
+           * and do not record it as a future break point */
+          off += cp_len;
+          col++;
+          continue;
+        }
+      }
+      if (ta->text[off] == ' ') {
+        last_space = col;
+      }
+      w += cpw;
+      off += cp_len;
+      col++;
+    }
+    if (vstart < line_len) {
+      ta_vline_push(ta, pi, vstart, line_len - vstart);
+    }
+  }
+}
+
+static void ta_vlines_invalidate(my_text_area_t* ta) {
+  ta->vlines_dirty = true;
+}
+
+/** @brief Ensure visual lines are built (when wrap is on). */
+static void ta_vlines_ensure(my_text_area_t* ta) {
+  if (ta->wrap && ta->vlines_dirty) {
+    ta_vlines_drop_from(ta, 0);
+    ta_vlines_rebuild_from(ta, 0);
+    ta->vlines_dirty = false;
+  }
+}
+
+static size_t ta_vline_count(my_text_area_t* ta) {
+  if (!ta->wrap) {
+    return ta_line_count(ta);
+  }
+  ta_vlines_ensure(ta);
+  return ta->vlines != NULL ? my_darray_size(ta->vlines) : 0;
+}
+
+static const my_visual_line_t* ta_vline_at(my_text_area_t* ta, size_t vi) {
+  if (!ta->wrap) {
+    static my_visual_line_t tmp;
+    tmp.phys = vi;
+    tmp.start_cp = 0;
+    tmp.len_cp = ta_line_cp_len(ta, vi);
+    return &tmp;
+  }
+  ta_vlines_ensure(ta);
+  return (const my_visual_line_t*)my_darray_get(ta->vlines, vi);
+}
+
+/** @brief Visual line index containing (row, col); -1 when beyond. */
+static size_t ta_vline_of_pos(my_text_area_t* ta, size_t row, size_t col,
+                              size_t* col_in_v) {
+  size_t n = ta_vline_count(ta);
+  size_t lo = 0, hi = n;
+  if (n == 0) {
+    *col_in_v = 0;
+    return 0;
+  }
+  /* vlines are sorted by (phys, start_cp): binary search the last vline
+   * with (phys, start_cp) <= (row, col). At a shared boundary col the
+   * LATER visual line owns it, which the upper-bound search yields. */
+  while (lo < hi) {
+    size_t mid = lo + (hi - lo) / 2;
+    const my_visual_line_t* v = ta_vline_at(ta, mid);
+    if (v->phys < row || (v->phys == row && v->start_cp <= col)) {
+      lo = mid + 1;
+    } else {
+      hi = mid;
+    }
+  }
+  if (lo > 0) {
+    const my_visual_line_t* v = ta_vline_at(ta, lo - 1);
+    if (v->phys == row && col <= v->start_cp + v->len_cp) {
+      *col_in_v = col - v->start_cp;
+      return lo - 1;
+    }
+  }
+  *col_in_v = 0;
+  return n - 1;
+}
+
 
 /* ---------------- buffer ops ---------------- */
 
@@ -295,22 +497,30 @@ static void ta_ensure_visible(my_text_area_t* ta) {
   int32_t line_h = ta->font != NULL
                        ? my_font_line_height(ta->font, ta->font_size)
                        : ta->font_size;
-  int32_t inner_h, inner_w, cy;
+  int32_t inner_h, inner_w, cy, row_px;
   if (line_h <= 0) {
     line_h = ta->font_size > 0 ? ta->font_size : 16;
   }
   inner_h = w->rect.h - 2 * TA_PAD_Y;
   inner_w = w->rect.w - 2 * TA_PAD_X;
+  if (ta->wrap) {
+    size_t civ;
+    ta->scroll_x = 0; /* wrap: no horizontal scrolling */
+    row_px = (int32_t)ta_vline_of_pos(ta, ta->cursor_row, ta->cursor_col,
+                                      &civ) *
+             line_h;
+  } else {
+    row_px = (int32_t)ta->cursor_row * line_h;
+  }
   if (inner_h > 0) {
-    int32_t top = (int32_t)ta->cursor_row * line_h;
-    if (top - ta->scroll_y < 0) {
-      ta->scroll_y = top;
+    if (row_px - ta->scroll_y < 0) {
+      ta->scroll_y = row_px;
     }
-    if (top + line_h - ta->scroll_y > inner_h) {
-      ta->scroll_y = top + line_h - inner_h;
+    if (row_px + line_h - ta->scroll_y > inner_h) {
+      ta->scroll_y = row_px + line_h - inner_h;
     }
   }
-  if (inner_w > 0) {
+  if (!ta->wrap && inner_w > 0) {
     cy = (int32_t)ta->cursor_col * TA_CELL_W;
     if (cy - ta->scroll_x < 0) {
       ta->scroll_x = cy;
@@ -447,18 +657,40 @@ static my_ret_t ta_on_key(my_text_area_t* ta, const my_event_t* event) {
       }
       return MY_RET_OK;
     case MY_KEY_UP:
-      if (ta->cursor_row > 0) {
+      if (ta->wrap) {
+        size_t civ, vi = ta_vline_of_pos(ta, ta->cursor_row, ta->cursor_col,
+                                         &civ);
+        if (vi > 0) {
+          const my_visual_line_t* v = ta_vline_at(ta, vi - 1);
+          size_t nc = ta->goal_col < v->len_cp ? ta->goal_col : v->len_cp;
+          ta_move_to(ta, v->phys, v->start_cp + nc, shift);
+        }
+      } else if (ta->cursor_row > 0) {
         ta_move_to(ta, ta->cursor_row - 1, ta->goal_col, shift);
       }
       return MY_RET_OK;
     case MY_KEY_DOWN:
-      if (ta->cursor_row + 1 < ta_line_count(ta)) {
+      if (ta->wrap) {
+        size_t civ, vi = ta_vline_of_pos(ta, ta->cursor_row, ta->cursor_col,
+                                         &civ);
+        if (vi + 1 < ta_vline_count(ta)) {
+          const my_visual_line_t* v = ta_vline_at(ta, vi + 1);
+          size_t nc = ta->goal_col < v->len_cp ? ta->goal_col : v->len_cp;
+          ta_move_to(ta, v->phys, v->start_cp + nc, shift);
+        }
+      } else if (ta->cursor_row + 1 < ta_line_count(ta)) {
         ta_move_to(ta, ta->cursor_row + 1, ta->goal_col, shift);
       }
       return MY_RET_OK;
     case MY_KEY_HOME:
       if (ctrl) {
         ta_move_to(ta, 0, 0, shift);
+      } else if (ta->wrap) {
+        /* wrap semantics: Home = start of the VISUAL line (documented) */
+        size_t civ, vi = ta_vline_of_pos(ta, ta->cursor_row, ta->cursor_col,
+                                         &civ);
+        const my_visual_line_t* v = ta_vline_at(ta, vi);
+        ta_move_to(ta, v->phys, v->start_cp, shift);
       } else {
         ta_move_to(ta, ta->cursor_row, 0, shift);
       }
@@ -470,6 +702,12 @@ static my_ret_t ta_on_key(my_text_area_t* ta, const my_event_t* event) {
       if (ctrl) {
         ta_move_to(ta, ta_line_count(ta) - 1,
                    ta_line_cp_len(ta, ta_line_count(ta) - 1), shift);
+      } else if (ta->wrap) {
+        /* wrap semantics: End = end of the VISUAL line (documented) */
+        size_t civ, vi = ta_vline_of_pos(ta, ta->cursor_row, ta->cursor_col,
+                                         &civ);
+        const my_visual_line_t* v = ta_vline_at(ta, vi);
+        ta_move_to(ta, v->phys, v->start_cp + v->len_cp, shift);
       } else {
         ta_move_to(ta, ta->cursor_row,
                    ta_line_cp_len(ta, ta->cursor_row), shift);
@@ -579,7 +817,6 @@ static void ta_on_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
   int32_t line_h = ta->font != NULL
                        ? my_font_line_height(ta->font, ta->font_size)
                        : ta->font_size;
-  size_t first_row, last_row, row;
   size_t sel_r0 = 0, sel_c0 = 0, sel_r1 = 0, sel_c1 = 0;
   bool has_sel;
 
@@ -601,11 +838,6 @@ static void ta_on_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
                                                   2 * TA_PAD_Y)});
 
   has_sel = ta_sel(ta, &sel_r0, &sel_c0, &sel_r1, &sel_c1);
-  first_row = (size_t)(ta->scroll_y / line_h);
-  last_row = first_row + (size_t)(widget->rect.h / line_h) + 1;
-  if (last_row >= ta_line_count(ta)) {
-    last_row = ta_line_count(ta) > 0 ? ta_line_count(ta) - 1 : 0;
-  }
 
   if ((ta->text == NULL || ta->text_len == 0) && ta->hint != NULL &&
       !ta->focused) {
@@ -613,49 +845,66 @@ static void ta_on_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
     my_vgcanvas_draw_text(vg, ta->hint, TA_PAD_X, TA_PAD_Y);
   }
 
-  for (row = first_row; row <= last_row && row < ta_line_count(ta); row++) {
-    size_t start = ta_line_start(ta, row);
-    size_t end = row + 1 < ta_line_count(ta) ? ta_line_start(ta, row + 1)
-                                             : ta->text_len;
-    size_t len = end - start;
-    int32_t ty = TA_PAD_Y + (int32_t)row * line_h - ta->scroll_y;
-    if (len > 0 && ta->text[start + len - 1] == '\n') {
-      len--;
+  {
+    /* iterate VISUAL lines (wrap on: wrapped segments; off: = physical) */
+    size_t vcount = ta_vline_count(ta), vi;
+    size_t vfirst = (size_t)(ta->scroll_y / line_h);
+    size_t vlast = vfirst + (size_t)(widget->rect.h / line_h) + 1;
+    if (vlast >= vcount && vcount > 0) {
+      vlast = vcount - 1;
     }
-    /* selection highlight for this row */
-    if (has_sel && row >= sel_r0 && row <= sel_r1) {
-      size_t c0 = row == sel_r0 ? sel_c0 : 0;
-      size_t c1 = row == sel_r1 ? sel_c1 : ta_line_cp_len(ta, row) +
-                                               (row + 1 < ta_line_count(ta)
-                                                    ? 1
-                                                    : 0);
-      if (c1 > c0) {
-        my_vgcanvas_set_fill_color(vg, my_color_rgb(130, 170, 230));
-        my_vgcanvas_fill_rect(vg,
-                              &(my_rectf_t){(float)(TA_PAD_X + (int32_t)c0 *
-                                                        TA_CELL_W -
-                                                    ta->scroll_x),
-                                            (float)ty, (float)(c1 - c0) * TA_CELL_W,
-                                            (float)line_h});
+    for (vi = vfirst; vi <= vlast && vi < vcount; vi++) {
+      const my_visual_line_t* vl = ta_vline_at(ta, vi);
+      size_t start = ta_offset_of(ta, vl->phys, vl->start_cp);
+      size_t end = ta_offset_of(ta, vl->phys, vl->start_cp + vl->len_cp);
+      size_t len = end > start ? end - start : 0;
+      int32_t ty = TA_PAD_Y + (int32_t)vi * line_h - ta->scroll_y;
+      /* selection highlight for this visual line */
+      if (has_sel && vl->phys >= sel_r0 && vl->phys <= sel_r1) {
+        size_t c0 = vl->phys == sel_r0 ? sel_c0 : 0;
+        size_t c1 = vl->phys == sel_r1
+                        ? sel_c1
+                        : vl->start_cp + vl->len_cp + (vi + 1 < vcount ? 1 : 0);
+        size_t s0 = c0 > vl->start_cp ? c0 : vl->start_cp;
+        size_t s1 = c1 < vl->start_cp + vl->len_cp ? c1
+                                                   : vl->start_cp + vl->len_cp;
+        if (s1 > s0) {
+          my_vgcanvas_set_fill_color(vg, my_color_rgb(130, 170, 230));
+          my_vgcanvas_fill_rect(
+              vg, &(my_rectf_t){(float)(TA_PAD_X +
+                                            (int32_t)(s0 - vl->start_cp) *
+                                                TA_CELL_W -
+                                            ta->scroll_x),
+                                (float)ty, (float)(s1 - s0) * TA_CELL_W,
+                                (float)line_h});
+        }
       }
-    }
-    if (len > 0) {
-      char* line = (char*)my_mem_alloc(ta->allocator, len + 1);
-      if (line != NULL) {
-        memcpy(line, ta->text + start, len);
-        line[len] = '\0';
-        my_vgcanvas_set_fill_color(vg, my_color_from_rgba32(fg));
-        my_vgcanvas_draw_text(vg, line,
-                              (float)(TA_PAD_X - ta->scroll_x), (float)ty);
-        my_mem_free(ta->allocator, line);
+      if (len > 0) {
+        char* line = (char*)my_mem_alloc(ta->allocator, len + 1);
+        if (line != NULL) {
+          memcpy(line, ta->text + start, len);
+          line[len] = '\0';
+          my_vgcanvas_set_fill_color(vg, my_color_from_rgba32(fg));
+          my_vgcanvas_draw_text(vg, line,
+                                (float)(TA_PAD_X - ta->scroll_x), (float)ty);
+          my_mem_free(ta->allocator, line);
+        }
       }
     }
   }
 
   /* cursor */
   if (ta->focused && ta->cursor_visible) {
-    int32_t cx = TA_PAD_X + (int32_t)ta->cursor_col * TA_CELL_W - ta->scroll_x;
-    int32_t cy = TA_PAD_Y + (int32_t)ta->cursor_row * line_h - ta->scroll_y;
+    size_t civ = 0, cvi = ta->wrap
+                              ? ta_vline_of_pos(ta, ta->cursor_row,
+                                                ta->cursor_col, &civ)
+                              : 0;
+    int32_t cx = TA_PAD_X +
+                 (int32_t)(ta->wrap ? civ : ta->cursor_col) * TA_CELL_W -
+                 ta->scroll_x;
+    int32_t cy = TA_PAD_Y +
+                 (int32_t)(ta->wrap ? cvi : ta->cursor_row) * line_h -
+                 ta->scroll_y;
     my_vgcanvas_set_fill_color(vg, my_color_from_rgba32(fg));
     my_vgcanvas_fill_rect(vg, &(my_rectf_t){(float)cx, (float)cy, 1,
                                             (float)line_h});
@@ -804,6 +1053,42 @@ my_ret_t my_text_area_set_hint(my_widget_t* area, const char* hint) {
   ta->hint = copy;
   my_widget_invalidate(area, NULL);
   return MY_RET_OK;
+}
+
+my_ret_t my_text_area_set_wrap(my_widget_t* area, bool wrap) {
+  my_text_area_t* ta = (my_text_area_t*)area;
+  if (area == NULL) {
+    return MY_RET_INVALID_PARAMS;
+  }
+  if (ta->wrap != wrap) {
+    ta->wrap = wrap;
+    ta->scroll_x = 0;
+    ta_vlines_invalidate(ta);
+  }
+  my_widget_invalidate(area, NULL);
+  return MY_RET_OK;
+}
+
+size_t my_text_area_visual_line_count(my_widget_t* area) {
+  return area != NULL ? ta_vline_count((my_text_area_t*)area) : 0;
+}
+
+const my_visual_line_t* my_text_area_visual_line_at(my_widget_t* area,
+                                                    size_t index) {
+  if (area == NULL) {
+    return NULL;
+  }
+  return ta_vline_at((my_text_area_t*)area, index);
+}
+
+size_t my_text_area_visual_line_of_pos(my_widget_t* area, size_t row,
+                                       size_t col, size_t* col_in_v) {
+  size_t civ = 0;
+  if (area == NULL) {
+    return 0;
+  }
+  return ta_vline_of_pos((my_text_area_t*)area, row, col,
+                         col_in_v != NULL ? col_in_v : &civ);
 }
 
 my_ret_t my_text_area_set_readonly(my_widget_t* area, bool readonly) {

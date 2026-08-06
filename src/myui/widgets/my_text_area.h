@@ -8,7 +8,10 @@
  * documents. Cursor is (row, col) in codepoints; vertical moves keep a
  * goal column. Shift+arrows select, Ctrl+A selects all, Ctrl+C/X/V via
  * the PAL clipboard (newlines preserved). Scrolls to keep the cursor
- * visible. NOT done: word wrap, line numbers, undo/redo (TODO).
+ * visible. Optional word wrap (M10b): a visual-line cache maps each
+ * physical line to width-limited segments; greedy break after the last
+ * fitting space, hard break otherwise (no UAX#14). NOT done: line
+ * numbers, undo/redo (TODO).
  * Emits "changed" (data = full text). No "activate" (Enter splits lines).
  */
 #ifndef MY_TEXT_AREA_H
@@ -17,6 +20,13 @@
 #include "mypal/my_pal.h"
 #include "myui/my_widget.h"
 
+/** @brief One visual line inside a physical line (word wrap, M10b). */
+typedef struct my_visual_line_t {
+  size_t phys;     /**< physical line index */
+  size_t start_cp; /**< start column (codepoints) within the physical line */
+  size_t len_cp;   /**< visual line length in codepoints */
+} my_visual_line_t;
+
 /** @brief Multi-line text area (IS-A widget). */
 typedef struct my_text_area_t {
   my_widget_t base;
@@ -24,6 +34,9 @@ typedef struct my_text_area_t {
   char* text;               /**< owned UTF-8 buffer */
   size_t text_len;          /**< bytes in use */
   my_darray_t* line_offsets;/**< size_t per line start (line 0 = 0) */
+  bool wrap;                /**< word wrap on (M10b, default off) */
+  my_darray_t* vlines;      /**< my_visual_line_t* (wrap on only) */
+  bool vlines_dirty;        /**< vlines need a full rebuild */
   size_t cursor_row;
   size_t cursor_col;        /**< codepoints */
   size_t anchor_row;        /**< selection anchor (== cursor = no sel) */
@@ -58,6 +71,20 @@ void my_text_area_set_font(my_widget_t* area, my_font_t* font, int32_t size);
 
 /** @brief Line count (from the offset cache). */
 size_t my_text_area_line_count(my_widget_t* area);
+
+/** @brief Word wrap on/off (rebuilds visual lines, resets h-scroll). */
+my_ret_t my_text_area_set_wrap(my_widget_t* area, bool wrap);
+
+/** @brief Visual line count (wrap on; 0 when off). */
+size_t my_text_area_visual_line_count(my_widget_t* area);
+
+/** @brief Visual line by index (wrap off = physical line view). */
+const my_visual_line_t* my_text_area_visual_line_at(my_widget_t* area,
+                                                    size_t index);
+
+/** @brief Visual line index containing (row, col); col_in_v may be NULL. */
+size_t my_text_area_visual_line_of_pos(my_widget_t* area, size_t row,
+                                       size_t col, size_t* col_in_v);
 
 /** @brief Link a scroll_bar (weak): synced with scroll_y/content height. */
 my_ret_t my_text_area_set_scroll_bar(my_widget_t* area, my_widget_t* bar);

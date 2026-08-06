@@ -170,7 +170,7 @@ PAL port 矩阵：
 
 - 数据模型：单一 UTF-8 字节缓冲 + 行起点偏移缓存（darray 存 size_t 值）；编辑只从**被编辑行**起局部重建偏移（二进制查找行、O（编辑点后字节数） 摊销）；10k 行实测：载入 0.13ms、2000 次光标移动 0.09ms、100 次插入 0.09ms。
 - 状态机：光标 (row,col) 按 codepoint；上下移动保持目标列（goal_col，水平移动/点击/编辑时重置——实现上 ta_move_to 不更新 goal，调用点按需设置）；Home/End/Ctrl+Home/End；Enter 拆行、行首 Backspace 合行；Shift 扩选、Ctrl+A、选区删除先行；Ctrl+C/X/V 经 PAL 剪贴板（**保留换行**，与单行 edit 相反）。
-- 视图：scroll_x/scroll_y 保光标可见（行高 = 字体 line_height）；绘制仅可视行区间（逐行 draw_text + 按行分段选区高亮 + 闪烁光标复用 edit 的 timer 机制）；hint 空文档显示；word wrap/行号/撤销重做 = TODO。
+- 视图：scroll_x/scroll_y 保光标可见（行高 = 字体 line_height）；绘制仅可视行区间（逐行 draw_text + 按行分段选区高亮 + 闪烁光标复用 edit 的 timer 机制）；hint 空文档显示；行号 = TODO（撤销重做见 M10a、word wrap 见 M10b）。
 - MVVM：widget_target 映射 text_area 的 text（TwoWay）/hint；XML 标签 `<text_area>`。
 
 ## draw_image 后端矩阵与缩放滤波（M9b）
@@ -194,3 +194,10 @@ PAL port 矩阵：
 - `my_undo_stack_t`：文本补丁模型（entry = {offset, deleted, inserted}；undo 删 inserted 回插 deleted，redo 反之）。**批合并**：连续插入且 offset 连续（打字流）合并；连续删除且 offset 相邻递减（退格流）前插合并；换向/非相邻/其他操作开新条目；`break_batch` 在 blur/光标跳转时调用。容量默认 100（溢出丢最老），新编辑清 redo 支。栈不持有文档：undo/redo 返回 {offset, remove_len, bytes} 由控件套用（套用期间 `applying_history` 抑制再记录）。
 - edit/text_area：用户键盘/粘贴/剪切入栈；**程序 set_text 与 MVVM 回写不入栈**（且 set_text 视为文档替换直接清栈——边界语义：撤销只覆盖"用户亲手编辑"）。Ctrl+Z undo、Ctrl+Y 与 Ctrl+Shift+Z redo。
 - 键盘导航：Tab/Shift+Tab 焦点环（分发器在未被吃掉时按树序前/后移焦点并回绕，跳过不可见/禁用）；text_area/list_view 的 PageUp/PageDown 按可视区翻页；scroll_bar 获焦后 Up/Down 微调、PgUp/PgDn 翻页、Home/End 到端。
+
+## text_area word wrap 视觉行模型（M10b）
+
+- **视觉行缓存**：`my_visual_line_t {phys, start_cp, len_cp}`（darray 按值存储），仅 wrap on 时维护。编辑只从**被编辑物理行**起局部重建视觉行（之前的行起点不受本行内编辑影响）；resize/改宽度置 `vlines_dirty` 全量重建。wrap off 时 `ta_vline_at` 返回静态临时物理行视图，绘制/光标路径零分支差异、零回归。
+- **折行规则（自定，非 UAX#14）**：逐 codepoint 累宽（font measure，位图字体回退 cell 宽），超宽时——若溢出字符本身是空格则在其**之前**断开并消费该空格；否则若当前视觉行内有空格则在**最后一个空格之后**断开（空格留在上一视觉行尾）；否则任意两 codepoint 间硬折。任何视觉行都不以空白开头。明确不做 UAX#14 断行规则（TODO）。
+- **光标/滚动语义**：wrap on 时 Up/Down 按视觉行移动（goal_col 按视觉行内列保持）；Home=视觉行首、End=视觉行尾；Left/Right 仍是物理逐 codepoint（跨视觉行无特殊处理）；`(row,col)`→视觉行用二分查找（vlines 按 (phys,start_cp) 有序，共享边界列归**后一个**视觉行）。wrap on 时水平滚动禁用（scroll_x 恒 0），垂直滚动以视觉行计高。撤销/重做只记录文本补丁，视觉位置由缓存自动重建。
+- 接入：`my_text_area_set_wrap` / XML `<text_area wrap="true">` / MVVM `wrap` bool 属性（text_area 专用）。bench（-O0，万行 ~80cp 长行 → 25843 视觉行）：载入+构建 1.57ms、1000 次视觉移动 0.10ms、滚动重绘 0.30ms/帧。
