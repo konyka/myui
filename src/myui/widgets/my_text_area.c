@@ -895,34 +895,108 @@ static void ta_on_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
       size_t end = ta_offset_of(ta, vl->phys, vl->start_cp + vl->len_cp);
       size_t len = end > start ? end - start : 0;
       int32_t ty = TA_PAD_Y + (int32_t)vi * line_h - ta->scroll_y;
-      /* selection highlight for this visual line */
-      if (has_sel && vl->phys >= sel_r0 && vl->phys <= sel_r1) {
-        size_t c0 = vl->phys == sel_r0 ? sel_c0 : 0;
-        size_t c1 = vl->phys == sel_r1
-                        ? sel_c1
-                        : vl->start_cp + vl->len_cp + (vi + 1 < vcount ? 1 : 0);
-        size_t s0 = c0 > vl->start_cp ? c0 : vl->start_cp;
-        size_t s1 = c1 < vl->start_cp + vl->len_cp ? c1
-                                                   : vl->start_cp + vl->len_cp;
-        if (s1 > s0) {
-          my_vgcanvas_set_fill_color(vg, my_color_rgb(130, 170, 230));
-          my_vgcanvas_fill_rect(
-              vg, &(my_rectf_t){(float)(TA_PAD_X +
-                                            (int32_t)(s0 - vl->start_cp) *
-                                                TA_CELL_W -
-                                            ta->scroll_x),
-                                (float)ty, (float)(s1 - s0) * TA_CELL_W,
-                                (float)line_h});
-        }
-      }
       if (len > 0) {
         char* line = (char*)my_mem_alloc(ta->allocator, len + 1);
         if (line != NULL) {
+          int32_t inner_w = widget->rect.w - 2 * TA_PAD_X;
+          int32_t lw = 0;
+          int32_t base_x = TA_PAD_X - ta->scroll_x;
+          int32_t delta = 0;
+          bool justify = false;
+          int nseps = 0;
+          size_t i;
           memcpy(line, ta->text + start, len);
           line[len] = '\0';
+          /* alignment (M11d): measure the segment, shift its base x */
+          if (ta->font != NULL) {
+            my_vgcanvas_measure_text(vg, line, &lw, NULL);
+          } else {
+            lw = (int32_t)vl->len_cp * TA_CELL_W;
+          }
+          for (i = 0; i + 1 < len; i++) {
+            if (line[i] == ' ') {
+              nseps++; /* separating spaces (have a following char) */
+            }
+          }
+          if (ta->align == MY_TEXT_ALIGN_CENTER) {
+            base_x += (inner_w - lw) / 2;
+          } else if (ta->align == MY_TEXT_ALIGN_RIGHT) {
+            base_x += inner_w - lw;
+          } else if (ta->align == MY_TEXT_ALIGN_JUSTIFY && ta->wrap &&
+                     inner_w > lw) {
+            /* stretch word spacing: only visual lines that are NOT the
+             * last segment of their physical line */
+            bool phys_continues =
+                vi + 1 < vcount && ta_vline_at(ta, vi + 1)->phys == vl->phys;
+            justify = phys_continues && nseps > 0;
+          }
+          /* selection/cursor shift with the line for CENTER/RIGHT
+           * (delta); JUSTIFY word stretching is not reflected in the
+           * highlight/cursor positions (documented TODO) */
+          delta = justify ? 0 : base_x - (TA_PAD_X - ta->scroll_x);
+          if (has_sel && vl->phys >= sel_r0 && vl->phys <= sel_r1) {
+            size_t c0 = vl->phys == sel_r0 ? sel_c0 : 0;
+            size_t c1 = vl->phys == sel_r1
+                            ? sel_c1
+                            : vl->start_cp + vl->len_cp + (vi + 1 < vcount ? 1 : 0);
+            size_t s0 = c0 > vl->start_cp ? c0 : vl->start_cp;
+            size_t s1 = c1 < vl->start_cp + vl->len_cp
+                            ? c1
+                            : vl->start_cp + vl->len_cp;
+            if (s1 > s0) {
+              my_vgcanvas_set_fill_color(vg, my_color_rgb(130, 170, 230));
+              my_vgcanvas_fill_rect(
+                  vg, &(my_rectf_t){(float)(TA_PAD_X + delta +
+                                                (int32_t)(s0 - vl->start_cp) *
+                                                    TA_CELL_W -
+                                                ta->scroll_x),
+                                    (float)ty, (float)(s1 - s0) * TA_CELL_W,
+                                    (float)line_h});
+            }
+          }
           my_vgcanvas_set_fill_color(vg, my_color_from_rgba32(fg));
-          my_vgcanvas_draw_text(vg, line,
-                                (float)(TA_PAD_X - ta->scroll_x), (float)ty);
+          if (justify) {
+            /* draw word by word, stretching each separating space */
+            float x = (float)base_x;
+            float space_extra = (float)(inner_w - lw) / (float)nseps;
+            float space_w = (float)TA_CELL_W;
+            const char* p = line;
+            if (ta->font != NULL) {
+              int32_t spw = 0;
+              my_vgcanvas_measure_text(vg, " ", &spw, NULL);
+              space_w = (float)spw;
+            }
+            while (*p != '\0') {
+              const char* wstart = p;
+              size_t wlen;
+              while (*p != '\0' && *p != ' ') {
+                p++;
+              }
+              wlen = (size_t)(p - wstart);
+              if (wlen > 0) {
+                char* word = (char*)my_mem_alloc(ta->allocator, wlen + 1);
+                if (word != NULL) {
+                  int32_t ww = 0;
+                  memcpy(word, wstart, wlen);
+                  word[wlen] = '\0';
+                  my_vgcanvas_draw_text(vg, word, x, (float)ty);
+                  if (ta->font != NULL) {
+                    my_vgcanvas_measure_text(vg, word, &ww, NULL);
+                  } else {
+                    ww = (int32_t)wlen * TA_CELL_W;
+                  }
+                  x += (float)ww;
+                  my_mem_free(ta->allocator, word);
+                }
+              }
+              while (*p == ' ') {
+                x += space_w + space_extra;
+                p++;
+              }
+            }
+          } else {
+            my_vgcanvas_draw_text(vg, line, (float)base_x, (float)ty);
+          }
           my_mem_free(ta->allocator, line);
         }
       }
@@ -1115,6 +1189,15 @@ my_ret_t my_text_area_set_wrap(my_widget_t* area, bool wrap) {
   return MY_RET_OK;
 }
 
+my_ret_t my_text_area_set_align(my_widget_t* area, my_text_align_t align) {
+  if (area == NULL) {
+    return MY_RET_INVALID_PARAMS;
+  }
+  ((my_text_area_t*)area)->align = align;
+  my_widget_invalidate(area, NULL);
+  return MY_RET_OK;
+}
+
 size_t my_text_area_visual_line_count(my_widget_t* area) {
   return area != NULL ? ta_vline_count((my_text_area_t*)area) : 0;
 }
@@ -1137,8 +1220,7 @@ size_t my_text_area_visual_line_of_pos(my_widget_t* area, size_t row,
                          col_in_v != NULL ? col_in_v : &civ);
 }
 
-my_ret_t my_text_area_set_undo_shared(my_widget_t* area, void* mgr) {
-  my_text_area_t* ta = (my_text_area_t*)area;
+my_ret_t my_text_area_set_undo_shared(my_widget_t* area, void* mgr) {  my_text_area_t* ta = (my_text_area_t*)area;
   if (area == NULL) {
     return MY_RET_INVALID_PARAMS;
   }

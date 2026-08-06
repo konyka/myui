@@ -18,6 +18,7 @@
 #define MY_TEXT_AREA_H
 
 #include "mypal/my_pal.h"
+#include "myui/my_text_align.h"
 #include "myui/my_widget.h"
 
 /** @brief One visual line inside a physical line (word wrap, M10b). */
@@ -58,6 +59,7 @@ typedef struct my_text_area_t {
   my_pal_main_loop_t* blink_loop; /**< weak while active */
   my_font_t* font;          /**< borrowed */
   int32_t font_size;
+  my_text_align_t align;    /**< horizontal alignment (M11d, default LEFT) */
 } my_text_area_t;
 
 my_widget_t* my_text_area_create(const my_allocator_t* allocator);
@@ -84,6 +86,17 @@ size_t my_text_area_line_count(my_widget_t* area);
 
 /** @brief Word wrap on/off (rebuilds visual lines, resets h-scroll). */
 my_ret_t my_text_area_set_wrap(my_widget_t* area, bool wrap);
+
+/**
+ * @brief Horizontal alignment (M11d). LEFT/CENTER/RIGHT shift each
+ * visual line within the inner width (measured with the font, or the
+ * 8px cell fallback). JUSTIFY only applies in wrap mode: visual lines
+ * that are NOT the last segment of their physical line get their word
+ * spacing stretched to fill the inner width (the last segment and any
+ * line without a word-separating space render LEFT). Without wrap,
+ * JUSTIFY behaves as LEFT.
+ */
+my_ret_t my_text_area_set_align(my_widget_t* area, my_text_align_t align);
 
 /** @brief Visual line count (wrap on; 0 when off). */
 size_t my_text_area_visual_line_count(my_widget_t* area);

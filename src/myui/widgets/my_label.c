@@ -19,12 +19,23 @@ static void label_on_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
     int32_t tw = 0, th = 0;
     int32_t font_size =
         my_widget_style_get_int(widget, MY_STATE_NORMAL, "font_size", 16);
+    float tx = 0.0f;
     my_vgcanvas_set_font(vg, NULL, font_size);
     if (my_vgcanvas_measure_text(vg, label->text, &tw, &th) == MY_RET_OK) {
-      /* real text rendering (M7a): centered in the label */
+      /* real text rendering (M7a): vertical center + align (M11d) */
+      switch (label->align) {
+        case MY_TEXT_ALIGN_CENTER:
+          tx = ((float)widget->rect.w - (float)tw) / 2.0f;
+          break;
+        case MY_TEXT_ALIGN_RIGHT:
+          tx = (float)widget->rect.w - (float)tw;
+          break;
+        default: /* LEFT; JUSTIFY = LEFT for a single-line label */
+          tx = 0.0f;
+          break;
+      }
       my_vgcanvas_set_fill_color(vg, my_color_from_rgba32(fg));
-      my_vgcanvas_draw_text(vg, label->text,
-                            ((float)widget->rect.w - (float)tw) / 2.0f,
+      my_vgcanvas_draw_text(vg, label->text, tx,
                             ((float)widget->rect.h - (float)th) / 2.0f);
     } else {
       /* no font on the backend: centered placeholder bar */
@@ -73,6 +84,15 @@ my_widget_t* my_label_create(const my_allocator_t* allocator, const char* text) 
   ((my_widget_t*)label)->enable = false; /* labels are non-interactive */
   ((my_widget_t*)label)->widget_type = "label";
   return (my_widget_t*)label;
+}
+
+my_ret_t my_label_set_align(my_widget_t* label, my_text_align_t align) {
+  if (label == NULL) {
+    return MY_RET_INVALID_PARAMS;
+  }
+  ((my_label_t*)label)->align = align;
+  my_widget_invalidate(label, NULL);
+  return MY_RET_OK;
 }
 
 my_ret_t my_label_set_text(my_widget_t* label, const char* text) {

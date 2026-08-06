@@ -25,6 +25,8 @@ typedef struct rec_vg_t {
   my_vgcanvas_t base;
   int n_ops;
   char ops[REC_VG_MAX_OPS][REC_VG_OP_LEN];
+  my_font_t* font;   /**< set via set_font (borrowed; for measure) */
+  int32_t font_size;
 } rec_vg_t;
 
 static void rec_op(rec_vg_t* r, const char* fmt, ...) {
@@ -147,10 +149,8 @@ static my_ret_t rec_stroke(my_vgcanvas_t* vg) {
 
 static my_ret_t rec_draw_text(my_vgcanvas_t* vg, const char* text, float x,
                               float y) {
-  (void)text;
-  (void)x;
-  (void)y;
-  rec_op((rec_vg_t*)vg, "draw_text");
+  rec_op((rec_vg_t*)vg, "draw_text %g %g %s", (double)x, (double)y,
+         text != NULL ? text : "");
   return MY_RET_OK;
 }
 
@@ -179,18 +179,24 @@ static void rec_destroy(my_vgcanvas_t* vg) {
 }
 
 static my_ret_t rec_set_font(my_vgcanvas_t* vg, my_font_t* font, int32_t size) {
-  rec_op((rec_vg_t*)vg, "set_font %d", (int)size);
-  (void)font;
+  rec_vg_t* r = (rec_vg_t*)vg;
+  rec_op(r, "set_font %d", (int)size);
+  if (font != NULL) {
+    r->font = font;
+  }
+  if (size > 0) {
+    r->font_size = size;
+  }
   return MY_RET_OK;
 }
 
 static my_ret_t rec_measure_text(my_vgcanvas_t* vg, const char* text,
                                  int32_t* w, int32_t* h) {
-  (void)vg;
-  (void)text;
-  (void)w;
-  (void)h;
-  return MY_RET_NOT_SUPPORTED;
+  rec_vg_t* r = (rec_vg_t*)vg;
+  if (r->font == NULL || r->font_size <= 0) {
+    return MY_RET_NOT_SUPPORTED;
+  }
+  return my_font_measure(r->font, text, r->font_size, w, h);
 }
 
 static const my_vgcanvas_vtable_t REC_VG_VTABLE = {

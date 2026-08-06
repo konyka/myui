@@ -136,6 +136,7 @@ mc = my_mvvm_bind(wm, win, vm);   /* 之后一切自动 */
 | button/label/edit | text | string | edit 支持 TwoWay（"changed" 回写） |
 | text_area | text / hint | string | TwoWay；粘贴保留换行 |
 | text_area | wrap | bool | OneWay；word wrap 开关（M10b） |
+| label / text_area | align | string | left/center/right/justify（M11d） |
 | edit | hint | string | OneWay |
 | checkbox | value | bool | TwoWay（toggle 发 "changed"） |
 | slider | value | double | TwoWay（拖动发 "changed"） |

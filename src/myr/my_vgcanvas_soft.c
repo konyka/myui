@@ -659,10 +659,206 @@ static my_ret_t soft_fill(my_vgcanvas_t* vg) {
                     s->contour_count, s->state.fill_color);
 }
 
+/** @brief Disk piece for the union stroke (device space; span math
+ * identical to soft_fill_circle for pixel parity). */
+typedef struct stroke_disk_t {
+  int32_t cx, cy, r;
+} stroke_disk_t;
+
+/** @brief Union-merge stroke fill (M11d, AA levels >= 1): all segment
+ * quads and cap/join disks accumulate into ONE per-row coverage buffer
+ * (saturating add capped at maxcov), so a pixel's effective alpha never
+ * exceeds color.a -- the translucent joint over-blend of the per-piece
+ * path is gone. Scope: one stroke() call; separate stroke() calls still
+ * composite normally (documented). */
+static my_ret_t soft_stroke_union(my_vgcanvas_soft_t* s, float half,
+                                  float odd_off) {
+  const my_rect_t* clip = &s->state.clip;
+  size_t nquads = 0, ndisks = 0, ci, i;
+  path_point_t* pts = NULL;
+  contour_t* cs = NULL;
+  stroke_disk_t* disks = NULL;
+  size_t np = 0, nq = 0, nd = 0;
+  int halves = s->antialias_level >= 2 ? 2 : 1;
+  static const float OFF1[1] = {0.5f};
+  static const float OFF2[2] = {0.25f, 0.75f};
+  const float* offs = halves == 2 ? OFF2 : OFF1;
+  aa_rowbuf_t rb;
+  int32_t row0, row1, y;
+  float ymin = 0.0f, ymax = 0.0f;
+  my_ret_t ret = MY_RET_OOM;
+
+  /* count pieces */
+  for (ci = 0; ci < s->contour_count; ci++) {
+    const contour_t* c = &s->contours[ci];
+    size_t edges = c->count > 1 ? (c->closed ? c->count : c->count - 1) : 0;
+    nquads += edges;
+    if (c->count > 1 && !c->closed &&
+        s->state.line_cap == MY_LINE_CAP_ROUND) {
+      ndisks += 2;
+    }
+    if (s->state.line_join == MY_LINE_JOIN_ROUND && edges > 0) {
+      ndisks += c->closed ? edges - 1 : edges;
+    }
+  }
+  if (nquads == 0 && ndisks == 0) {
+    return MY_RET_OK;
+  }
+  pts = (path_point_t*)my_mem_alloc(s->allocator,
+                                    (nquads > 0 ? nquads : 1) * 4 *
+                                        sizeof(path_point_t));
+  cs = (contour_t*)my_mem_alloc(s->allocator,
+                                (nquads > 0 ? nquads : 1) * sizeof(contour_t));
+  disks = (stroke_disk_t*)my_mem_alloc(s->allocator,
+                                       (ndisks > 0 ? ndisks : 1) *
+                                           sizeof(stroke_disk_t));
+  rb.cov = (uint8_t*)my_mem_alloc(s->allocator, (size_t)clip->w * 2);
+  if (pts == NULL || cs == NULL || disks == NULL || rb.cov == NULL) {
+    goto done;
+  }
+  rb.alpha = rb.cov + clip->w;
+
+  /* build quads (user space + odd_off; collect_intersections adds the
+   * translate, matching the fill path) and disks (device space) */
+  for (ci = 0; ci < s->contour_count; ci++) {
+    const contour_t* c = &s->contours[ci];
+    size_t edges = c->count > 1 ? (c->closed ? c->count : c->count - 1) : 0;
+    if (c->count > 1 && !c->closed &&
+        s->state.line_cap == MY_LINE_CAP_ROUND) {
+      int32_t r = (int32_t)(half + 0.5f);
+      size_t last = c->start + c->count - 1;
+      disks[nd].cx = (int32_t)floorf(s->points[c->start].x + s->state.tx +
+                                     odd_off);
+      disks[nd].cy = (int32_t)floorf(s->points[c->start].y + s->state.ty +
+                                     odd_off);
+      disks[nd].r = r;
+      nd++;
+      disks[nd].cx =
+          (int32_t)floorf(s->points[last].x + s->state.tx + odd_off);
+      disks[nd].cy =
+          (int32_t)floorf(s->points[last].y + s->state.ty + odd_off);
+      disks[nd].r = r;
+      nd++;
+    }
+    for (i = 0; i < edges; i++) {
+      size_t j = (i + 1) % c->count;
+      float x0 = s->points[c->start + i].x + odd_off;
+      float y0 = s->points[c->start + i].y + odd_off;
+      float x1 = s->points[c->start + j].x + odd_off;
+      float y1 = s->points[c->start + j].y + odd_off;
+      float dx = x1 - x0, dy = y1 - y0;
+      float len = sqrtf(dx * dx + dy * dy);
+      float nx, ny;
+      contour_t* qc = &cs[nq];
+      if (len < 0.001f) {
+        nx = 0.0f;
+        ny = 0.0f; /* zero-length: small square stamp */
+        pts[np].x = x0 - half;
+        pts[np].y = y0 - half;
+        pts[np + 1].x = x0 + half;
+        pts[np + 1].y = y0 - half;
+        pts[np + 2].x = x0 + half;
+        pts[np + 2].y = y0 + half;
+        pts[np + 3].x = x0 - half;
+        pts[np + 3].y = y0 + half;
+      } else {
+        nx = -dy / len * half;
+        ny = dx / len * half;
+        pts[np].x = x0 + nx;
+        pts[np].y = y0 + ny;
+        pts[np + 1].x = x1 + nx;
+        pts[np + 1].y = y1 + ny;
+        pts[np + 2].x = x1 - nx;
+        pts[np + 2].y = y1 - ny;
+        pts[np + 3].x = x0 - nx;
+        pts[np + 3].y = y0 - ny;
+      }
+      qc->start = np;
+      qc->count = 4;
+      qc->closed = true;
+      nq++;
+      np += 4;
+      if (s->state.line_join == MY_LINE_JOIN_ROUND && i + 1 < c->count) {
+        disks[nd].cx = (int32_t)floorf(s->points[c->start + j].x +
+                                       s->state.tx + odd_off);
+        disks[nd].cy = (int32_t)floorf(s->points[c->start + j].y +
+                                       s->state.ty + odd_off);
+        disks[nd].r = (int32_t)(half + 0.5f);
+        nd++;
+      }
+    }
+  }
+
+  /* row range: quads (device) and disks, intersected with the clip */
+  ymin = (float)(clip->y + clip->h);
+  ymax = (float)clip->y;
+  for (i = 0; i < np; i++) {
+    float py = pts[i].y + s->state.ty;
+    if (py < ymin) {
+      ymin = py;
+    }
+    if (py > ymax) {
+      ymax = py;
+    }
+  }
+  for (i = 0; i < nd; i++) {
+    float y0 = (float)(disks[i].cy - disks[i].r);
+    float y1 = (float)(disks[i].cy + disks[i].r + 1);
+    if (y0 < ymin) {
+      ymin = y0;
+    }
+    if (y1 > ymax) {
+      ymax = y1;
+    }
+  }
+  row0 = (int32_t)floorf(ymin) > clip->y ? (int32_t)floorf(ymin) : clip->y;
+  row1 = (int32_t)ceilf(ymax) < clip->y + clip->h ? (int32_t)ceilf(ymax)
+                                                  : clip->y + clip->h;
+  for (y = row0; y < row1; y++) {
+    int hh;
+    memset(rb.cov, 0, (size_t)clip->w);
+    for (hh = 0; hh < halves; hh++) {
+      /* quads: even-odd WITHIN each contour (convex -> one span) */
+      for (i = 0; i < nq; i++) {
+        float xs[4];
+        size_t nxs = collect_intersections(s, pts, &cs[i], 1,
+                                           (float)y + offs[hh], xs, 4);
+        if (nxs > 1) {
+          size_t k;
+          qsort(xs, nxs, sizeof(float), float_cmp);
+          for (k = 0; k + 1 < nxs; k += 2) {
+            span_accum(rb.cov, clip->x, clip->w, xs[k], xs[k + 1]);
+          }
+        }
+      }
+      /* disks: exact circle spans (device space) */
+      for (i = 0; i < nd; i++) {
+        float fx = (float)disks[i].cx + 0.5f;
+        float fdy = (float)y + offs[hh] - ((float)disks[i].cy + 0.5f);
+        float r = (float)disks[i].r;
+        if (fdy * fdy <= r * r) {
+          float fdx = sqrtf(r * r - fdy * fdy);
+          span_accum(rb.cov, clip->x, clip->w, fx - fdx, fx + fdx);
+        }
+      }
+    }
+    emit_row(s, &rb, y, clip->x, clip->w, 4 * halves, s->state.stroke_color);
+  }
+  ret = MY_RET_OK;
+
+done:
+  my_mem_free(s->allocator, pts);
+  my_mem_free(s->allocator, cs);
+  my_mem_free(s->allocator, disks);
+  my_mem_free(s->allocator, rb.cov);
+  return ret;
+}
+
 /** @brief Stroke: each segment becomes a quad contour filled with the
- * shared coverage path (blending + AA for free). Square caps/joins
- * (round caps are a TODO); translucent strokes may over-blend at joints
- * (segments are filled independently). */
+ * shared coverage path (blending + AA for free). AA levels >= 1 take
+ * soft_stroke_union (M11d: single coverage buffer, no joint over-blend);
+ * level 0 keeps the per-piece fills below (translucent joints still
+ * over-blend there -- documented boundary). */
 static my_ret_t soft_stroke(my_vgcanvas_t* vg) {
   my_vgcanvas_soft_t* s = (my_vgcanvas_soft_t*)vg;
   float half = s->state.line_width / 2.0f;
@@ -674,6 +870,11 @@ static my_ret_t soft_stroke(my_vgcanvas_t* vg) {
   /* odd integer widths: shift 0.5px so thin lines land on pixel centers */
   if (((int32_t)s->state.line_width) % 2 == 1) {
     odd_off = 0.5f;
+  }
+  if (s->antialias_level >= 1 && s->contour_count > 0) {
+    /* M11d: union-merge all pieces of this stroke into one coverage
+     * buffer (no translucent joint over-blend) */
+    return soft_stroke_union(s, half, odd_off);
   }
   for (ci = 0; ci < s->contour_count; ci++) {
     const contour_t* c = &s->contours[ci];

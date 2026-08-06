@@ -76,6 +76,16 @@ static my_ret_t target_set_prop(my_binding_target_t* t, const char* name,
     }
     return MY_RET_NOT_SUPPORTED;
   }
+  if (strcmp(name, "align") == 0) {
+    const char* s = my_value_get_str(v);
+    if (my_str_eq(w->widget_type, "label")) {
+      return my_label_set_align(w, my_text_align_parse(s));
+    }
+    if (my_str_eq(w->widget_type, "text_area")) {
+      return my_text_area_set_align(w, my_text_align_parse(s));
+    }
+    return MY_RET_NOT_SUPPORTED;
+  }
   if (strcmp(name, "visible") == 0) {
     return my_widget_set_visible(w, v->type == MY_VALUE_BOOL
                                       ? my_value_get_bool(v)
@@ -131,6 +141,17 @@ static my_ret_t target_get_prop(my_binding_target_t* t, const char* name,
   if (strcmp(name, "wrap") == 0) {
     if (my_str_eq(w->widget_type, "text_area")) {
       return my_value_set_bool(v, ((my_text_area_t*)w)->wrap);
+    }
+    return MY_RET_NOT_SUPPORTED;
+  }
+  if (strcmp(name, "align") == 0) {
+    if (my_str_eq(w->widget_type, "label")) {
+      return my_value_set_str(v,
+                              my_text_align_str(((my_label_t*)w)->align));
+    }
+    if (my_str_eq(w->widget_type, "text_area")) {
+      return my_value_set_str(v,
+                              my_text_align_str(((my_text_area_t*)w)->align));
     }
     return MY_RET_NOT_SUPPORTED;
   }

@@ -102,7 +102,11 @@ static my_widget_t* make_button(const my_allocator_t* a,
 
 static my_widget_t* make_label(const my_allocator_t* a,
                                const my_xml_node_t* n) {
-  return my_label_create(a, my_xml_node_attr(n, "text"));
+  my_widget_t* w = my_label_create(a, my_xml_node_attr(n, "text"));
+  if (w != NULL) {
+    my_label_set_align(w, my_text_align_parse(my_xml_node_attr(n, "align")));
+  }
+  return w;
 }
 
 static my_widget_t* make_edit(const my_allocator_t* a, const my_xml_node_t* n) {
@@ -168,6 +172,10 @@ static my_widget_t* make_text_area(const my_allocator_t* a,
   }
   if (attr_bool(n, "wrap", false)) {
     my_text_area_set_wrap(w, true);
+  }
+  if (my_xml_node_attr(n, "align") != NULL) {
+    my_text_area_set_align(w,
+                           my_text_align_parse(my_xml_node_attr(n, "align")));
   }
   if (my_xml_node_attr(n, "max_len") != NULL) {
     my_text_area_set_max_len(w, (size_t)attr_int(n, "max_len", 0));
