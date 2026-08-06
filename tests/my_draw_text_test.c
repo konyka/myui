@@ -127,6 +127,52 @@ static void test_ttf_text_pixels(void) {
   my_lcd_destroy(lcd);
 }
 
+/* RTL scripts via text_layout (M11a). Font paths contain [] (shell
+ * escaping only; plain strings in C). Skip when the fonts are absent. */
+static void render_rtl(const char* font_path, const char* text,
+                       const char* ltr4, const char* tag) {
+  my_font_t* font = my_font_stb_create(NULL, font_path, 0);
+  my_lcd_t* lcd;
+  my_vgcanvas_t* vg;
+  int32_t w = 0, h = 0, wl = 0, hl = 0;
+  int lit;
+  if (font == NULL) {
+    fprintf(stdout, "SKIP: %s font not found (%s)\n", tag, font_path);
+    return;
+  }
+  lcd = my_lcd_mem_create(NULL, 256, 48, MY_PIXEL_FORMAT_BGRA8888);
+  vg = my_vgcanvas_soft_create(NULL, lcd);
+  my_vgcanvas_set_font(vg, font, 24);
+
+  TEST_ASSERT_EQ_INT(my_vgcanvas_measure_text(vg, text, &w, &h), MY_RET_OK);
+  TEST_ASSERT(w > 0 && h >= 24);
+  TEST_ASSERT_EQ_INT(my_vgcanvas_measure_text(vg, ltr4, &wl, &hl), MY_RET_OK);
+  TEST_ASSERT(w != wl); /* shaped RTL word != any 4 LTR chars */
+
+  my_vgcanvas_begin_frame(vg, NULL);
+  my_vgcanvas_set_fill_color(vg, my_color_rgb(255, 255, 255));
+  TEST_ASSERT_EQ_INT(my_vgcanvas_draw_text(vg, text, 4, 4), MY_RET_OK);
+  my_vgcanvas_end_frame(vg);
+  lit = count_lit(lcd, 4, 4, 4 + w, 4 + h);
+  TEST_ASSERT(lit > 40); /* real glyphs rendered (not tofu boxes) */
+
+  my_vgcanvas_destroy(vg);
+  my_font_destroy(font);
+  my_lcd_destroy(lcd);
+}
+
+static void test_draw_text_arabic_shaped(void) {
+  /* محمد: shaped (presentation forms) + visually reversed */
+  render_rtl("/usr/share/fonts/google-noto-vf/NotoNaskhArabic[wght].ttf",
+             "\xD9\x85\xD8\xAD\xD9\x85\xD8\xAF", "abcd", "arabic");
+}
+
+static void test_draw_text_hebrew_reordered(void) {
+  /* אבג */
+  render_rtl("/usr/share/fonts/google-noto-vf/NotoSansHebrew[wght].ttf",
+             "\xD7\x90\xD7\x91\xD7\x92", "abcd", "hebrew");
+}
+
 static void test_no_font_returns_not_supported(void) {
   my_lcd_t* lcd = my_lcd_mem_create(NULL, 32, 32, MY_PIXEL_FORMAT_BGRA8888);
   my_vgcanvas_t* vg = my_vgcanvas_soft_create(NULL, lcd);
@@ -144,5 +190,7 @@ MYTEST_MAIN_BEGIN()
   MYTEST_RUN(test_draw_text_clipped);
   MYTEST_RUN(test_draw_text_translates);
   MYTEST_RUN(test_ttf_text_pixels);
+  MYTEST_RUN(test_draw_text_arabic_shaped);
+  MYTEST_RUN(test_draw_text_hebrew_reordered);
   MYTEST_RUN(test_no_font_returns_not_supported);
 MYTEST_MAIN_END()

@@ -188,6 +188,41 @@ static void test_gles2_real_render(void) {
     TEST_ASSERT(px[0] > 200); /* ROUND: cap extends to x=52 */
   }
 
+  /* RTL text through the gles2 backend (M11a): Arabic word shaped +
+   * reversed via text_layout; skip when the Noto font is absent */
+  {
+    my_font_t* ar = my_font_stb_create(
+        NULL, "/usr/share/fonts/google-noto-vf/NotoNaskhArabic[wght].ttf", 0);
+    if (ar == NULL) {
+      fprintf(stdout, "SKIP: no Noto Arabic font\n");
+    } else {
+      int lit = 0, x, y;
+      GLubyte rowpx[64 * 4];
+      glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+      glClear(GL_COLOR_BUFFER_BIT);
+      my_vgcanvas_begin_frame(vg, NULL);
+      my_vgcanvas_set_font(vg, ar, 24);
+      my_vgcanvas_set_fill_color(vg, my_color_rgb(255, 255, 255));
+      /* محمد */
+      TEST_ASSERT_EQ_INT(my_vgcanvas_draw_text(
+                             vg, "\xD9\x85\xD8\xAD\xD9\x85\xD8\xAF", 4, 4),
+                         MY_RET_OK);
+      my_vgcanvas_end_frame(vg);
+      glFinish();
+      for (y = 4; y < 40 && lit == 0; y++) {
+        glReadPixels(4, 64 - 1 - y, 60, 1, GL_RGBA, GL_UNSIGNED_BYTE, rowpx);
+        for (x = 0; x < 60; x++) {
+          if (rowpx[x * 4] > 100) {
+            lit = 1;
+          }
+        }
+      }
+      TEST_ASSERT(lit > 0); /* shaped glyphs rendered */
+      TEST_ASSERT(glGetError() == GL_NO_ERROR);
+      my_font_destroy(ar);
+    }
+  }
+
   my_vgcanvas_destroy(vg);
 }
 

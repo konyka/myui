@@ -212,3 +212,12 @@ PAL port 矩阵：
 
 - **GLES 描边 cap/join 补齐**（与 soft 几何对齐）：stroke 折线本就是法线扩展四边形（与 soft 同几何），本期补——ROUND cap = 端点半圆三角扇（8 段，沿端点切线外凸，退化线段回落整圆盘）；ROUND join = 顶点半径 lw/2 圆盘三角扇（8 段，覆盖规则与 soft 一致：`i+1 < count`——开放折线末端也有盘，闭合轮廓顶点 0 无盘）。cap/join 入 gles state（save/restore 有效）。GLES 无 AA，边缘为硬边（几何扇近似圆）。至此两后端 cap/join 能力对齐：BUTT/MITER/ROUND 全支持，差异仅剩 soft 的覆盖率 AA。
 - **变高行动态行高失效**：`my_list_view_invalidate_row_heights(list)`（丢弃全部已测行高，psum 清回 [0]）与 `my_list_view_invalidate_row_height(list, index)`（psum 截断到 index 之后，前缀已测值保留，尾部惰性重算）。两者立即：钳制 scroll_offset 到新（估算）总高、重建可视行、同步滚动条。典型场景：行内容更新导致行高变化后调用 index 版；全局字号/密度切换调全量版。
+
+## 文本管线：BiDi 重排 + 阿拉伯整形（M11a）
+
+- **`my_text_layout`**（src/myr/my_text_layout.[ch]）：逻辑序 UTF-8 → 视觉序 codepoint 数组 + 视觉→逻辑索引映射 + 重编码 visual_utf8（给 font vtable measure 用——测量与顺序无关但与整形有关）。流程：UTF-8 解码 → **纯 LTR 快速路径**（扫描无希伯来/阿拉伯/presentation forms/bidi 控制字符 → 恒等映射，SheenBidi 零触碰）→ **阿拉伯整形**（见下）→ **SheenBidi UBA**（段落方向按 P2/P3 首强字符；visual runs 已按视觉序返回，奇数 level 段内反转）。
+- **阿拉伯整形自研**（src/myr/my_arabic_shape.[ch]）：SheenBidi 3.0.0 只有 UBA 没有 shaping，整形按 UCD 自建——连接类别表 + presentation forms 映射表（`my_arabic_shape_data.h`，tools/gen_arabic_shape_data.py 从本地 ArabicShaping.txt + UnicodeData.txt 生成，离线）。规则：逐字母看逻辑邻居（跳过透明记号），双连接/右连接/左连接/tatweel 决定词首/中/尾/独立形，1:1 原位替换（先拷贝原文再判型，因为 presentation forms 本身无连接类）。Lam-Alef 合字不做（TODO，字体通常有 GSUB 兜底）。
+- **绘制接入**：soft/gles2 的 draw_text 与 measure_text 入口先 `my_text_layout_may_need_bidi` 预扫描，纯 LTR 走原逐字形循环（零开销），否则取布局结果按视觉序绘制/按 visual_utf8 测宽。**语义：x 永远是左缘**——RTL 段落的视觉序自然从右读起，对齐交给控件。编辑控件（edit/text_area）的 RTL 光标视觉-逻辑映射本期不做（TODO，draw_text 级与展示控件完整受益）。镜像（UBA L4）未做（TODO）。
+- **缓存**：进程级 LRU 64 项，key = 文本（布局结果与字体/字号无关，故不纳入 key）；`my_text_layout_process` 返回**调用方所有的拷贝**（缓存持主副本），`my_text_layout_cache_flush/size` 为测试钩子。
+- **裁剪**：`MYUI_BIDI=OFF`（默认 ON）不编 SheenBidi（省 ~100KB），process 退化为恒等布局，draw/measure 路径不变。
+- 集成偏离记录：任务书假定"SheenBidi 的 shaping"，实际 3.0.0 无此模块（只有重排/镜像查找表），整形为 myui 自研（数据同来自本地 UCD）；SheenBidi 许可证为 Apache-2.0（非任务书所述 ISC，同为宽松许可，LICENSE 已 vendor）。

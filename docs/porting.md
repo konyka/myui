@@ -50,6 +50,7 @@
 ## 构建选项
 
 - `-DMYUI_PAL=auto|x11|dummy`（已实现；新 port 在此扩展）
+- `-DMYUI_BIDI=ON|OFF`（M11a；嵌入式无 RTL 需求时 OFF，省 ~100KB 的 SheenBidi + 整形表——draw_text/measure 自动退化为原逻辑序路径，无需改应用代码）
 - 交叉工具链文件 `cmake/toolchains/<platform>.cmake`（TODO，M5 起）
 - 裁剪开关：日志级别、动画、XML 加载器（TODO）
 

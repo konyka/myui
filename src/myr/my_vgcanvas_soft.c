@@ -18,6 +18,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "myr/my_text_layout.h"
+
 typedef struct soft_state_t {
   my_color_t fill_color;
   my_color_t stroke_color;
@@ -756,10 +758,44 @@ static my_ret_t soft_set_line_join(my_vgcanvas_t* vg, my_line_join_t join) {
   return MY_RET_OK;
 }
 
+/** @brief Draw one codepoint at pen_x and advance it (soft text body). */
+static void soft_draw_cp(my_vgcanvas_soft_t* s, uint32_t cp, float* pen_x,
+                         int32_t top, int32_t ascent) {
+  const my_rect_t* clip = &s->state.clip;
+  my_glyph_t g;
+  int32_t gx, gy, row;
+  if (my_font_get_glyph(s->state.font, cp, s->state.font_size, &g) !=
+      MY_RET_OK) {
+    return;
+  }
+  gx = soft_round(*pen_x) + g.bearing_x;
+  gy = top + ascent - g.bearing_y;
+  if (g.bitmap != NULL) {
+    for (row = 0; row < g.h; row++) {
+      int32_t dy = gy + row;
+      int32_t dx0 = gx, dx1 = gx + g.w;
+      const uint8_t* alpha_row = g.bitmap + (size_t)row * (size_t)g.w;
+      if (dy < clip->y || dy >= clip->y + clip->h) {
+        continue;
+      }
+      if (dx0 < clip->x) {
+        dx0 = clip->x;
+      }
+      if (dx1 > clip->x + clip->w) {
+        dx1 = clip->x + clip->w;
+      }
+      if (dx1 > dx0) {
+        my_lcd_blend_span(s->lcd, dx0, dy, alpha_row + (dx0 - gx), dx1 - dx0,
+                          s->state.fill_color);
+      }
+    }
+  }
+  *pen_x += (float)g.advance;
+}
+
 static my_ret_t soft_draw_text(my_vgcanvas_t* vg, const char* text, float x,
                                float y) {
   my_vgcanvas_soft_t* s = (my_vgcanvas_soft_t*)vg;
-  const my_rect_t* clip = &s->state.clip;
   int32_t ascent;
   float pen_x;
   int32_t top;
@@ -775,37 +811,26 @@ static my_ret_t soft_draw_text(my_vgcanvas_t* vg, const char* text, float x,
   pen_x = x + s->state.tx;
   top = soft_round(y + s->state.ty);
 
-  while (*p != '\0') {
-    uint32_t cp = my_utf8_next(&p);
-    my_glyph_t g;
-    int32_t gx, gy, row;
-    if (my_font_get_glyph(s->state.font, cp, s->state.font_size, &g) !=
-        MY_RET_OK) {
-      continue;
+  if (!my_text_layout_may_need_bidi(text)) {
+    /* fast path: plain LTR, no layout work at all */
+    while (*p != '\0') {
+      soft_draw_cp(s, my_utf8_next(&p), &pen_x, top, ascent);
     }
-    gx = soft_round(pen_x) + g.bearing_x;
-    gy = top + ascent - g.bearing_y;
-    if (g.bitmap != NULL) {
-      for (row = 0; row < g.h; row++) {
-        int32_t dy = gy + row;
-        int32_t dx0 = gx, dx1 = gx + g.w;
-        const uint8_t* alpha_row = g.bitmap + (size_t)row * (size_t)g.w;
-        if (dy < clip->y || dy >= clip->y + clip->h) {
-          continue;
-        }
-        if (dx0 < clip->x) {
-          dx0 = clip->x;
-        }
-        if (dx1 > clip->x + clip->w) {
-          dx1 = clip->x + clip->w;
-        }
-        if (dx1 > dx0) {
-          my_lcd_blend_span(s->lcd, dx0, dy, alpha_row + (dx0 - gx), dx1 - dx0,
-                            s->state.fill_color);
-        }
-      }
+    return MY_RET_OK;
+  }
+  /* shaped + visually reordered path (M11a). x is ALWAYS the left edge:
+   * the visual order of an RTL paragraph simply starts there; alignment
+   * is the widget's business (see my_text_layout.h). */
+  {
+    my_text_layout_t* l = my_text_layout_process(s->allocator, text);
+    size_t i;
+    if (l == NULL) {
+      return MY_RET_OOM;
     }
-    pen_x += (float)g.advance;
+    for (i = 0; i < l->len; i++) {
+      soft_draw_cp(s, l->visual_cps[i], &pen_x, top, ascent);
+    }
+    my_text_layout_destroy(l);
   }
   return MY_RET_OK;
 }
@@ -827,6 +852,19 @@ static my_ret_t soft_measure_text(my_vgcanvas_t* vg, const char* text,
   my_vgcanvas_soft_t* s = (my_vgcanvas_soft_t*)vg;
   if (s->state.font == NULL || s->state.font_size <= 0) {
     return MY_RET_NOT_SUPPORTED;
+  }
+  if (text != NULL && my_text_layout_may_need_bidi(text)) {
+    /* shaping changes widths (order does not matter for the total):
+     * measure the shaped+reordered string (M11a) */
+    my_text_layout_t* l = my_text_layout_process(s->allocator, text);
+    my_ret_t ret;
+    if (l == NULL) {
+      return MY_RET_OOM;
+    }
+    ret = my_font_measure(s->state.font, l->visual_utf8, s->state.font_size,
+                          w, h);
+    my_text_layout_destroy(l);
+    return ret;
   }
   return my_font_measure(s->state.font, text, s->state.font_size, w, h);
 }

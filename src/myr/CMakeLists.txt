@@ -9,6 +9,8 @@ add_library(myr STATIC
   my_font.c
   my_font_stb.c
   my_stb_truetype.c
+  my_arabic_shape.c
+  my_text_layout.c
 )
 
 target_include_directories(myr PUBLIC ${CMAKE_SOURCE_DIR}/src)
@@ -24,6 +26,24 @@ endif()
 
 if(MYUI_FONT_STB)
   target_compile_definitions(myr PUBLIC MYUI_FONT_STB)
+endif()
+
+# BiDi reorder + Arabic shaping (M11a): vendored SheenBidi unity TU,
+# same warning relaxation as stb (third-party code, Apache-2.0)
+if(MYUI_BIDI)
+  set(SHEENBIDI_DIR ${CMAKE_SOURCE_DIR}/3rd/SheenBidi)
+  target_sources(myr PRIVATE ${SHEENBIDI_DIR}/Source/SheenBidi.c)
+  target_compile_definitions(myr PUBLIC MYUI_BIDI)
+  target_include_directories(myr PRIVATE
+    ${SHEENBIDI_DIR}/Headers ${SHEENBIDI_DIR}/Source)
+  if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
+    set_source_files_properties(${SHEENBIDI_DIR}/Source/SheenBidi.c
+      PROPERTIES COMPILE_OPTIONS "-Wno-error;-Wno-pedantic;-Wno-unused-function;-Wno-unused-parameter;-Wno-implicit-fallthrough;-Wno-unused-value"
+      COMPILE_DEFINITIONS SB_CONFIG_UNITY)
+  else()
+    set_source_files_properties(${SHEENBIDI_DIR}/Source/SheenBidi.c
+      PROPERTIES COMPILE_DEFINITIONS SB_CONFIG_UNITY)
+  endif()
 endif()
 
 # math library for the software rasterizer (floorf/ceilf/sqrtf)

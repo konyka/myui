@@ -7,6 +7,7 @@
 - **分层架构**：myc 基础库 / mypal 平台抽象 / myr 渲染抽象 / myui 控件核心 / mymvvm MVVM，层间只经 vtable 接口通信
 - **双渲染 backend**：软件光栅化（零依赖，5 种像素格式）+ GLES2（CPU 三角化，GL 调用经函数表隔离），同一冻结 vgcanvas 接口；全量 alpha 混合（src-over）+ 扫描线覆盖率抗锯齿（三级可开关：x4 / x4y2）；剪贴板（x11 selection + 内存实现）
 - **字体系统**：stb_truetype（TTF + LRU 字形缓存）+ 内置 8x8 位图字体兜底（`MYUI_FONT_STB=OFF` 嵌入式裁剪），soft/GLES2 双 backend 文本渲染
+- **国际化文本**：BiDi 重排（vendored SheenBidi，UBA 全算法）+ 阿拉伯字母整形（presentation forms，UCD 数据自研），纯 LTR 零开销快速路径，`MYUI_BIDI=OFF` 可裁剪；编辑控件 RTL 光标为 TODO
 - **控件系统**：引用计数控件树、linear 布局（px/%/flex）、事件分发（grab/焦点）、主题样式（文本加载）、属性动画、脏矩形局部重绘；内置 button/label/edit（单行输入）/text_area（多行编辑）/checkbox/slider/progress_bar/list_view（虚拟化）/scroll_bar/image
 - **编辑体验**：撤销/重做（批合并撤销栈）、Tab 焦点环、PageUp/Down、光标闪烁、剪贴板
 - **MVVM**：data/command/items/condition 绑定、converter/validator、navigator、声明式规则字符串，UI 适配经 binding_target 抽象（base 可独立单测）

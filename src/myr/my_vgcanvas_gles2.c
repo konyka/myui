@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "myc/my_mem.h"
+#include "myr/my_text_layout.h"
 
 /* ---------------- shaders ---------------- */
 
@@ -575,6 +576,49 @@ static my_ret_t gles_set_line_join(my_vgcanvas_t* vg, my_line_join_t join) {
   return MY_RET_OK;
 }
 
+/** @brief Draw one codepoint at pen_x and advance it (gles text body). */
+static void gles_draw_cp(my_vgcanvas_gles2_t* s, uint32_t cp, float* pen_x,
+                         float top, int32_t ascent) {
+  my_glyph_t g;
+  uint32_t slot;
+  float gx, gy, quad[24];
+  if (my_font_get_glyph(s->state.font, cp, s->state.font_size, &g) !=
+          MY_RET_OK ||
+      g.bitmap == NULL || g.w <= 0 || g.h <= 0) {
+    *pen_x += g.advance > 0 ? (float)g.advance : 0.0f;
+    return;
+  }
+  /* direct-mapped texture cache: evict on slot collision */
+  slot = (cp ^ (uint32_t)s->state.font_size) % GLES_TEX_CACHE_SIZE;
+  if (s->tex_cache[slot].texture == 0 || s->tex_cache[slot].codepoint != cp ||
+      s->tex_cache[slot].size != s->state.font_size) {
+    if (s->tex_cache[slot].texture != 0) {
+      s->gl.delete_texture(s->gl.ctx, s->tex_cache[slot].texture);
+    }
+    s->tex_cache[slot].texture =
+        s->gl.create_texture(s->gl.ctx, g.bitmap, g.w, g.h);
+    s->tex_cache[slot].codepoint = cp;
+    s->tex_cache[slot].size = s->state.font_size;
+  }
+  gx = *pen_x + (float)g.bearing_x;
+  gy = top + (float)(ascent - g.bearing_y);
+  /* quad: 2 triangles, interleaved xy+uv */
+  {
+    float x0 = gx, y0 = gy, x1 = gx + (float)g.w, y1 = gy + (float)g.h;
+    const float verts[6][4] = {{x0, y0, 0, 0}, {x1, y0, 1, 0}, {x1, y1, 1, 1},
+                               {x0, y0, 0, 0}, {x1, y1, 1, 1}, {x0, y1, 0, 1}};
+    memcpy(quad, verts, sizeof(quad));
+  }
+  s->gl.uniform4f(s->gl.ctx, s->text_program, "u_color",
+                  (float)s->state.fill_color.r / 255.0f,
+                  (float)s->state.fill_color.g / 255.0f,
+                  (float)s->state.fill_color.b / 255.0f,
+                  (float)s->state.fill_color.a / 255.0f);
+  s->gl.draw_textured_quads(s->gl.ctx, s->text_program,
+                            s->tex_cache[slot].texture, quad, 6);
+  *pen_x += (float)g.advance;
+}
+
 static my_ret_t gles_draw_text(my_vgcanvas_t* vg, const char* text, float x,
                                float y) {
   my_vgcanvas_gles2_t* s = (my_vgcanvas_gles2_t*)vg;
@@ -604,47 +648,23 @@ static my_ret_t gles_draw_text(my_vgcanvas_t* vg, const char* text, float x,
   pen_x = x + s->state.tx;
   top = y + s->state.ty;
 
-  while (*p != '\0') {
-    uint32_t cp = my_utf8_next(&p);
-    my_glyph_t g;
-    uint32_t slot;
-    float gx, gy, quad[24];
-    if (my_font_get_glyph(s->state.font, cp, s->state.font_size, &g) !=
-            MY_RET_OK ||
-        g.bitmap == NULL || g.w <= 0 || g.h <= 0) {
-      pen_x += g.advance > 0 ? (float)g.advance : 0.0f;
-      continue;
+  if (!my_text_layout_may_need_bidi(text)) {
+    /* fast path: plain LTR, no layout work at all */
+    while (*p != '\0') {
+      gles_draw_cp(s, my_utf8_next(&p), &pen_x, top, ascent);
     }
-    /* direct-mapped texture cache: evict on slot collision */
-    slot = (cp ^ (uint32_t)s->state.font_size) % GLES_TEX_CACHE_SIZE;
-    if (s->tex_cache[slot].texture == 0 ||
-        s->tex_cache[slot].codepoint != cp ||
-        s->tex_cache[slot].size != s->state.font_size) {
-      if (s->tex_cache[slot].texture != 0) {
-        s->gl.delete_texture(s->gl.ctx, s->tex_cache[slot].texture);
-      }
-      s->tex_cache[slot].texture =
-          s->gl.create_texture(s->gl.ctx, g.bitmap, g.w, g.h);
-      s->tex_cache[slot].codepoint = cp;
-      s->tex_cache[slot].size = s->state.font_size;
+  } else {
+    /* shaped + visually reordered path (M11a); x is always the left
+     * edge (see my_text_layout.h) */
+    my_text_layout_t* l = my_text_layout_process(s->allocator, text);
+    size_t i;
+    if (l == NULL) {
+      return MY_RET_OOM;
     }
-    gx = pen_x + (float)g.bearing_x;
-    gy = top + (float)(ascent - g.bearing_y);
-    /* quad: 2 triangles, interleaved xy+uv */
-    {
-      float x0 = gx, y0 = gy, x1 = gx + (float)g.w, y1 = gy + (float)g.h;
-      const float verts[6][4] = {{x0, y0, 0, 0}, {x1, y0, 1, 0}, {x1, y1, 1, 1},
-                                 {x0, y0, 0, 0}, {x1, y1, 1, 1}, {x0, y1, 0, 1}};
-      memcpy(quad, verts, sizeof(quad));
+    for (i = 0; i < l->len; i++) {
+      gles_draw_cp(s, l->visual_cps[i], &pen_x, top, ascent);
     }
-    s->gl.uniform4f(s->gl.ctx, s->text_program, "u_color",
-                    (float)s->state.fill_color.r / 255.0f,
-                    (float)s->state.fill_color.g / 255.0f,
-                    (float)s->state.fill_color.b / 255.0f,
-                    (float)s->state.fill_color.a / 255.0f);
-    s->gl.draw_textured_quads(s->gl.ctx, s->text_program,
-                              s->tex_cache[slot].texture, quad, 6);
-    pen_x += (float)g.advance;
+    my_text_layout_destroy(l);
   }
   /* restore the flat-color program for subsequent geometry */
   s->gl.use_program(s->gl.ctx, s->program);
@@ -743,6 +763,19 @@ static my_ret_t gles_measure_text(my_vgcanvas_t* vg, const char* text,
   my_vgcanvas_gles2_t* s = (my_vgcanvas_gles2_t*)vg;
   if (s->state.font == NULL || s->state.font_size <= 0) {
     return MY_RET_NOT_SUPPORTED;
+  }
+  if (text != NULL && my_text_layout_may_need_bidi(text)) {
+    /* shaping changes widths (order does not): measure the shaped and
+     * reordered string (M11a) */
+    my_text_layout_t* l = my_text_layout_process(s->allocator, text);
+    my_ret_t ret;
+    if (l == NULL) {
+      return MY_RET_OOM;
+    }
+    ret = my_font_measure(s->state.font, l->visual_utf8, s->state.font_size,
+                          w, h);
+    my_text_layout_destroy(l);
+    return ret;
   }
   return my_font_measure(s->state.font, text, s->state.font_size, w, h);
 }

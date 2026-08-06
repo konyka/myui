@@ -92,6 +92,7 @@ typedef struct app_t {
   my_widget_t* anim_btn;
   my_view_model_t* vm;
   my_mvvm_context_t* mc;
+  my_window_t* win_ar; /**< i18n Arabic window (M11a, NULL when skipped) */
 } app_t;
 
 static my_theme_t* make_dark_theme(void) {
@@ -312,6 +313,31 @@ static void click_widget(my_window_t* win, my_widget_t* widget) {
 }
 #endif
 
+/** @brief i18n demo window (M11a): one label in the given script, shown
+ * with a script-appropriate font; window is only created when the font
+ * file exists. RTL shaping/reorder happens in draw_text. Returns the
+ * window (borrowed, owned by the wm) or NULL. */
+static my_window_t* i18n_window(app_t* app, const char* title,
+                                const char* font_path, const char* text) {
+  my_font_t* font = my_font_stb_create(NULL, font_path, 0);
+  my_window_t* win;
+  my_widget_t* label;
+  if (font == NULL) {
+    return NULL; /* font not installed: skip this window */
+  }
+  win = my_window_create(NULL, app->pal, 480, 140, title);
+  my_window_set_font(win, font, 28);
+  my_widget_set_layouter(my_window_widget(win),
+                         my_layouter_linear_create(NULL, false, 8));
+  label = my_label_create(NULL, text);
+  my_widget_set_layout_params(label, "h:60");
+  my_widget_add_child(my_window_widget(win), label);
+  my_widget_unref(label);
+  my_window_manager_open(app->wm, win);
+  my_widget_unref(my_window_widget(win));
+  return win;
+}
+
 int main(void) {
   app_t app;
   memset(&app, 0, sizeof(app));
@@ -370,6 +396,16 @@ int main(void) {
   app.mc = my_mvvm_bind(app.wm, app.win, app.vm);
   my_widget_unref(my_window_widget(app.win));
 
+  /* i18n (M11a): Arabic + Hebrew RTL windows (skipped when the Noto
+   * fonts are not installed) */
+  app.win_ar = i18n_window(&app, "myui Arabic (RTL)",
+              "/usr/share/fonts/google-noto-vf/NotoNaskhArabic[wght].ttf",
+              "\xD8\xA7\xD9\x84\xD8\xB3\xD9\x84\xD8\xA7\xD9\x85 "
+              "\xD8\xB9\xD9\x84\xD9\x8A\xD9\x83\xD9\x85"); /* السلام عليكم */
+  i18n_window(&app, "myui Hebrew (RTL)",
+              "/usr/share/fonts/google-noto-vf/NotoSansHebrew[wght].ttf",
+              "\xD7\xA9\xD7\x9C\xD7\x95\xD7\x9D"); /* שלום */
+
 #ifdef MYUI_PAL_DUMMY
   {
     const char* dump = getenv("MYUI_DEMO_DUMP_PPM");
@@ -427,6 +463,11 @@ int main(void) {
       my_pal_dummy_set_now_ms(app.pal, 200);
       my_pal_main_loop_run(app.loop);
       dump_ppm(app.win->pal_window, dump);
+      if (app.win_ar != NULL) {
+        my_widget_invalidate(my_window_widget(app.win_ar), NULL);
+        my_window_paint(app.win_ar);
+        dump_ppm(app.win_ar->pal_window, "/tmp/myui_demo_arabic.ppm");
+      }
       my_mvvm_context_destroy(app.mc);
       my_view_model_unref(app.vm);
       my_theme_destroy(app.light);
