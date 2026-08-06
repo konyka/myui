@@ -5,6 +5,7 @@
 #include "myui/my_window.h"
 
 #include "myc/my_str.h"
+#include "myr/my_vgcanvas_gles2.h"
 #include "myr/my_vgcanvas_soft.h"
 #include "myui/my_animator.h"
 #include "myui/my_layout.h"
@@ -44,6 +45,10 @@ static void window_destroy_chain(my_object_t* obj) {
     my_vgcanvas_destroy(win->vg);
   }
   win->vg = NULL;
+  if (win->gl_owned) {
+    my_pal_gl_destroy(win->gl);
+  }
+  win->gl = NULL;
   if (win->theme_owned) {
     my_theme_destroy(win->theme);
   }
@@ -104,6 +109,43 @@ void my_window_set_vgcanvas(my_window_t* win, my_vgcanvas_t* vg) {
   win->vg_owned = false;
 }
 
+my_ret_t my_window_enable_gl(my_window_t* win) {
+  my_pal_gl_t* gl;
+  my_vgcanvas_t* vg;
+  int32_t w = 0, h = 0;
+  if (win == NULL) {
+    return MY_RET_INVALID_PARAMS;
+  }
+  if (win->gl != NULL) {
+    return MY_RET_OK; /* already enabled */
+  }
+  gl = my_pal_window_gl_enable(win->pal_window);
+  if (gl == NULL) {
+    return MY_RET_NOT_SUPPORTED;
+  }
+  if (my_pal_gl_make_current(gl) != MY_RET_OK) {
+    my_pal_gl_destroy(gl);
+    return MY_RET_FAIL;
+  }
+  my_pal_gl_get_size(gl, &w, &h);
+  vg = my_vgcanvas_gles2_create(win->allocator, w, h);
+  if (vg == NULL) {
+    my_pal_gl_destroy(gl);
+    return MY_RET_FAIL;
+  }
+  if (win->vg_owned) {
+    my_vgcanvas_destroy(win->vg);
+  }
+  win->vg = vg;
+  win->vg_owned = true;
+  win->gl = gl;
+  win->gl_owned = true;
+  if (win->font != NULL) {
+    my_vgcanvas_set_font(win->vg, win->font, win->font_size);
+  }
+  return MY_RET_OK;
+}
+
 void my_window_set_theme(my_window_t* win, my_theme_t* theme,
                          bool take_ownership) {
   if (win == NULL) {
@@ -157,6 +199,9 @@ void my_window_paint(my_window_t* win) {
   if (vg == NULL) {
     return;
   }
+  if (win->gl != NULL) {
+    my_pal_gl_make_current(win->gl);
+  }
   my_vgcanvas_begin_frame(vg, my_dirty_rects_get(&win->dirty, 0));
   n = my_dirty_rects_count(&win->dirty);
   for (i = 0; i < n; i++) {
@@ -168,6 +213,9 @@ void my_window_paint(my_window_t* win) {
     my_vgcanvas_restore(vg);
   }
   my_vgcanvas_end_frame(vg);
+  if (win->gl != NULL) {
+    my_pal_gl_swap_buffers(win->gl);
+  }
   my_dirty_rects_clear(&win->dirty);
 }
 
@@ -215,6 +263,11 @@ my_ret_t my_window_on_pal_event(my_window_t* win, const my_event_t* event) {
       root->rect.w = event->u.resize.w;
       root->rect.h = event->u.resize.h;
       root->need_layout = true;
+      if (win->gl != NULL && win->vg != NULL) {
+        my_pal_gl_make_current(win->gl);
+        my_vgcanvas_gles2_resize(win->vg, event->u.resize.w,
+                                 event->u.resize.h);
+      }
       my_widget_invalidate(root, NULL);
       break;
     case MY_EVENT_POINTER_DOWN:

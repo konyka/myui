@@ -26,6 +26,10 @@
 #include <X11/Xutil.h>
 #include <X11/Xatom.h>
 
+#if defined(MYUI_PAL_GL_EGL)
+#include <EGL/egl.h>
+#endif
+
 #include "myc/my_darray.h"
 #include "myc/my_str.h"
 #include "mypal/x11/my_pal_x11_keymap.h"
@@ -47,6 +51,11 @@ typedef struct x11_pal_t {
   Atom atom_utf8;
   Atom atom_targets;
   Atom atom_clip_prop;
+#if defined(MYUI_PAL_GL_EGL)
+  EGLDisplay egl_dpy; /**< shared EGL display (lazy, EGL_NO_DISPLAY off) */
+  EGLConfig egl_cfg;
+  int egl_state; /**< 0 = untried, 1 = ready, -1 = unavailable */
+#endif
 } x11_pal_t;
 
 /* ---------------- window ---------------- */
@@ -62,6 +71,7 @@ typedef struct x11_window_t {
   my_lcd_t* mem_lcd;   /**< back buffer (owned) */
   my_lcd_t* front_lcd; /**< wrapper lcd: end_frame presents (owned) */
   XImage* ximage;      /**< wraps the back buffer (data borrowed) */
+  my_pal_gl_t* gl;     /**< GL mount after gl_enable (owned, M10c) */
 } x11_window_t;
 
 static uint64_t x11_now_ms(void) {
@@ -228,6 +238,10 @@ static void x11_win_destroy(my_pal_window_t* win) {
       break;
     }
   }
+  if (w->gl != NULL) {
+    my_pal_gl_destroy(w->gl); /* before XDestroyWindow */
+    w->gl = NULL;
+  }
   x11_image_destroy(w->ximage);
   my_lcd_destroy(w->mem_lcd);
   my_mem_free(w->allocator, w->front_lcd);
@@ -237,9 +251,129 @@ static void x11_win_destroy(my_pal_window_t* win) {
   my_mem_free(w->allocator, w);
 }
 
+/* ---------------- GL mount (M10c): EGL on X11 ---------------- */
+
+#if defined(MYUI_PAL_GL_EGL)
+
+typedef struct x11_gl_t {
+  my_pal_gl_t base;
+  x11_window_t* win; /**< borrowed (the window owns this handle) */
+  EGLContext ctx;
+  EGLSurface surf;
+} x11_gl_t;
+
+/** @brief Lazy one-time EGL display/config init (shared by all windows;
+ * never eglTerminate'd -- the EGL display outlives individual windows
+ * and is reclaimed at process exit). */
+static bool x11_egl_init(x11_pal_t* p) {
+  EGLint major = 0, minor = 0, n = 0;
+  EGLint cfg_attrs[] = {EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
+                        EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
+                        EGL_RED_SIZE, 8, EGL_GREEN_SIZE, 8, EGL_BLUE_SIZE, 8,
+                        EGL_NONE};
+  if (p->egl_state != 0) {
+    return p->egl_state > 0;
+  }
+  p->egl_dpy = eglGetDisplay((EGLNativeDisplayType)p->display);
+  if (p->egl_dpy == EGL_NO_DISPLAY ||
+      !eglInitialize(p->egl_dpy, &major, &minor) ||
+      !eglBindAPI(EGL_OPENGL_ES_API) ||
+      !eglChooseConfig(p->egl_dpy, cfg_attrs, &p->egl_cfg, 1, &n) || n < 1) {
+    p->egl_state = -1;
+    return false;
+  }
+  p->egl_state = 1;
+  return true;
+}
+
+static my_ret_t x11_gl_make_current(my_pal_gl_t* gl) {
+  x11_gl_t* g = (x11_gl_t*)gl;
+  return eglMakeCurrent(g->win->pal->egl_dpy, g->surf, g->surf, g->ctx)
+             ? MY_RET_OK
+             : MY_RET_FAIL;
+}
+
+static my_ret_t x11_gl_swap(my_pal_gl_t* gl) {
+  x11_gl_t* g = (x11_gl_t*)gl;
+  return eglSwapBuffers(g->win->pal->egl_dpy, g->surf) ? MY_RET_OK
+                                                       : MY_RET_FAIL;
+}
+
+static my_ret_t x11_gl_get_size(my_pal_gl_t* gl, int32_t* w, int32_t* h) {
+  x11_gl_t* g = (x11_gl_t*)gl;
+  if (w != NULL) {
+    *w = g->win->w;
+  }
+  if (h != NULL) {
+    *h = g->win->h;
+  }
+  return MY_RET_OK;
+}
+
+static void x11_gl_destroy(my_pal_gl_t* gl) {
+  x11_gl_t* g = (x11_gl_t*)gl;
+  if (g != NULL) {
+    EGLDisplay dpy = g->win->pal->egl_dpy;
+    eglMakeCurrent(dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+    eglDestroySurface(dpy, g->surf);
+    eglDestroyContext(dpy, g->ctx);
+    g->win->gl = NULL; /* the window forgets it (double-destroy safe) */
+    my_mem_free(g->win->allocator, g);
+  }
+}
+
+static const my_pal_gl_vtable_t s_x11_gl_vtable = {
+    x11_gl_make_current, x11_gl_swap, x11_gl_get_size, x11_gl_destroy};
+
+static my_pal_gl_t* x11_win_gl_enable(my_pal_window_t* win) {
+  x11_window_t* w = (x11_window_t*)win;
+  x11_pal_t* p = w->pal;
+  x11_gl_t* g;
+  EGLint ctx_attrs[] = {EGL_CONTEXT_CLIENT_VERSION, 2, EGL_NONE};
+  if (w->gl != NULL) {
+    return w->gl;
+  }
+  if (!x11_egl_init(p)) {
+    return NULL;
+  }
+  g = (x11_gl_t*)my_mem_calloc(w->allocator, 1, sizeof(x11_gl_t));
+  if (g == NULL) {
+    return NULL;
+  }
+  g->base.vtable = &s_x11_gl_vtable;
+  g->win = w;
+  g->ctx = eglCreateContext(p->egl_dpy, p->egl_cfg, EGL_NO_CONTEXT, ctx_attrs);
+  if (g->ctx == EGL_NO_CONTEXT) {
+    my_mem_free(w->allocator, g);
+    return NULL;
+  }
+  g->surf = eglCreateWindowSurface(p->egl_dpy, p->egl_cfg,
+                                   (EGLNativeWindowType)w->xwin, NULL);
+  if (g->surf == EGL_NO_SURFACE) {
+    eglDestroyContext(p->egl_dpy, g->ctx);
+    my_mem_free(w->allocator, g);
+    return NULL;
+  }
+  w->gl = (my_pal_gl_t*)g;
+  if (x11_gl_make_current(w->gl) == MY_RET_OK) {
+    eglSwapInterval(p->egl_dpy, 1); /* vsync */
+  }
+  return w->gl;
+}
+
+#else /* !MYUI_PAL_GL_EGL */
+
+static my_pal_gl_t* x11_win_gl_enable(my_pal_window_t* win) {
+  (void)win;
+  return NULL; /* built without EGL */
+}
+
+#endif /* MYUI_PAL_GL_EGL */
+
 static const my_pal_window_vtable_t s_x11_window_vtable = {
     x11_win_set_title, x11_win_resize,  x11_win_show,
-    x11_win_get_size,  x11_win_get_lcd, x11_win_destroy};
+    x11_win_get_size,  x11_win_get_lcd, x11_win_destroy,
+    x11_win_gl_enable};
 
 static my_pal_window_t* x11_window_create(my_pal_t* pal, int32_t w, int32_t h,
                                           const char* title) {

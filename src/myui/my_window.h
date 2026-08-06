@@ -22,6 +22,8 @@ typedef struct my_window_t {
   my_pal_window_t* pal_window;       /**< owned */
   my_vgcanvas_t* vg;                 /**< soft backend, or injected (tests) */
   bool vg_owned;
+  my_pal_gl_t* gl;                   /**< GL mount when GL enabled (M10c) */
+  bool gl_owned;
   my_color_t bg_color;
   my_theme_t* theme;                 /**< active theme */
   bool theme_owned;
@@ -64,6 +66,16 @@ my_pal_main_loop_t* my_window_loop_of_widget(my_widget_t* widget);
 
 /** @brief Test hook: use this vgcanvas instead of creating a soft one. */
 void my_window_set_vgcanvas(my_window_t* win, my_vgcanvas_t* vg);
+
+/**
+ * @brief Switch this window to GLES rendering (M10c): enables the PAL
+ * window's GL mount and replaces the vgcanvas with the GLES2 backend.
+ * Painting then makes the context current and swaps buffers at frame
+ * end; resizes update the GL viewport. Returns MY_RET_NOT_SUPPORTED
+ * when the port/build has no GL support, MY_RET_FAIL when context or
+ * backend creation fails (the window keeps the soft path then).
+ */
+my_ret_t my_window_enable_gl(my_window_t* win);
 
 /**
  * @brief Set the window's default font (borrowed ref; the caller keeps

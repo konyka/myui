@@ -12,6 +12,7 @@
 
 #include "mypal/my_pal.h"
 #include "myr/my_lcd_mem.h"
+#include "myr/my_vgcanvas_gles2.h"
 #include "myr/my_vgcanvas_soft.h"
 #include "myui/my_window.h"
 
@@ -40,13 +41,21 @@ typedef struct app_t {
   my_pal_t* pal;
   my_pal_window_t* window;
   my_pal_main_loop_t* loop;
+  my_pal_gl_t* gl;   /**< GL mount when MYUI_DEMO_GLES worked (M10c) */
+  my_vgcanvas_t* vg; /**< gles2 backend when gl != NULL */
 } app_t;
 
-static void draw_scene(my_pal_window_t* window) {
+static void draw_scene(app_t* app) {
+  my_pal_window_t* window = app->window;
   my_lcd_t* lcd = my_pal_window_get_lcd(window);
-  my_vgcanvas_t* vg = my_vgcanvas_soft_create(NULL, lcd);
+  my_vgcanvas_t* vg = app->vg;
   static my_font_t* font = NULL;
   int32_t w = 0, h = 0;
+  if (vg == NULL) {
+    vg = my_vgcanvas_soft_create(NULL, lcd);
+  } else {
+    my_pal_gl_make_current(app->gl);
+  }
   if (vg == NULL) {
     return;
   }
@@ -82,7 +91,11 @@ static void draw_scene(my_pal_window_t* window) {
   my_vgcanvas_draw_text(vg, "myui: text works!", 40, 420);
   my_vgcanvas_end_frame(vg);
 
-  my_vgcanvas_destroy(vg);
+  if (app->gl != NULL) {
+    my_pal_gl_swap_buffers(app->gl);
+  } else {
+    my_vgcanvas_destroy(vg);
+  }
 }
 
 static my_ret_t on_event(void* ctx, my_pal_window_t* window,
@@ -90,9 +103,18 @@ static my_ret_t on_event(void* ctx, my_pal_window_t* window,
   app_t* app = (app_t*)ctx;
   switch (event->type) {
     case MY_EVENT_PAINT:
-    case MY_EVENT_RESIZE:
       if (window != NULL) {
-        draw_scene(window);
+        draw_scene(app);
+      }
+      break;
+    case MY_EVENT_RESIZE:
+      if (app->gl != NULL && app->vg != NULL) {
+        my_pal_gl_make_current(app->gl);
+        my_vgcanvas_gles2_resize(app->vg, event->u.resize.w,
+                                 event->u.resize.h);
+      }
+      if (window != NULL) {
+        draw_scene(app);
       }
       break;
     case MY_EVENT_QUIT:
@@ -142,7 +164,7 @@ static void dump_ppm(my_pal_window_t* window, const char* path) {
 #endif
 
 int main(void) {
-  app_t app;
+  app_t app = {NULL, NULL, NULL, NULL, NULL};
 
   printf("myui demo_hello, myui version %s\n", MYUI_VERSION);
 
@@ -163,7 +185,27 @@ int main(void) {
 
   my_pal_set_event_handler(app.pal, on_event, &app);
   my_pal_window_show(app.window);
-  draw_scene(app.window);
+
+  /* MYUI_DEMO_GLES=1: render through the GLES2 backend on a real GL
+   * window (M10c); falls back to the soft path when unavailable */
+  if (getenv("MYUI_DEMO_GLES") != NULL) {
+    app.gl = my_pal_window_gl_enable(app.window);
+    if (app.gl != NULL &&
+        my_pal_gl_make_current(app.gl) == MY_RET_OK) {
+      int32_t gw = 0, gh = 0;
+      my_pal_gl_get_size(app.gl, &gw, &gh);
+      app.vg = my_vgcanvas_gles2_create(NULL, gw, gh);
+    }
+    if (app.vg != NULL) {
+      printf("demo_hello: GLES rendering enabled\n");
+    } else {
+      fprintf(stderr, "demo_hello: GLES unavailable, using soft path\n");
+      my_pal_gl_destroy(app.gl);
+      app.gl = NULL;
+    }
+  }
+
+  draw_scene(&app);
 
 #ifdef MYUI_PAL_DUMMY
   {
@@ -176,6 +218,8 @@ int main(void) {
 
   my_pal_main_loop_run(app.loop);
 
+  my_vgcanvas_destroy(app.vg);
+  my_pal_gl_destroy(app.gl);
   my_pal_main_loop_destroy(app.loop);
   my_pal_window_destroy(app.window);
   my_pal_destroy(app.pal);

@@ -22,6 +22,7 @@
   - [ ] `window_create(w, h, title)`：创建隐藏窗口 + 关联一个 lcd
   - [ ] `get_lcd()`：给 myr 绘制的 `my_lcd_t*`；最简单方案 = 内嵌 `my_lcd_mem`，`end_frame` 时整块拷贝/上屏（x11 port 就是这么做的）
   - [ ] `set_title` / `resize`（重建 lcd 缓冲）/ `show` / `get_size` / `destroy`
+  - [ ] `gl_enable`（M10c，可打桩返回 NULL）：窗口的 GL 挂载点，见下节
 - [ ] 主循环 `my_pal_main_loop_t` vtable
   - [ ] `run`：阻塞等待（select/poll/平台 wait），超时取 `my_timer_manager_due_in_ms`，分发事件 + `my_timer_manager_fire`
   - [ ] `quit`：可跨线程调用，须唤醒 run（pipe/事件/wakeup 消息）
@@ -34,8 +35,17 @@
 ## 渲染 backend 选择
 
 - 无 GPU / 裸机 / RTOS / Linux-FB：**software backend**（默认）：`my_lcd_mem` 或直接包显存的 lcd 实现 + `my_vgcanvas_soft`。
-- 有 GLES2+：GLES backend（M5）。
+- 有 GLES2+：GLES backend（M5），真窗口经 GL 挂载点（M10c，下节）。
 - Apple 平台：Metal shim（M6）。Web(Emscripten)：WebGL（M5）。
+
+## GL 窗口集成（M10c，可选）
+
+新 port 要让 `my_window_enable_gl()` / `MYUI_DEMO_GLES=1` 工作，实现窗口 vtable 的 `gl_enable`：
+
+- 返回 `my_pal_gl_t*`（vtable：`make_current` / `swap_buffers` / `get_size` / `destroy`）；首次调用创建、之后返回同一句柄；**句柄归窗口所有**（窗口 destroy 时释放，`my_pal_gl_destroy` 仅供提前释放且须把窗口里的指针置 NULL——双重释放安全，参考 x11/wayland port）。
+- EGL 路线（x11/wayland 同款）：pal 级懒初始化共享 `EGLDisplay`+config（`EGL_WINDOW_BIT` + ES2，永不 eglTerminate），窗口级创建 context+window surface；wayland 额外要 `wl_egl_window_create`（resize 事件里同步 `wl_egl_window_resize`）。
+- vsync：`eglSwapInterval(dpy, 1)`（make_current 后设置）；wayland 下 mesa 用合成器 frame 回调节流，语义与 shm 路径一致。
+- 无 GL 的平台直接打桩返回 NULL，soft 路径零影响；`gl_window_smoke_test` 自动 skip。
 
 ## 构建选项
 

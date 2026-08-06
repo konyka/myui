@@ -898,6 +898,54 @@ static void pack_native(my_pixel_format_t fmt, const uint8_t* rgba,
   }
 }
 
+/** @brief Box pre-downsample tier (M10c): largest power-of-2 factor f in
+ * {2,4,8} with dst*f <= src (the remaining scale ratio stays <= 1), and
+ * only when downscaling past 0.5x. Returns 1 when no tier applies. */
+static int32_t box_factor(int32_t src, int32_t dst) {
+  int32_t f = 2;
+  if (src <= 0 || dst <= 0 || (int64_t)dst * 2 >= src) {
+    return 1; /* upscale, 1:1, or mild downscale (ratio >= 0.5) */
+  }
+  while (f < 8 && (int64_t)dst * (f * 2) <= src) {
+    f *= 2;
+  }
+  return f;
+}
+
+/** @brief Box-average src into tmp (nw x nh): output pixel (tx,ty) is the
+ * mean of the fx x fy source block at (tx*fx, ty*fy); edge blocks may be
+ * partial (only valid pixels are averaged). Straight-alpha channels are
+ * averaged independently -- semi-transparent edges deviate slightly from
+ * premultiplied filtering (accepted, keeps it simple). */
+static void box_average(const uint8_t* src, int32_t w, int32_t h, int32_t fx,
+                        int32_t fy, uint8_t* tmp, int32_t nw, int32_t nh) {
+  int32_t tx, ty;
+  for (ty = 0; ty < nh; ty++) {
+    int32_t y0 = ty * fy;
+    int32_t y1 = y0 + fy < h ? y0 + fy : h;
+    for (tx = 0; tx < nw; tx++) {
+      int32_t x0 = tx * fx;
+      int32_t x1 = x0 + fx < w ? x0 + fx : w;
+      uint32_t acc[4] = {0, 0, 0, 0};
+      uint32_t cnt = 0;
+      int32_t x, y, c;
+      for (y = y0; y < y1; y++) {
+        for (x = x0; x < x1; x++) {
+          const uint8_t* p = src + ((size_t)y * (size_t)w + (size_t)x) * 4u;
+          for (c = 0; c < 4; c++) {
+            acc[c] += p[c];
+          }
+          cnt++;
+        }
+      }
+      for (c = 0; c < 4; c++) {
+        tmp[((size_t)ty * (size_t)nw + (size_t)tx) * 4u + (size_t)c] =
+            (uint8_t)(acc[c] / cnt);
+      }
+    }
+  }
+}
+
 static my_ret_t soft_draw_image(my_vgcanvas_t* vg, const uint8_t* rgba,
                                 int32_t w, int32_t h, const my_rectf_t* dst,
                                 const my_color_t* bg) {
@@ -906,6 +954,9 @@ static my_ret_t soft_draw_image(my_vgcanvas_t* vg, const uint8_t* rgba,
   my_rect_t dev, clipped;
   uint32_t bpp;
   uint8_t* row = NULL;
+  const uint8_t* src;
+  uint8_t* pre = NULL;
+  int32_t sw, sh;
   int32_t dy;
   my_ret_t ret = MY_RET_OK;
   if (rgba == NULL || dst == NULL || w <= 0 || h <= 0) {
@@ -922,40 +973,67 @@ static my_ret_t soft_draw_image(my_vgcanvas_t* vg, const uint8_t* rgba,
   if (!my_rect_intersect(&dev, &s->state.clip, &clipped)) {
     return MY_RET_OK;
   }
+  /* box pre-downsample (M10c): deep downscales in bilinear mode first drop
+   * an integer tier (2/4/8) by box averaging, then bilinear the rest --
+   * much less source traffic than direct bilinear, far less aliasing than
+   * nearest */
+  src = rgba;
+  sw = w;
+  sh = h;
+  if (s->scale_filter == MY_SCALE_FILTER_BILINEAR) {
+    int32_t fx = box_factor(w, dev.w);
+    int32_t fy = box_factor(h, dev.h);
+    if (fx > 1 || fy > 1) {
+      int32_t nw = (w + fx - 1) / fx;
+      int32_t nh = (h + fy - 1) / fy;
+      pre = (uint8_t*)my_mem_alloc(s->allocator,
+                                   (size_t)nw * (size_t)nh * 4u);
+      if (pre != NULL) {
+        box_average(rgba, w, h, fx, fy, pre, nw, nh);
+        src = pre;
+        sw = nw;
+        sh = nh;
+      }
+      /* OOM: fall through to direct bilinear on the full source */
+    }
+  }
   row = (uint8_t*)my_mem_alloc(s->allocator, (size_t)clipped.w * bpp);
   if (row == NULL) {
+    my_mem_free(s->allocator, pre);
     return MY_RET_OOM;
   }
   for (dy = clipped.y; dy < clipped.y + clipped.h; dy++) {
-    int32_t sy = (int32_t)((int64_t)(dy - dev.y) * h / (dev.h > 0 ? dev.h : 1));
+    int32_t sy =
+        (int32_t)((int64_t)(dy - dev.y) * sh / (dev.h > 0 ? dev.h : 1));
     int32_t dx;
     uint8_t* out = row;
     if (sy < 0) {
       sy = 0;
     }
-    if (sy >= h) {
-      sy = h - 1;
+    if (sy >= sh) {
+      sy = sh - 1;
     }
     for (dx = clipped.x; dx < clipped.x + clipped.w; dx++) {
       if (s->scale_filter == MY_SCALE_FILTER_BILINEAR) {
         uint8_t px4[4];
-        float fx = ((float)(dx - dev.x) + 0.5f) * (float)w /
+        float fx = ((float)(dx - dev.x) + 0.5f) * (float)sw /
                        (float)(dev.w > 0 ? dev.w : 1) -
                    0.5f;
-        float fy = ((float)(dy - dev.y) + 0.5f) * (float)h /
+        float fy = ((float)(dy - dev.y) + 0.5f) * (float)sh /
                        (float)(dev.h > 0 ? dev.h : 1) -
                    0.5f;
-        sample_bilinear(rgba, w, h, fx, fy, px4);
+        sample_bilinear(src, sw, sh, fx, fy, px4);
         pack_native(fmt, px4, bg, out);
       } else {
-        int32_t sx = (int32_t)((int64_t)(dx - dev.x) * w / (dev.w > 0 ? dev.w : 1));
+        int32_t sx =
+            (int32_t)((int64_t)(dx - dev.x) * sw / (dev.w > 0 ? dev.w : 1));
         if (sx < 0) {
           sx = 0;
         }
-        if (sx >= w) {
-          sx = w - 1;
+        if (sx >= sw) {
+          sx = sw - 1;
         }
-        pack_native(fmt, rgba + ((size_t)sy * (size_t)w + (size_t)sx) * 4u, bg,
+        pack_native(fmt, src + ((size_t)sy * (size_t)sw + (size_t)sx) * 4u, bg,
                     out);
       }
       out += bpp;
@@ -967,6 +1045,7 @@ static my_ret_t soft_draw_image(my_vgcanvas_t* vg, const uint8_t* rgba,
     }
   }
   my_mem_free(s->allocator, row);
+  my_mem_free(s->allocator, pre);
   if (ret == MY_RET_OK) {
     my_dirty_rects_add(&s->dirty, &clipped);
   }

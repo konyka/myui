@@ -26,6 +26,7 @@
 typedef struct my_pal_t my_pal_t;
 typedef struct my_pal_window_t my_pal_window_t;
 typedef struct my_pal_main_loop_t my_pal_main_loop_t;
+typedef struct my_pal_gl_t my_pal_gl_t;
 
 /**
  * @brief Application event handler. window is the event source, or NULL
@@ -50,6 +51,15 @@ typedef struct my_pal_window_vtable_t {
    */
   my_lcd_t* (*get_lcd)(my_pal_window_t* win);
   void (*destroy)(my_pal_window_t* win);
+  /**
+   * @brief Enable GLES rendering on this window (M10c, optional port
+   * feature). Returns a GL context handle (create on first call, same
+   * handle afterwards), or NULL when the port/build has no GL support.
+   * The handle is owned by the window (freed with it); my_pal_gl_destroy
+   * is for early teardown only and is double-destroy safe (the window
+   * forgets the handle). The software lcd path keeps working regardless.
+   */
+  my_pal_gl_t* (*gl_enable)(my_pal_window_t* win);
 } my_pal_window_vtable_t;
 
 /** @brief Window base "class". */
@@ -84,6 +94,48 @@ static inline void my_pal_window_destroy(my_pal_window_t* win) {
   if (win != NULL) {
     win->vtable->destroy(win);
   }
+}
+
+/* ---------------- GL context (M10c) ---------------- */
+
+/** @brief GL context vtable: the raw window-system GL mount a vgcanvas
+ * GLES backend can render through. */
+typedef struct my_pal_gl_vtable_t {
+  /** @brief Make this context (and its window surface) current. */
+  my_ret_t (*make_current)(my_pal_gl_t* gl);
+  /** @brief Present the back buffer (eglSwapBuffers; vsync-throttled). */
+  my_ret_t (*swap_buffers)(my_pal_gl_t* gl);
+  /** @brief Current drawable size in pixels; w/h may be NULL. */
+  my_ret_t (*get_size)(my_pal_gl_t* gl, int32_t* w, int32_t* h);
+  void (*destroy)(my_pal_gl_t* gl);
+} my_pal_gl_vtable_t;
+
+/** @brief GL context base "class". */
+struct my_pal_gl_t {
+  const my_pal_gl_vtable_t* vtable;
+};
+
+static inline my_ret_t my_pal_gl_make_current(my_pal_gl_t* gl) {
+  return gl->vtable->make_current(gl);
+}
+
+static inline my_ret_t my_pal_gl_swap_buffers(my_pal_gl_t* gl) {
+  return gl->vtable->swap_buffers(gl);
+}
+
+static inline my_ret_t my_pal_gl_get_size(my_pal_gl_t* gl, int32_t* w,
+                                          int32_t* h) {
+  return gl->vtable->get_size(gl, w, h);
+}
+
+static inline void my_pal_gl_destroy(my_pal_gl_t* gl) {
+  if (gl != NULL) {
+    gl->vtable->destroy(gl);
+  }
+}
+
+static inline my_pal_gl_t* my_pal_window_gl_enable(my_pal_window_t* win) {
+  return win->vtable->gl_enable(win);
 }
 
 /* ---------------- main loop ---------------- */

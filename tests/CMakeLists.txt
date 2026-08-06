@@ -11,6 +11,10 @@ set(MYUI_X11_TESTS
 set(MYUI_GLES2_TESTS
   "${CMAKE_CURRENT_SOURCE_DIR}/gles2_smoke_test.c"
 )
+# real-window GL smoke needs the resolved port's GL mount (M10c)
+set(MYUI_GL_WINDOW_TESTS
+  "${CMAKE_CURRENT_SOURCE_DIR}/gl_window_smoke_test.c"
+)
 # wayland tests need the wayland port built
 set(MYUI_WAYLAND_TESTS
   "${CMAKE_CURRENT_SOURCE_DIR}/my_pal_wayland_keymap_test.c"
@@ -21,7 +25,7 @@ set(MYUI_LINUX_FB_TESTS
   "${CMAKE_CURRENT_SOURCE_DIR}/my_pal_linux_fb_test.c"
 )
 list(REMOVE_ITEM MYUI_TEST_SOURCES ${MYUI_X11_TESTS} ${MYUI_GLES2_TESTS}
-     ${MYUI_WAYLAND_TESTS} ${MYUI_LINUX_FB_TESTS})
+     ${MYUI_GL_WINDOW_TESTS} ${MYUI_WAYLAND_TESTS} ${MYUI_LINUX_FB_TESTS})
 
 foreach(test_src ${MYUI_TEST_SOURCES})
   get_filename_component(test_name ${test_src} NAME_WE)
@@ -55,6 +59,32 @@ if(MYUI_GLESV2_FOUND AND MYUI_EGL_FOUND)
     target_link_libraries(${test_name} PRIVATE myc myr ${MYUI_EGL_LIBRARIES})
     target_include_directories(${test_name}
       PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${MYUI_EGL_INCLUDE_DIRS})
+    add_test(NAME ${test_name} COMMAND ${test_name})
+  endforeach()
+endif()
+
+# real-window GL smoke (M10c): resolved port must have its GL mount built
+set(MYUI_GL_WINDOW_OK OFF)
+if(MYUI_GLESV2_FOUND AND MYUI_EGL_FOUND)
+  if(MYUI_PAL_RESOLVED STREQUAL "x11")
+    set(MYUI_GL_WINDOW_OK ON)
+  elseif(MYUI_PAL_RESOLVED STREQUAL "wayland")
+    pkg_check_modules(MYUI_WAYLAND_EGL QUIET wayland-egl)
+    if(MYUI_WAYLAND_EGL_FOUND)
+      set(MYUI_GL_WINDOW_OK ON)
+    endif()
+  endif()
+endif()
+if(MYUI_GL_WINDOW_OK)
+  foreach(test_src ${MYUI_GL_WINDOW_TESTS})
+    get_filename_component(test_name ${test_src} NAME_WE)
+    add_executable(${test_name} ${test_src})
+    target_link_libraries(${test_name}
+      PRIVATE myc myr mypal myui ${MYUI_EGL_LIBRARIES}
+              ${MYUI_GLESV2_LIBRARIES})
+    target_include_directories(${test_name}
+      PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${MYUI_EGL_INCLUDE_DIRS}
+              ${MYUI_GLESV2_INCLUDE_DIRS})
     add_test(NAME ${test_name} COMMAND ${test_name})
   endforeach()
 endif()

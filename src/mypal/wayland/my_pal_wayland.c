@@ -26,6 +26,15 @@
 #include <wayland-client.h>
 #include <xkbcommon/xkbcommon.h>
 
+#if defined(MYUI_PAL_GL_EGL)
+#include <EGL/egl.h>
+#include <EGL/eglext.h>
+#include <wayland-egl.h>
+#ifndef EGL_PLATFORM_WAYLAND_KHR
+#define EGL_PLATFORM_WAYLAND_KHR 0x31D8
+#endif
+#endif
+
 #include "myc/my_darray.h"
 #include "mypal/wayland/my_pal_wayland_keymap.h"
 #include "myr/my_lcd_mem.h"
@@ -52,6 +61,11 @@ typedef struct wl_pal_t {
   my_pal_event_handler_t handler;
   void* handler_ctx;
   char* clipboard; /* in-memory; wl_data_device integration is a TODO */
+#if defined(MYUI_PAL_GL_EGL)
+  EGLDisplay egl_dpy; /**< shared EGL display (lazy, EGL_NO_DISPLAY off) */
+  EGLConfig egl_cfg;
+  int egl_state; /**< 0 = untried, 1 = ready, -1 = unavailable */
+#endif
 } wl_pal_t;
 
 static void dispatch_event(wl_pal_t* p, my_pal_window_t* win, my_event_t* e) {
@@ -80,6 +94,10 @@ typedef struct wl_window_t {
   bool closed;
   int32_t pointer_x, pointer_y;
   struct wl_callback* frame_cb;
+  my_pal_gl_t* gl;    /**< GL mount after gl_enable (owned, M10c) */
+#if defined(MYUI_PAL_GL_EGL)
+  struct wl_egl_window* egl_win; /**< owned by the GL mount */
+#endif
 } wl_window_t;
 
 static void present(wl_window_t* w) {
@@ -228,6 +246,12 @@ static void on_toplevel_configure(void* data, struct xdg_toplevel* tl,
     }
     w->w = width;
     w->h = height;
+#if defined(MYUI_PAL_GL_EGL)
+    if (w->egl_win != NULL) {
+      /* keep the EGL window surface in sync with the compositor size */
+      wl_egl_window_resize(w->egl_win, width, height, 0, 0);
+    }
+#endif
     if (wl_buffer_create(w)) {
       wl_buffer_add_listener(w->wlbuf, &BUFFER_LISTENER, w);
       my_lcd_destroy(w->lcd);
@@ -538,6 +562,10 @@ static void wl_win_destroy(my_pal_window_t* win) {
       break;
     }
   }
+  if (w->gl != NULL) {
+    my_pal_gl_destroy(w->gl); /* before wl_surface_destroy */
+    w->gl = NULL;
+  }
   if (w->frame_cb != NULL) {
     wl_callback_destroy(w->frame_cb);
   }
@@ -557,9 +585,146 @@ static void wl_win_destroy(my_pal_window_t* win) {
   my_mem_free(w->allocator, w);
 }
 
+/* ---------------- GL mount (M10c): wl_egl_window + EGL window surface ---- */
+
+#if defined(MYUI_PAL_GL_EGL)
+
+typedef struct wl_gl_t {
+  my_pal_gl_t base;
+  wl_window_t* win; /**< borrowed (the window owns this handle) */
+  EGLContext ctx;
+  EGLSurface surf;
+} wl_gl_t;
+
+/** @brief Lazy one-time EGL display/config init (shared by all windows;
+ * never eglTerminate'd -- the EGL display outlives individual windows
+ * and is reclaimed at process exit). */
+static bool wl_egl_init(wl_pal_t* p) {
+  EGLint major = 0, minor = 0, n = 0;
+  EGLint cfg_attrs[] = {EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
+                        EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
+                        EGL_RED_SIZE, 8, EGL_GREEN_SIZE, 8, EGL_BLUE_SIZE, 8,
+                        EGL_NONE};
+  if (p->egl_state != 0) {
+    return p->egl_state > 0;
+  }
+  p->egl_dpy = eglGetPlatformDisplay(EGL_PLATFORM_WAYLAND_KHR, p->display,
+                                     NULL);
+  if (p->egl_dpy == EGL_NO_DISPLAY) {
+    p->egl_dpy = eglGetDisplay((EGLNativeDisplayType)p->display);
+  }
+  if (p->egl_dpy == EGL_NO_DISPLAY ||
+      !eglInitialize(p->egl_dpy, &major, &minor) ||
+      !eglBindAPI(EGL_OPENGL_ES_API) ||
+      !eglChooseConfig(p->egl_dpy, cfg_attrs, &p->egl_cfg, 1, &n) || n < 1) {
+    p->egl_state = -1;
+    return false;
+  }
+  p->egl_state = 1;
+  return true;
+}
+
+static my_ret_t wl_gl_make_current(my_pal_gl_t* gl) {
+  wl_gl_t* g = (wl_gl_t*)gl;
+  return eglMakeCurrent(g->win->pal->egl_dpy, g->surf, g->surf, g->ctx)
+             ? MY_RET_OK
+             : MY_RET_FAIL;
+}
+
+static my_ret_t wl_gl_swap(my_pal_gl_t* gl) {
+  wl_gl_t* g = (wl_gl_t*)gl;
+  /* eglSwapBuffers attaches+commits; mesa throttles to the compositor's
+   * frame callbacks at swap interval 1 (vsync semantics preserved) */
+  return eglSwapBuffers(g->win->pal->egl_dpy, g->surf) ? MY_RET_OK
+                                                       : MY_RET_FAIL;
+}
+
+static my_ret_t wl_gl_get_size(my_pal_gl_t* gl, int32_t* w, int32_t* h) {
+  wl_gl_t* g = (wl_gl_t*)gl;
+  if (w != NULL) {
+    *w = g->win->w;
+  }
+  if (h != NULL) {
+    *h = g->win->h;
+  }
+  return MY_RET_OK;
+}
+
+static void wl_gl_destroy(my_pal_gl_t* gl) {
+  wl_gl_t* g = (wl_gl_t*)gl;
+  if (g != NULL) {
+    EGLDisplay dpy = g->win->pal->egl_dpy;
+    eglMakeCurrent(dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+    eglDestroySurface(dpy, g->surf);
+    eglDestroyContext(dpy, g->ctx);
+    wl_egl_window_destroy(g->win->egl_win);
+    g->win->egl_win = NULL;
+    g->win->gl = NULL; /* the window forgets it (double-destroy safe) */
+    my_mem_free(g->win->allocator, g);
+  }
+}
+
+static const my_pal_gl_vtable_t s_wl_gl_vtable = {
+    wl_gl_make_current, wl_gl_swap, wl_gl_get_size, wl_gl_destroy};
+
+static my_pal_gl_t* wl_win_gl_enable(my_pal_window_t* win) {
+  wl_window_t* w = (wl_window_t*)win;
+  wl_pal_t* p = w->pal;
+  wl_gl_t* g;
+  EGLint ctx_attrs[] = {EGL_CONTEXT_CLIENT_VERSION, 2, EGL_NONE};
+  if (w->gl != NULL) {
+    return w->gl;
+  }
+  if (!wl_egl_init(p)) {
+    return NULL;
+  }
+  g = (wl_gl_t*)my_mem_calloc(w->allocator, 1, sizeof(wl_gl_t));
+  if (g == NULL) {
+    return NULL;
+  }
+  g->base.vtable = &s_wl_gl_vtable;
+  g->win = w;
+  w->egl_win = wl_egl_window_create(w->surface, w->w, w->h);
+  if (w->egl_win == NULL) {
+    my_mem_free(w->allocator, g);
+    return NULL;
+  }
+  g->ctx = eglCreateContext(p->egl_dpy, p->egl_cfg, EGL_NO_CONTEXT, ctx_attrs);
+  if (g->ctx == EGL_NO_CONTEXT) {
+    wl_egl_window_destroy(w->egl_win);
+    w->egl_win = NULL;
+    my_mem_free(w->allocator, g);
+    return NULL;
+  }
+  g->surf = eglCreateWindowSurface(p->egl_dpy, p->egl_cfg,
+                                   (EGLNativeWindowType)w->egl_win, NULL);
+  if (g->surf == EGL_NO_SURFACE) {
+    eglDestroyContext(p->egl_dpy, g->ctx);
+    wl_egl_window_destroy(w->egl_win);
+    w->egl_win = NULL;
+    my_mem_free(w->allocator, g);
+    return NULL;
+  }
+  w->gl = (my_pal_gl_t*)g;
+  if (wl_gl_make_current(w->gl) == MY_RET_OK) {
+    eglSwapInterval(p->egl_dpy, 1); /* vsync */
+  }
+  return w->gl;
+}
+
+#else /* !MYUI_PAL_GL_EGL */
+
+static my_pal_gl_t* wl_win_gl_enable(my_pal_window_t* win) {
+  (void)win;
+  return NULL; /* built without EGL/wayland-egl */
+}
+
+#endif /* MYUI_PAL_GL_EGL */
+
 static const my_pal_window_vtable_t s_wl_window_vtable = {
     wl_win_set_title, wl_win_resize,  wl_win_show,
-    wl_win_get_size,  wl_win_get_lcd, wl_win_destroy};
+    wl_win_get_size,  wl_win_get_lcd, wl_win_destroy,
+    wl_win_gl_enable};
 
 static my_pal_window_t* wl_window_create(my_pal_t* pal, int32_t w, int32_t h,
                                          const char* title) {

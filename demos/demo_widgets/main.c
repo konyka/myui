@@ -344,6 +344,17 @@ int main(void) {
 
   app.win = my_window_create(NULL, app.pal, 800, 560, "myui demo_widgets");
   my_window_set_theme(app.win, app.light, false);
+#ifndef MYUI_PAL_DUMMY
+  /* MYUI_DEMO_GLES=1: render through the GLES2 backend on a real GL
+   * window (M10c); falls back to the soft path when unavailable */
+  if (getenv("MYUI_DEMO_GLES") != NULL) {
+    if (my_window_enable_gl(app.win) == MY_RET_OK) {
+      printf("demo_widgets: GLES rendering enabled\n");
+    } else {
+      fprintf(stderr, "demo_widgets: GLES unavailable, using soft path\n");
+    }
+  }
+#endif
   {
     app_font = create_default_font();
     my_window_set_font(app.win, app_font, 16);

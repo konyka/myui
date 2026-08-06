@@ -94,9 +94,15 @@ static void dummy_win_destroy(my_pal_window_t* win) {
   }
 }
 
+static my_pal_gl_t* dummy_win_gl_enable(my_pal_window_t* win) {
+  (void)win;
+  return NULL; /* dummy port: no GL support (headless) */
+}
+
 static const my_pal_window_vtable_t s_dummy_window_vtable = {
     dummy_win_set_title, dummy_win_resize,  dummy_win_show,
-    dummy_win_get_size,  dummy_win_get_lcd, dummy_win_destroy};
+    dummy_win_get_size,  dummy_win_get_lcd, dummy_win_destroy,
+    dummy_win_gl_enable};
 
 static my_pal_window_t* dummy_window_create(my_pal_t* pal, int32_t w, int32_t h,
                                             const char* title) {

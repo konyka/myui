@@ -21,7 +21,7 @@
 | x11 | ✅ 已验证 | 单测 + 真机冒烟 |
 | wayland（xdg-shell + wl_shm） | ✅ 已验证 | keymap 单测 + 真实合成器冒烟 |
 | linux-fb | ✅ 编译通过 | my_osal_t 假设备单测；未实机（无 /dev/fb0） |
-| GLES2 backend | ✅ 已验证 | mock GL 单测 + EGL 真实冒烟 |
+| GLES2 backend | ✅ 已验证 | mock GL 单测 + EGL 真实冒烟 + x11/wayland 真窗口 GL 渲染（`MYUI_DEMO_GLES=1`） |
 | Windows（核心库+dummy） | ✅ CI 构建 | MSVC 构建+测试（CI） |
 | macOS（核心库+dummy） | ✅ CI 构建 | CI |
 | FreeBSD | ◐ 未实机 | x11/wayland 逻辑同 Linux，见 docs/porting.md |

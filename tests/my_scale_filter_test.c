@@ -84,6 +84,134 @@ static void test_bilinear_gradient_downscale(void) {
   my_lcd_destroy(lcd);
 }
 
+/* ---------------- box pre-downsample (M10c) ---------------- */
+
+static void fill_checker(uint8_t* img, int32_t w, int32_t h) {
+  int32_t x, y;
+  for (y = 0; y < h; y++) {
+    for (x = 0; x < w; x++) {
+      uint8_t* p = img + ((size_t)y * (size_t)w + (size_t)x) * 4u;
+      uint8_t v = (uint8_t)(((x + y) & 1) ? 255 : 0);
+      p[0] = p[1] = p[2] = v;
+      p[3] = 255;
+    }
+  }
+}
+
+static void test_box_checker_8x_to_gray(void) {
+  /* 8x8 checkerboard -> 1x1 dst: 8x box average = mid gray (nearest would
+   * give a hard black/white sample) */
+  uint8_t img[8 * 8 * 4];
+  my_lcd_t* lcd = my_lcd_mem_create(NULL, 1, 1, MY_PIXEL_FORMAT_BGRA8888);
+  my_vgcanvas_t* vg = my_vgcanvas_soft_create(NULL, lcd);
+  uint8_t r, g, b;
+  fill_checker(img, 8, 8);
+
+  my_vgcanvas_begin_frame(vg, NULL);
+  my_vgcanvas_soft_set_scale_filter(vg, MY_SCALE_FILTER_BILINEAR);
+  my_vgcanvas_draw_image(vg, img, 8, 8, &(my_rectf_t){0, 0, 1, 1}, NULL);
+  my_vgcanvas_end_frame(vg);
+
+  px_rgb(lcd, 0, 0, &r, &g, &b);
+  TEST_ASSERT(r > 110 && r < 145); /* ~(0+255)/2 = 127.5 */
+
+  my_vgcanvas_destroy(vg);
+  my_lcd_destroy(lcd);
+}
+
+static void test_box_solid_red_stays_red(void) {
+  /* 8x8 solid red -> 2x2 dst (4x box): still pure red */
+  uint8_t img[8 * 8 * 4];
+  my_lcd_t* lcd = my_lcd_mem_create(NULL, 2, 2, MY_PIXEL_FORMAT_BGRA8888);
+  my_vgcanvas_t* vg = my_vgcanvas_soft_create(NULL, lcd);
+  uint8_t r, g, b;
+  int i;
+  for (i = 0; i < 8 * 8; i++) {
+    img[i * 4 + 0] = 255;
+    img[i * 4 + 1] = 0;
+    img[i * 4 + 2] = 0;
+    img[i * 4 + 3] = 255;
+  }
+
+  my_vgcanvas_begin_frame(vg, NULL);
+  my_vgcanvas_soft_set_scale_filter(vg, MY_SCALE_FILTER_BILINEAR);
+  my_vgcanvas_draw_image(vg, img, 8, 8, &(my_rectf_t){0, 0, 2, 2}, NULL);
+  my_vgcanvas_end_frame(vg);
+
+  px_rgb(lcd, 0, 0, &r, &g, &b);
+  TEST_ASSERT(r == 255 && g == 0 && b == 0);
+  px_rgb(lcd, 1, 1, &r, &g, &b);
+  TEST_ASSERT(r == 255 && g == 0 && b == 0);
+
+  my_vgcanvas_destroy(vg);
+  my_lcd_destroy(lcd);
+}
+
+static void test_box_checker_variance_below_nearest(void) {
+  /* 64x64 checkerboard -> 8x8 dst: box+bilinear output is all mid-gray
+   * (low variance); nearest output contains hard 0/255 samples */
+  uint8_t img[64 * 64 * 4];
+  my_lcd_t* lcd = my_lcd_mem_create(NULL, 8, 8, MY_PIXEL_FORMAT_BGRA8888);
+  my_vgcanvas_t* vg = my_vgcanvas_soft_create(NULL, lcd);
+  uint8_t r, g, b;
+  int x, y;
+  bool saw_hard = false;
+  fill_checker(img, 64, 64);
+
+  my_vgcanvas_begin_frame(vg, NULL);
+  my_vgcanvas_soft_set_scale_filter(vg, MY_SCALE_FILTER_NEAREST);
+  my_vgcanvas_draw_image(vg, img, 64, 64, &(my_rectf_t){0, 0, 8, 8}, NULL);
+  for (y = 0; y < 8; y++) {
+    for (x = 0; x < 8; x++) {
+      px_rgb(lcd, x, y, &r, &g, &b);
+      if (r == 0 || r == 255) {
+        saw_hard = true;
+      }
+    }
+  }
+  TEST_ASSERT(saw_hard);
+
+  memset(my_lcd_mem_get_buffer(lcd), 0, 8 * my_lcd_mem_get_stride(lcd));
+  my_vgcanvas_soft_set_scale_filter(vg, MY_SCALE_FILTER_BILINEAR);
+  my_vgcanvas_draw_image(vg, img, 64, 64, &(my_rectf_t){0, 0, 8, 8}, NULL);
+  my_vgcanvas_end_frame(vg);
+  for (y = 0; y < 8; y++) {
+    for (x = 0; x < 8; x++) {
+      px_rgb(lcd, x, y, &r, &g, &b);
+      TEST_ASSERT(r > 100 && r < 155); /* every pixel near 127.5 */
+    }
+  }
+
+  my_vgcanvas_destroy(vg);
+  my_lcd_destroy(lcd);
+}
+
+static void test_box_tier_partial_blocks(void) {
+  /* 12x12 solid green -> 3x3 dst: ratio 0.25 -> 4x tier, 12/4=3 exact;
+   * then 13x13 -> 3x3: partial edge blocks must not read OOB nor skew */
+  uint8_t img[13 * 13 * 4];
+  my_lcd_t* lcd = my_lcd_mem_create(NULL, 3, 3, MY_PIXEL_FORMAT_BGRA8888);
+  my_vgcanvas_t* vg = my_vgcanvas_soft_create(NULL, lcd);
+  uint8_t r, g, b;
+  int i;
+  for (i = 0; i < 13 * 13; i++) {
+    img[i * 4 + 0] = 0;
+    img[i * 4 + 1] = 200;
+    img[i * 4 + 2] = 0;
+    img[i * 4 + 3] = 255;
+  }
+
+  my_vgcanvas_begin_frame(vg, NULL);
+  my_vgcanvas_soft_set_scale_filter(vg, MY_SCALE_FILTER_BILINEAR);
+  my_vgcanvas_draw_image(vg, img, 13, 13, &(my_rectf_t){0, 0, 3, 3}, NULL);
+  my_vgcanvas_end_frame(vg);
+  px_rgb(lcd, 2, 2, &r, &g, &b); /* corner from a partial block */
+  TEST_ASSERT(g > 180 && r < 40);
+
+  my_vgcanvas_destroy(vg);
+  my_lcd_destroy(lcd);
+}
+
 static void test_nearest_vs_bilinear_differs(void) {
   /* 1x2 image (black|white) upscaled to 4x1: nearest = hard 0/255 steps,
    * bilinear = intermediate gray in the middle */
@@ -114,4 +242,8 @@ MYTEST_MAIN_BEGIN()
   MYTEST_RUN(test_bilinear_2x_center_is_mean);
   MYTEST_RUN(test_bilinear_gradient_downscale);
   MYTEST_RUN(test_nearest_vs_bilinear_differs);
+  MYTEST_RUN(test_box_checker_8x_to_gray);
+  MYTEST_RUN(test_box_solid_red_stays_red);
+  MYTEST_RUN(test_box_checker_variance_below_nearest);
+  MYTEST_RUN(test_box_tier_partial_blocks);
 MYTEST_MAIN_END()

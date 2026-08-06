@@ -145,9 +145,15 @@ static void fb_win_destroy(my_pal_window_t* win) {
   }
 }
 
+static my_pal_gl_t* fb_win_gl_enable(my_pal_window_t* win) {
+  (void)win;
+  return NULL; /* linux_fb: no GL support */
+}
+
 static const my_pal_window_vtable_t s_fb_window_vtable = {
     fb_win_set_title, fb_win_resize,  fb_win_show,
-    fb_win_get_size,  fb_win_get_lcd, fb_win_destroy};
+    fb_win_get_size,  fb_win_get_lcd, fb_win_destroy,
+    fb_win_gl_enable};
 
 static my_pal_window_t* fb_window_create(my_pal_t* pal, int32_t w, int32_t h,
                                          const char* title) {

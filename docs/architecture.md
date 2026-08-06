@@ -175,7 +175,7 @@ PAL port 矩阵：
 
 ## draw_image 后端矩阵与缩放滤波（M9b）
 
-- **soft**：最近邻（默认关闭）或双线性（默认开）采样，alpha 按控件主题 bg 预合成后走 draw_pixels。双线性用像素中心映射 `(dst+0.5)*w/dw-0.5`、四邻域加权（float，未走定点——-O0 下 480x270→800x600 为 15.5ms/帧 vs 最近邻 2.2ms（7x）；**嵌入式建议 `MY_SCALE_FILTER_NEAREST`**，桌面默认 BILINEAR；缩小时的盒式预降采样是 TODO）。`my_vgcanvas_soft_set_scale_filter` + `my_image_set_scale_filter` 透传。
+- **soft**：最近邻（默认关闭）或双线性（默认开）采样，alpha 按控件主题 bg 预合成后走 draw_pixels。双线性用像素中心映射 `(dst+0.5)*w/dw-0.5`、四邻域加权（float，未走定点——-O0 下 480x270→800x600 为 15.5ms/帧 vs 最近邻 2.2ms（7x）；**嵌入式建议 `MY_SCALE_FILTER_NEAREST`**，桌面默认 BILINEAR；缩小时的盒式预降采样见 M10c 一节）。`my_vgcanvas_soft_set_scale_filter` + `my_image_set_scale_filter` 透传。
 - **gles2**：draw_image 已实现——RGBA8888 上传纹理（`create_texture_rgba`），专用 FS（直接采样不过调制色），quad + scissor；纹理按 (ptr,w,h) 键 LRU 16 项（调用方须保证位图生命周期，my_image 的解码 LRU 语义自洽，头注释注明）；EGL 冒烟四象限读回断言通过。bg 参数先画背景矩形再混合 quad。
 
 ## scroll_bar 与变高列表（M9c）
@@ -201,3 +201,9 @@ PAL port 矩阵：
 - **折行规则（自定，非 UAX#14）**：逐 codepoint 累宽（font measure，位图字体回退 cell 宽），超宽时——若溢出字符本身是空格则在其**之前**断开并消费该空格；否则若当前视觉行内有空格则在**最后一个空格之后**断开（空格留在上一视觉行尾）；否则任意两 codepoint 间硬折。任何视觉行都不以空白开头。明确不做 UAX#14 断行规则（TODO）。
 - **光标/滚动语义**：wrap on 时 Up/Down 按视觉行移动（goal_col 按视觉行内列保持）；Home=视觉行首、End=视觉行尾；Left/Right 仍是物理逐 codepoint（跨视觉行无特殊处理）；`(row,col)`→视觉行用二分查找（vlines 按 (phys,start_cp) 有序，共享边界列归**后一个**视觉行）。wrap on 时水平滚动禁用（scroll_x 恒 0），垂直滚动以视觉行计高。撤销/重做只记录文本补丁，视觉位置由缓存自动重建。
 - 接入：`my_text_area_set_wrap` / XML `<text_area wrap="true">` / MVVM `wrap` bool 属性（text_area 专用）。bench（-O0，万行 ~80cp 长行 → 25843 视觉行）：载入+构建 1.57ms、1000 次视觉移动 0.10ms、滚动重绘 0.30ms/帧。
+
+## 盒式预降采样与 GL 真窗口（M10c）
+
+- **盒式预降采样**（soft draw_image，双线性模式自动生效）：缩放比 < 0.5 时先按 2/4/8 整数档（取使剩余比例 ≤ 1 的最大档，每轴独立）做盒式平均到临时位图，再走双线性到目标。盒式平均按 straight-alpha 各通道独立求均值（半透明边缘与预乘滤波有轻微偏差，已注释）；边缘不足一档的块只平均有效像素。bench（2000x1500→400x300，-O0）：nearest 0.71ms / 纯双线性 5.09ms / 盒式+双线性 28.93ms——**这是质量特性不是速度特性**：直接双线性只采目标×4 像素 O(dst)，盒式必须读完整源图 O(src)；换来的是高频内容零混叠（64x64 棋盘缩 8x8 后全部 ≈127 中灰，nearest 仍有硬 0/255）。嵌入式继续建议 NEAREST。
+- **GL 窗口挂载**：窗口 vtable 新增 `gl_enable` → `my_pal_gl_t*`（`make_current`/`swap_buffers`/`get_size`/`destroy`；句柄归窗口所有，提前释放双重安全——见 porting.md）。x11：`eglGetDisplay` + window surface；wayland：`wl_egl_window_create`（resize 同步 `wl_egl_window_resize`）+ `eglGetPlatformDisplay(WAYLAND)`；两 port 均 pal 级懒初始化共享 EGLDisplay、swap interval 1（wayland 由 mesa 经 frame 回调节流，vsync 语义保持）。dummy/linux_fb 打桩 NULL。CMake 探测 `egl`（+`wayland-egl`）定义 `MYUI_PAL_GL_EGL`，缺库自动回落。
+- **集成点**：`my_window_enable_gl(win)` 一行切换——建 gles2 vgcanvas（失败回落 soft）、paint 帧末 swap、RESIZE 更新 GL viewport。demo：`MYUI_DEMO_GLES=1`（demo_hello/demo_widgets）。冒烟 `gl_window_smoke_test`（有显示环境时实跑：渲染→swap 前 glReadPixels 像素断言→300ms 定时退出；无环境 skip），x11/wayland 均实跑通过。
