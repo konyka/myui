@@ -7,6 +7,7 @@
 #include <string.h>
 
 #include "myc/my_str.h"
+#include "myui/my_undo_stack.h"
 #include "myui/my_window.h"
 #include "myui/widgets/my_scroll_bar.h"
 
@@ -200,6 +201,9 @@ static void user_insert(my_text_area_t* ta, const char* bytes, size_t n,
   if (ta_sel(ta, &r0, &c0, &r1, &c1)) {
     size_t s0 = ta_offset_of(ta, r0, c0);
     size_t s1 = ta_offset_of(ta, r1, c1);
+    if (!ta->applying_history && ta->undo != NULL) {
+      my_undo_stack_record_delete(ta->undo, s0, ta->text + s0, s1 - s0);
+    }
     ta_delete_bytes(ta, s0, s1);
     ta_cursor_to_offset(ta, s0);
     emit_changed(ta);
@@ -208,6 +212,9 @@ static void user_insert(my_text_area_t* ta, const char* bytes, size_t n,
     return;
   }
   start = ta_offset_of(ta, ta->cursor_row, ta->cursor_col);
+  if (!ta->applying_history && ta->undo != NULL) {
+    my_undo_stack_record_insert(ta->undo, start, bytes, n);
+  }
   ta_insert_bytes(ta, start, bytes, n);
   ta_cursor_to_offset(ta, start + n);
   emit_changed(ta);
@@ -217,6 +224,10 @@ static void user_insert(my_text_area_t* ta, const char* bytes, size_t n,
 static void user_delete_range(my_text_area_t* ta, size_t start, size_t end) {
   if (ta->readonly) {
     return;
+  }
+  if (!ta->applying_history && ta->undo != NULL) {
+    my_undo_stack_record_delete(ta->undo, start, ta->text + start,
+                                end - start);
   }
   ta_delete_bytes(ta, start, end);
   ta_cursor_to_offset(ta, start);
@@ -337,11 +348,38 @@ static void ta_move_to(my_text_area_t* ta, size_t row, size_t col,
   my_widget_invalidate((my_widget_t*)ta, NULL);
 }
 
+static void ta_apply_history(my_text_area_t* ta, my_undo_op_t* op) {
+  ta->applying_history = true;
+  ta_delete_bytes(ta, op->offset, op->offset + op->remove_len);
+  ta_insert_bytes(ta, op->offset, op->bytes, op->bytes_len);
+  ta_cursor_to_offset(ta, op->offset + op->bytes_len);
+  ta->applying_history = false;
+  emit_changed(ta);
+  my_widget_invalidate((my_widget_t*)ta, NULL);
+}
+
 static my_ret_t ta_on_key(my_text_area_t* ta, const my_event_t* event) {
   uint32_t key = event->u.key.key;
   uint8_t mods = event->u.key.modifiers;
   bool shift = (mods & MY_KEYMOD_SHIFT) != 0;
   bool ctrl = (mods & MY_KEYMOD_CTRL) != 0;
+
+  if (ctrl && (key == 'z' || key == 'Z')) {
+    my_undo_op_t op;
+    my_ret_t r = shift ? my_undo_stack_redo(ta->undo, &op)
+                       : my_undo_stack_undo(ta->undo, &op);
+    if (r == MY_RET_OK) {
+      ta_apply_history(ta, &op);
+    }
+    return MY_RET_OK;
+  }
+  if (ctrl && (key == 'y' || key == 'Y')) {
+    my_undo_op_t op;
+    if (my_undo_stack_redo(ta->undo, &op) == MY_RET_OK) {
+      ta_apply_history(ta, &op);
+    }
+    return MY_RET_OK;
+  }
 
   if (ctrl && (key == 'a' || key == 'A')) {
     ta->anchor_row = 0;
@@ -440,6 +478,20 @@ static my_ret_t ta_on_key(my_text_area_t* ta, const my_event_t* event) {
         ta->goal_col = ta->cursor_col;
       }
       return MY_RET_OK;
+    case MY_KEY_PAGE_DOWN:
+    case MY_KEY_PAGE_UP: {
+      int32_t visible = (((my_widget_t*)ta)->rect.h - 2 * TA_PAD_Y) /
+                        ta_line_height(ta);
+      size_t row;
+      if (visible < 1) {
+        visible = 1;
+      }
+      row = key == MY_KEY_PAGE_DOWN ? ta->cursor_row + (size_t)visible
+          : ta->cursor_row > (size_t)visible ? ta->cursor_row - (size_t)visible
+                                             : 0;
+      ta_move_to(ta, row, ta->goal_col, shift);
+      return MY_RET_OK;
+    }
     case MY_KEY_BACKSPACE: {
       size_t r0, c0, r1, c1;
       if (ta_sel(ta, &r0, &c0, &r1, &c1)) {
@@ -642,6 +694,7 @@ static void ta_on_blur(void* ctx, const char* event, void* data) {
   my_text_area_t* ta = (my_text_area_t*)ctx;
   (void)event;
   (void)data;
+  my_undo_stack_break_batch(ta->undo);
   ta->focused = false;
   ta->cursor_visible = true;
   if (ta->blink_timer_id > 0 && ta->blink_loop != NULL) {
@@ -657,6 +710,7 @@ static void ta_destroy_chain(my_object_t* obj) {
   if (ta->blink_timer_id > 0 && ta->blink_loop != NULL) {
     my_pal_main_loop_remove_timer(ta->blink_loop, ta->blink_timer_id);
   }
+  my_undo_stack_destroy(ta->undo);
   my_darray_destroy(ta->line_offsets);
   my_mem_free(ta->allocator, ta->text);
   my_mem_free(ta->allocator, ta->hint);
@@ -690,6 +744,11 @@ my_widget_t* my_text_area_create(const my_allocator_t* allocator) {
     my_object_unref((my_object_t*)ta);
     return NULL;
   }
+  ta->undo = my_undo_stack_create(allocator, 0);
+  if (ta->undo == NULL) {
+    my_object_unref((my_object_t*)ta);
+    return NULL;
+  }
   ((my_widget_t*)ta)->focusable = true;
   ((my_widget_t*)ta)->widget_type = "text_area";
   my_widget_on((my_widget_t*)ta, "focus", ta_on_focus, ta);
@@ -702,6 +761,10 @@ my_ret_t my_text_area_set_text(my_widget_t* area, const char* text) {
   size_t len;
   if (area == NULL) {
     return MY_RET_INVALID_PARAMS;
+  }
+  /* programmatic replacement: not undoable; the document diverged */
+  if (ta->undo != NULL) {
+    my_undo_stack_clear(ta->undo);
   }
   len = text != NULL ? strlen(text) : 0;
   {

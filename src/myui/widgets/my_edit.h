@@ -27,6 +27,8 @@ typedef struct my_edit_t {
   size_t anchor;       /**< selection anchor (cursor != anchor = selection) */
   int32_t scroll_x;    /**< horizontal scroll offset in pixels */
   size_t max_len;      /**< max codepoints, 0 = unlimited */
+  struct my_undo_stack_t* undo; /**< user-edit history (M10a) */
+  bool applying_history;          /**< suppresses recording during undo/redo */
   bool readonly;
   bool password;
   bool focused;

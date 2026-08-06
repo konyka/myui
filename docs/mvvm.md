@@ -44,7 +44,7 @@ option    = "Mode=" ("OneWay" | "TwoWay" | "Once")
 | TwoWay | ✓ | ✓ | ✓（target `"changed"` 事件） |
 | Once | ✓ | — | — |
 
-回写路径：`convert_back` → `Validator` 校验 → **失败则拒绝**：vm 不变、target 被恢复为 vm 当前值（测试固化此语义）。Converter 正向用于推送。命令绑定：target 事件（`on_click` → `"click"`）触发，先 `can_exec` 再 `exec(args)`。
+回写路径：`convert_back` → `Validator` 校验 → **失败则拒绝**：vm 不变、target 被恢复为 vm 当前值（测试固化此语义）。MVVM 回写与程序 set_text 一样**不进撤销栈**（M10a：撤销只覆盖用户亲手编辑）。Converter 正向用于推送。命令绑定：target 事件（`on_click` → `"click"`）触发，先 `can_exec` 再 `exec(args)`。
 
 手动全量同步：`my_binding_context_update_to_view()` / `update_to_vm()`（后者只处理 TwoWay）。
 

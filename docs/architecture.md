@@ -188,3 +188,9 @@ PAL port 矩阵：
 
 - `tools/ui2c`：XML→C 生成器（宿主工具，输出 `my_widget_t* fn(allocator, pal)` 构建函数；golden 等价测试保证与运行时加载逐节点一致）；嵌入式走 `MYUI_UI_XML=OFF` + 离线生成 = 零解析开销零 parser 代码（见 porting.md）。
 - x11 剪贴板外部获取：`clipboard_get_text` 在 owner 为外部时 `XConvertSelection`（UTF8_STRING→STRING 回退）+ ~500ms 同步等待 SelectionNotify，等待期间其他事件照常分发（重入安全）；INCR 增量传输未做（TODO）。
+
+## 撤销/重做与键盘导航（M10a）
+
+- `my_undo_stack_t`：文本补丁模型（entry = {offset, deleted, inserted}；undo 删 inserted 回插 deleted，redo 反之）。**批合并**：连续插入且 offset 连续（打字流）合并；连续删除且 offset 相邻递减（退格流）前插合并；换向/非相邻/其他操作开新条目；`break_batch` 在 blur/光标跳转时调用。容量默认 100（溢出丢最老），新编辑清 redo 支。栈不持有文档：undo/redo 返回 {offset, remove_len, bytes} 由控件套用（套用期间 `applying_history` 抑制再记录）。
+- edit/text_area：用户键盘/粘贴/剪切入栈；**程序 set_text 与 MVVM 回写不入栈**（且 set_text 视为文档替换直接清栈——边界语义：撤销只覆盖"用户亲手编辑"）。Ctrl+Z undo、Ctrl+Y 与 Ctrl+Shift+Z redo。
+- 键盘导航：Tab/Shift+Tab 焦点环（分发器在未被吃掉时按树序前/后移焦点并回绕，跳过不可见/禁用）；text_area/list_view 的 PageUp/PageDown 按可视区翻页；scroll_bar 获焦后 Up/Down 微调、PgUp/PgDn 翻页、Home/End 到端。

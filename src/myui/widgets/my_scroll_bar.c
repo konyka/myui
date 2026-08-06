@@ -82,6 +82,33 @@ static my_ret_t sb_on_event(my_widget_t* widget, const my_event_t* event) {
         return MY_RET_OK;
       }
       return MY_RET_FAIL;
+    case MY_EVENT_KEY_DOWN: {
+      float step = sb_clamp(b->page_size, 0.02f, 1.0f);
+      switch (event->u.key.key) {
+        case MY_KEY_DOWN:
+        case MY_KEY_RIGHT:
+          sb_set_internal(b, b->value + 0.02f, true);
+          return MY_RET_OK;
+        case MY_KEY_UP:
+        case MY_KEY_LEFT:
+          sb_set_internal(b, b->value - 0.02f, true);
+          return MY_RET_OK;
+        case MY_KEY_PAGE_DOWN:
+          sb_set_internal(b, b->value + step, true);
+          return MY_RET_OK;
+        case MY_KEY_PAGE_UP:
+          sb_set_internal(b, b->value - step, true);
+          return MY_RET_OK;
+        case MY_KEY_HOME:
+          sb_set_internal(b, 0.0f, true);
+          return MY_RET_OK;
+        case MY_KEY_END:
+          sb_set_internal(b, 1.0f, true);
+          return MY_RET_OK;
+        default:
+          return MY_RET_FAIL;
+      }
+    }
     default:
       return MY_RET_FAIL;
   }
@@ -125,6 +152,7 @@ my_widget_t* my_scroll_bar_create(const my_allocator_t* allocator) {
   }
   b->page_size = 0.2f;
   ((my_widget_t*)b)->widget_type = "scroll_bar";
+  ((my_widget_t*)b)->focusable = true;
   return (my_widget_t*)b;
 }
 

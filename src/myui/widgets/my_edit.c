@@ -7,6 +7,7 @@
 #include <string.h>
 
 #include "myc/my_str.h"
+#include "myui/my_undo_stack.h"
 #include "myui/my_window.h"
 
 #define EDIT_PAD_X 4
@@ -80,6 +81,10 @@ static void edit_set_text_internal(my_edit_t* e, const char* text, bool notify) 
   if (copy == NULL) {
     return;
   }
+  /* programmatic replacement: not undoable; the document diverged */
+  if (e->undo != NULL) {
+    my_undo_stack_clear(e->undo);
+  }
   my_mem_free(e->allocator, e->text);
   e->text = copy;
   e->cursor = strlen(copy);
@@ -146,6 +151,9 @@ static void user_delete_range(my_edit_t* e, size_t start, size_t end) {
   if (e->readonly) {
     return;
   }
+  if (!e->applying_history && e->undo != NULL) {
+    my_undo_stack_record_delete(e->undo, start, e->text + start, end - start);
+  }
   edit_delete_range(e, start, end);
   emit_changed(e);
   my_widget_invalidate((my_widget_t*)e, NULL);
@@ -157,6 +165,9 @@ static void user_insert(my_edit_t* e, const char* bytes, size_t n) {
   }
   if (has_selection(e)) {
     delete_selection(e);
+  }
+  if (!e->applying_history && e->undo != NULL) {
+    my_undo_stack_record_insert(e->undo, e->cursor, bytes, n);
   }
   edit_insert(e, bytes, n);
   emit_changed(e);
@@ -232,6 +243,38 @@ static my_ret_t edit_on_key(my_edit_t* e, const my_event_t* event) {
   bool ctrl = (mods & MY_KEYMOD_CTRL) != 0;
   size_t len = edit_len_bytes(e);
 
+  if (ctrl && (key == 'z' || key == 'Z')) {
+    /* Ctrl+Z undo / Ctrl+Shift+Z redo (M10a) */
+    my_undo_op_t op;
+    my_ret_t r = ((mods & MY_KEYMOD_SHIFT) != 0)
+                     ? my_undo_stack_redo(e->undo, &op)
+                     : my_undo_stack_undo(e->undo, &op);
+    if (r == MY_RET_OK) {
+      e->applying_history = true;
+      edit_delete_range(e, op.offset, op.offset + op.remove_len);
+      edit_insert(e, op.bytes, op.bytes_len);
+      e->cursor = op.offset + op.bytes_len;
+      e->anchor = e->cursor;
+      e->applying_history = false;
+      emit_changed(e);
+      my_widget_invalidate((my_widget_t*)e, NULL);
+    }
+    return MY_RET_OK;
+  }
+  if (ctrl && (key == 'y' || key == 'Y')) {
+    my_undo_op_t op;
+    if (my_undo_stack_redo(e->undo, &op) == MY_RET_OK) {
+      e->applying_history = true;
+      edit_delete_range(e, op.offset, op.offset + op.remove_len);
+      edit_insert(e, op.bytes, op.bytes_len);
+      e->cursor = op.offset + op.bytes_len;
+      e->anchor = e->cursor;
+      e->applying_history = false;
+      emit_changed(e);
+      my_widget_invalidate((my_widget_t*)e, NULL);
+    }
+    return MY_RET_OK;
+  }
   if (ctrl && (key == 'a' || key == 'A')) {
     e->anchor = 0;
     e->cursor = len;
@@ -394,6 +437,7 @@ static void edit_on_blur(void* ctx, const char* event, void* data) {
   my_edit_t* e = (my_edit_t*)ctx;
   (void)event;
   (void)data;
+  my_undo_stack_break_batch(e->undo);
   e->focused = false;
   e->cursor_visible = true; /* hidden anyway when unfocused */
   if (e->blink_timer_id > 0 && e->blink_loop != NULL) {
@@ -475,6 +519,7 @@ static void edit_destroy_chain(my_object_t* obj) {
   if (e->blink_timer_id > 0 && e->blink_loop != NULL) {
     my_pal_main_loop_remove_timer(e->blink_loop, e->blink_timer_id);
   }
+  my_undo_stack_destroy(e->undo);
   my_mem_free(e->allocator, e->text);
   my_mem_free(e->allocator, e->masked);
   my_mem_free(e->allocator, e->hint);
@@ -496,6 +541,11 @@ my_widget_t* my_edit_create(const my_allocator_t* allocator) {
   e->allocator = allocator;
   e->font_size = 16;
   e->cursor_visible = true;
+  e->undo = my_undo_stack_create(allocator, 0);
+  if (e->undo == NULL) {
+    my_object_unref((my_object_t*)e);
+    return NULL;
+  }
   ((my_widget_t*)e)->focusable = true;
   ((my_widget_t*)e)->widget_type = "edit";
   my_widget_on((my_widget_t*)e, "focus", edit_on_focus, e);

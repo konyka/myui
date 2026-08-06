@@ -374,6 +374,39 @@ int main(void) {
       e.u.pointer.x = 300;
       e.u.pointer.y = 180;
       my_window_on_pal_event(app.win, &e);
+      /* focus the text_area, type, then Ctrl+Z the last stream */
+      {
+        my_widget_t* root = my_window_widget(app.win);
+        size_t i, n = my_widget_child_count(root);
+        my_widget_t* ta = NULL;
+        for (i = 0; i < n; i++) {
+          my_widget_t* c = my_widget_get_child(root, i);
+          if (strcmp(c->widget_type, "text_area") == 0) {
+            ta = c;
+          }
+        }
+        if (ta != NULL) {
+          static const char typed[] = "UNDO-DEMO";
+          my_event_t e;
+          int32_t cx = ta->rect.w / 2, cy = ta->rect.y + 10;
+          size_t k;
+          my_widget_local_to_global(ta, &cx, &cy);
+          e = my_event_init(MY_EVENT_POINTER_DOWN);
+          e.u.pointer.x = cx;
+          e.u.pointer.y = cy;
+          my_window_on_pal_event(app.win, &e);
+          for (k = 0; typed[k] != '\0'; k++) {
+            e = my_event_init(MY_EVENT_KEY_DOWN);
+            e.u.key.key = (uint8_t)typed[k];
+            my_window_on_pal_event(app.win, &e);
+          }
+          /* Ctrl+Z: removes the whole "UNDO-DEMO" stream at once */
+          e = my_event_init(MY_EVENT_KEY_DOWN);
+          e.u.key.key = 'z';
+          e.u.key.modifiers = MY_KEYMOD_CTRL;
+          my_window_on_pal_event(app.win, &e);
+        }
+      }
       my_pal_dummy_set_now_ms(app.pal, 200);
       my_pal_main_loop_run(app.loop);
       dump_ppm(app.win->pal_window, dump);

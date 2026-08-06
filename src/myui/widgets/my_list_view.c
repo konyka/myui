@@ -289,6 +289,19 @@ static my_ret_t lv_on_event(my_widget_t* widget, const my_event_t* event) {
         return MY_RET_OK;
       }
       return MY_RET_FAIL;
+    case MY_EVENT_KEY_DOWN:
+      if (event->u.key.key == MY_KEY_PAGE_DOWN ||
+          event->u.key.key == MY_KEY_PAGE_UP) {
+        int32_t page = ((my_widget_t*)lv)->rect.h > 0
+                           ? ((my_widget_t*)lv)->rect.h
+                           : 100;
+        lv->scroll_offset += event->u.key.key == MY_KEY_PAGE_DOWN ? page
+                                                                  : -page;
+        lv_clamp_scroll(lv);
+        lv_on_layout_changed(lv);
+        return MY_RET_OK;
+      }
+      return MY_RET_FAIL;
     default:
       return MY_RET_FAIL;
   }
@@ -345,6 +358,7 @@ my_widget_t* my_list_view_create(const my_allocator_t* allocator) {
     return NULL;
   }
   ((my_widget_t*)lv)->widget_type = "list_view";
+  ((my_widget_t*)lv)->focusable = true;
   return (my_widget_t*)lv;
 }
 

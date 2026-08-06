@@ -31,6 +31,8 @@ typedef struct my_text_area_t {
   size_t goal_col;          /**< target col for vertical moves */
   int32_t scroll_x;
   int32_t scroll_y;
+  struct my_undo_stack_t* undo; /**< user-edit history (M10a) */
+  bool applying_history;          /**< suppresses recording during undo/redo */
   size_t max_len;           /**< codepoints cap, 0 = unlimited */
   bool readonly;
   char* hint;               /**< owned, shown when empty and unfocused */

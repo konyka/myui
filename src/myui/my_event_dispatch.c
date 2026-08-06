@@ -52,6 +52,65 @@ static bool deliver(my_widget_t* target, const my_event_t* event) {
   return false;
 }
 
+/** @brief Depth-first traversal: next focusable (visible+enable) after w,
+ * wrapping around the tree. direction: +1 forward, -1 backward. */
+static my_widget_t* focus_step(my_widget_t* root, my_widget_t* current,
+                               int direction) {
+  my_widget_t* found = NULL;
+  my_widget_t* first = NULL;
+  my_widget_t* prev = NULL;
+  if (root == NULL) {
+    return NULL;
+  }
+  /* collect-walk: preorder via recursion-free loop using child index state
+   * kept on the stack of parent pointers (trees are small) */
+  {
+    /* simple recursive walk implemented iteratively with an explicit
+     * state: we walk using parent/child links only */
+    size_t i;
+    my_widget_t* order[256];
+    size_t count = 0;
+    /* stack-based preorder */
+    my_widget_t* stack[256];
+    size_t sp = 0;
+    stack[sp++] = root;
+    while (sp > 0 && count < 256) {
+      my_widget_t* n = stack[--sp];
+      size_t c = my_widget_child_count(n);
+      if (n->visible && n->enable && n->focusable) {
+        order[count++] = n;
+      }
+      /* push children in reverse so pop order matches tree order */
+      i = c;
+      while (i > 0 && sp < 256) {
+        stack[sp++] = my_widget_get_child(n, i - 1);
+        i--;
+      }
+    }
+    for (i = 0; i < count; i++) {
+      if (first == NULL) {
+        first = order[i];
+      }
+      if (order[i] == current) {
+        if (direction > 0) {
+          found = i + 1 < count ? order[i + 1] : NULL;
+        } else {
+          found = prev;
+        }
+        break;
+      }
+      prev = order[i];
+    }
+    if (found == NULL) {
+      /* wrap: forward -> first, backward -> last */
+      if (count > 0) {
+        found = direction > 0 ? first : order[count - 1];
+      }
+    }
+  }
+  return found;
+}
+
 /** @brief Nearest focusable widget at or above w (NULL when none). */
 static my_widget_t* nearest_focusable(my_widget_t* w) {
   while (w != NULL && !w->focusable) {
@@ -112,6 +171,23 @@ bool my_event_dispatch(my_event_dispatcher_t* dispatcher,
       dispatcher->grabbed = NULL;
       return target != NULL ? deliver(target, event) : false;
     case MY_EVENT_KEY_DOWN:
+      if (event->u.key.key == MY_KEY_TAB) {
+        bool consumed = dispatcher->focused != NULL
+                            ? deliver(dispatcher->focused, event)
+                            : false;
+        if (!consumed) {
+          int dir = (event->u.key.modifiers & MY_KEYMOD_SHIFT) != 0 ? -1 : 1;
+          my_widget_t* next = focus_step(dispatcher->root, dispatcher->focused,
+                                         dir);
+          if (next != NULL) {
+            set_focus(dispatcher, next);
+            return true;
+          }
+        }
+        return consumed;
+      }
+      return dispatcher->focused != NULL ? deliver(dispatcher->focused, event)
+                                         : false;
     case MY_EVENT_KEY_UP:
       return dispatcher->focused != NULL ? deliver(dispatcher->focused, event)
                                          : false;
