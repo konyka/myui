@@ -390,6 +390,35 @@ my_ret_t my_list_view_refresh(my_widget_t* list_view) {
   return MY_RET_OK;
 }
 
+my_ret_t my_list_view_invalidate_row_heights(my_widget_t* list_view) {
+  my_list_view_t* lv = (my_list_view_t*)list_view;
+  if (list_view == NULL) {
+    return MY_RET_INVALID_PARAMS;
+  }
+  if (lv->psum != NULL) {
+    my_darray_clear(lv->psum);
+    my_darray_push(lv->psum, (void*)0); /* keep the psum[0] = 0 invariant */
+  }
+  lv_on_layout_changed(lv);
+  return MY_RET_OK;
+}
+
+my_ret_t my_list_view_invalidate_row_height(my_widget_t* list_view,
+                                            size_t index) {
+  my_list_view_t* lv = (my_list_view_t*)list_view;
+  if (list_view == NULL) {
+    return MY_RET_INVALID_PARAMS;
+  }
+  if (lv->psum != NULL) {
+    /* keep psum[0..index] (heights of rows < index), drop the tail */
+    while (my_darray_size(lv->psum) > index + 1) {
+      my_darray_remove_at(lv->psum, my_darray_size(lv->psum) - 1);
+    }
+  }
+  lv_on_layout_changed(lv);
+  return MY_RET_OK;
+}
+
 my_ret_t my_list_view_set_scroll_offset(my_widget_t* list_view, int32_t offset) {
   my_list_view_t* lv = (my_list_view_t*)list_view;
   if (list_view == NULL) {

@@ -26,8 +26,10 @@
 - **M10a 撤销/重做 + 键盘导航** ✅ 已完成：my_undo_stack（文本补丁 + 打字/退格批合并，容量 100，程序 set_text 清栈）；edit/text_area Ctrl+Z/Y；Tab 焦点环、PageUp/Down 翻页、scroll_bar 键盘微调。
 - **M10b text_area word wrap** ✅ 已完成：视觉行缓存（编辑行局部重建、resize 全量、wrap off 零回归）；贪心折行（溢出空格前断开并消费 / 最后空格后断开 / 硬折，非 UAX#14）；Up/Down/Home/End 视觉行语义、`(row,col)`→视觉行二分查找、wrap 下禁水平滚动；XML `wrap` 属性 + MVVM wrap 绑定。bench（-O0，万行 ~80cp → 25843 视觉行）：载入+构建 1.57ms、1000 次视觉移动 0.10ms、滚动重绘 0.30ms/帧。
 - **M10c 盒式预降采样 + GL 真窗口** ✅ 已完成：soft draw_image 双线性模式缩放比 <0.5 时自动 2/4/8 档盒式预降采样（高频内容零混叠，代价 ~4x 纯双线性——质量特性非速度特性，结论写进 architecture.md）；PAL 窗口 `gl_enable` GL 挂载点（x11 EGL / wayland wl_egl_window，vsync swap interval 1，dummy/linux_fb 打桩）；`my_window_enable_gl` 一行切 GLES 渲染（帧末 swap、RESIZE 更新 viewport）；`MYUI_DEMO_GLES=1` demo 开关；`gl_window_smoke_test` x11/wayland 真窗口实跑通过（渲染 + swap 前 glReadPixels 像素断言 + 300ms 存活）。
+- **M10d GLES cap/join + 行高失效 + 收尾** ✅ 已完成：GLES ROUND cap（端点半圆 8 段三角扇）/ROUND join（顶点 lw/2 圆盘 8 段三角扇，覆盖规则同 soft），两后端描边能力对齐；`my_list_view_invalidate_row_height(s)` 变高行动态行高失效（全量重建 / index 起截断前缀和，滚动钳制 + 可视区 + 滚动条即时同步）；mock 顶点断言 + EGL 端点外像素读回；bench -L 全跑无回归。
+- **M10 完成**。
 
-## 性能基线汇总（M9 刷新，GCC 16，-O0 Debug，本机）
+## 性能基线汇总（M10d 刷新，GCC 16，-O0 Debug，本机）
 
 | 场景 | 数值 |
 |------|------|
@@ -41,4 +43,4 @@
 | list_view 万行滚动（固定/变高） | 0.002 ms/次（~22 行控件） |
 | 1051 控件构建 / relayout / 10 万 hit_test | 0.30 / 0.05 / 29.0 ms |
 
-- **M10+ 候选**：文字 shaping/Bidi、IME、INCR 增量剪贴板、GLES AA 与 round cap/join、变高行动态行高失效 API、UAX#14 断行、wrap 下撤销的视觉位置、两端对齐、stroke 关节单轮廓合并。**SDK 顺延**：iOS/HarmonyOS/Android/Web/win32/sdl2 port、Metal backend、FreeBSD/linux_fb 实机复核。x11 外部剪贴板获取、文字 shaping/Bidi、GLES draw_image 与 GLES AA、双线性缩放、变高列表与增量 diff、XML→C 生成器、滚动条拖拽、stroke 圆 cap/join。**待有 SDK 环境**：iOS(uikit)、HarmonyOS、Android、Web、win32/sdl2 port、Metal backend、FreeBSD/linux_fb 实机复核。
+- **M11+ 候选**：文字 shaping/Bidi、IME、INCR 增量剪贴板、UAX#14 断行、两端对齐（justify）、wrap 下撤销的视觉位置、盒式 pass 优化（滑动窗口分摊）、GLES AA、跨控件 undo 管理器、stroke 关节单轮廓合并。**SDK 顺延**：iOS/HarmonyOS/Android/Web/win32/sdl2 port、Metal backend、FreeBSD/linux_fb 实机复核。

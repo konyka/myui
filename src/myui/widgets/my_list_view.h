@@ -58,6 +58,21 @@ my_ret_t my_list_view_set_adapter(my_widget_t* list_view,
                                   my_list_adapter_t* adapter);
 /** @brief Re-read the adapter and refresh visible rows (data changed). */
 my_ret_t my_list_view_refresh(my_widget_t* list_view);
+/**
+ * @brief Variable-height mode: forget ALL measured row heights (M10d).
+ * The prefix-sum cache is dropped and refilled lazily from row 0; the
+ * visible range, scroll offset (clamped to the new content height) and
+ * scroll bar are refreshed immediately. Harmless in fixed-height mode.
+ */
+my_ret_t my_list_view_invalidate_row_heights(my_widget_t* list_view);
+/**
+ * @brief Variable-height mode: forget measured heights from `index`
+ * onward (e.g. the row at `index` changed height, M10d). The prefix-sum
+ * cache keeps rows < index and refills the tail lazily; visible range,
+ * scroll clamp and scroll bar refresh immediately.
+ */
+my_ret_t my_list_view_invalidate_row_height(my_widget_t* list_view,
+                                            size_t index);
 /** @brief Scroll offset in px (clamped to content). */
 my_ret_t my_list_view_set_scroll_offset(my_widget_t* list_view, int32_t offset);
 int32_t my_list_view_get_scroll_offset(my_widget_t* list_view);

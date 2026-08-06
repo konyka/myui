@@ -182,7 +182,7 @@ PAL port 矩阵：
 
 - `my_scroll_bar`：value [0,1] + page_size [0,1]（滑块长，min 16px）；滑块拖拽（grab）、轨道点击翻页；"changed" 事件。容器显式挂接：`my_list_view_set_scroll_bar(lv, bar)` / `my_text_area_set_scroll_bar(ta, bar)`——双向同步（容器滚动 → value/page_size 更新；bar 拖拽 → 容器 offset 更新，无事件回环）。
 - list_view 变高行：adapter vtable 增加 `row_height(index)`（NULL = 固定行高，M8b 行为零回归）。变高模式用**前缀和缓存**（darray 存累计高度，滚动到哪儿惰性算到哪儿）；总高在未测完全部行数前用"已测部分 + 未测部分×已见平均高"估算（滚动条位置轻微非线性，Android ListView 式常规取舍，头注释说明）；可视区间二分查找 + 前向累计，回收复用逻辑不变。
-- stroke 圆 cap/join：`my_vgcanvas_set_line_cap/join`（BUTT/ROUND、MITER/ROUND，入 save/restore 状态）。soft 实现为 lw/2 圆盘点（cap 取端点、join 取内部顶点），走覆盖率路径自动 AA；关节处相邻段与圆盘重叠区域对半透明描边有轻微过混合（接受并注释，合并单轮廓是 TODO）；GLES 端存状态不生效（TODO）。
+- stroke 圆 cap/join：`my_vgcanvas_set_line_cap/join`（BUTT/ROUND、MITER/ROUND，入 save/restore 状态）。soft 实现为 lw/2 圆盘点（cap 取端点、join 取内部顶点），走覆盖率路径自动 AA；关节处相邻段与圆盘重叠区域对半透明描边有轻微过混合（接受并注释，合并单轮廓是 TODO）；GLES 端 M9c 只存状态，M10d 已补齐（见下）。
 
 ## ui2c 与剪贴板协议收尾（M9d）
 
@@ -207,3 +207,8 @@ PAL port 矩阵：
 - **盒式预降采样**（soft draw_image，双线性模式自动生效）：缩放比 < 0.5 时先按 2/4/8 整数档（取使剩余比例 ≤ 1 的最大档，每轴独立）做盒式平均到临时位图，再走双线性到目标。盒式平均按 straight-alpha 各通道独立求均值（半透明边缘与预乘滤波有轻微偏差，已注释）；边缘不足一档的块只平均有效像素。bench（2000x1500→400x300，-O0）：nearest 0.71ms / 纯双线性 5.09ms / 盒式+双线性 28.93ms——**这是质量特性不是速度特性**：直接双线性只采目标×4 像素 O(dst)，盒式必须读完整源图 O(src)；换来的是高频内容零混叠（64x64 棋盘缩 8x8 后全部 ≈127 中灰，nearest 仍有硬 0/255）。嵌入式继续建议 NEAREST。
 - **GL 窗口挂载**：窗口 vtable 新增 `gl_enable` → `my_pal_gl_t*`（`make_current`/`swap_buffers`/`get_size`/`destroy`；句柄归窗口所有，提前释放双重安全——见 porting.md）。x11：`eglGetDisplay` + window surface；wayland：`wl_egl_window_create`（resize 同步 `wl_egl_window_resize`）+ `eglGetPlatformDisplay(WAYLAND)`；两 port 均 pal 级懒初始化共享 EGLDisplay、swap interval 1（wayland 由 mesa 经 frame 回调节流，vsync 语义保持）。dummy/linux_fb 打桩 NULL。CMake 探测 `egl`（+`wayland-egl`）定义 `MYUI_PAL_GL_EGL`，缺库自动回落。
 - **集成点**：`my_window_enable_gl(win)` 一行切换——建 gles2 vgcanvas（失败回落 soft）、paint 帧末 swap、RESIZE 更新 GL viewport。demo：`MYUI_DEMO_GLES=1`（demo_hello/demo_widgets）。冒烟 `gl_window_smoke_test`（有显示环境时实跑：渲染→swap 前 glReadPixels 像素断言→300ms 定时退出；无环境 skip），x11/wayland 均实跑通过。
+
+## GLES round cap/join 与行高失效（M10d）
+
+- **GLES 描边 cap/join 补齐**（与 soft 几何对齐）：stroke 折线本就是法线扩展四边形（与 soft 同几何），本期补——ROUND cap = 端点半圆三角扇（8 段，沿端点切线外凸，退化线段回落整圆盘）；ROUND join = 顶点半径 lw/2 圆盘三角扇（8 段，覆盖规则与 soft 一致：`i+1 < count`——开放折线末端也有盘，闭合轮廓顶点 0 无盘）。cap/join 入 gles state（save/restore 有效）。GLES 无 AA，边缘为硬边（几何扇近似圆）。至此两后端 cap/join 能力对齐：BUTT/MITER/ROUND 全支持，差异仅剩 soft 的覆盖率 AA。
+- **变高行动态行高失效**：`my_list_view_invalidate_row_heights(list)`（丢弃全部已测行高，psum 清回 [0]）与 `my_list_view_invalidate_row_height(list, index)`（psum 截断到 index 之后，前缀已测值保留，尾部惰性重算）。两者立即：钳制 scroll_offset 到新（估算）总高、重建可视行、同步滚动条。典型场景：行内容更新导致行高变化后调用 index 版；全局字号/密度切换调全量版。

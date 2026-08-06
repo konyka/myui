@@ -26,6 +26,8 @@ typedef struct mock_gl_t {
   int32_t last_draw_count;
   float last_uniform_color[4];
   float first_xy[6]; /* first 3 vertices of the LAST draw call */
+  float all_xy[4096]; /* all vertices of the LAST draw call (clipped) */
+  int32_t all_count;  /* floats stored in all_xy */
 } mock_gl_t;
 
 static void mock_viewport(void* ctx, int32_t w, int32_t h) {
@@ -111,6 +113,8 @@ static void mock_draw_arrays(void* ctx, uint32_t p, const float* xy,
   for (i = 0; i < 6 && i < count * 2; i++) {
     m->first_xy[i] = xy[i];
   }
+  m->all_count = count * 2 < 4096 ? count * 2 : 4096;
+  memcpy(m->all_xy, xy, (size_t)m->all_count * sizeof(float));
 }
 
 static uint32_t mock_create_texture(void* ctx, const uint8_t* alpha, int32_t w,
@@ -283,6 +287,108 @@ static void test_stroke_polyline_segments(void) {
   my_vgcanvas_destroy(vg);
 }
 
+/* ---------------- round cap/join (M10d) ---------------- */
+
+static bool mock_has_vertex(const mock_gl_t* m, float x, float y) {
+  int32_t i;
+  for (i = 0; i + 1 < m->all_count; i += 2) {
+    if (m->all_xy[i] > x - 0.01f && m->all_xy[i] < x + 0.01f &&
+        m->all_xy[i + 1] > y - 0.01f && m->all_xy[i + 1] < y + 0.01f) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static void test_round_cap_adds_semicircle_fans(void) {
+  mock_gl_t gl;
+  my_vgcanvas_t* vg;
+  mock_gl_init(&gl);
+  vg = my_vgcanvas_gles2_create_with_gl(NULL, 100, 80, &gl.gl);
+
+  /* baseline: butt cap, 1 segment = 2 triangles = 6 verts */
+  my_vgcanvas_begin_frame(vg, NULL);
+  my_vgcanvas_set_line_width(vg, 4.0f);
+  my_vgcanvas_begin_path(vg);
+  my_vgcanvas_move_to(vg, 10, 10);
+  my_vgcanvas_line_to(vg, 50, 10);
+  my_vgcanvas_stroke(vg);
+  TEST_ASSERT_EQ_INT(gl.last_draw_count, 6);
+
+  /* round cap: + 2 semicircle fans x 8 triangles x 3 verts = 48 */
+  my_vgcanvas_set_line_cap(vg, MY_LINE_CAP_ROUND);
+  my_vgcanvas_begin_path(vg);
+  my_vgcanvas_move_to(vg, 10, 10);
+  my_vgcanvas_line_to(vg, 50, 10);
+  my_vgcanvas_stroke(vg);
+  TEST_ASSERT_EQ_INT(gl.last_draw_count, 6 + 48);
+  /* arc tip lw/2 = 2px beyond each endpoint along the line direction */
+  TEST_ASSERT(mock_has_vertex(&gl, 52.0f, 10.0f)); /* right cap tip */
+  TEST_ASSERT(mock_has_vertex(&gl, 8.0f, 10.0f));  /* left cap tip */
+  /* fan centers at the endpoints */
+  TEST_ASSERT(mock_has_vertex(&gl, 50.0f, 10.0f));
+  TEST_ASSERT(mock_has_vertex(&gl, 10.0f, 10.0f));
+
+  my_vgcanvas_destroy(vg);
+}
+
+static void test_round_join_adds_vertex_disks(void) {
+  mock_gl_t gl;
+  my_vgcanvas_t* vg;
+  mock_gl_init(&gl);
+  vg = my_vgcanvas_gles2_create_with_gl(NULL, 100, 80, &gl.gl);
+
+  my_vgcanvas_begin_frame(vg, NULL);
+  my_vgcanvas_set_line_width(vg, 4.0f);
+  my_vgcanvas_set_line_join(vg, MY_LINE_JOIN_ROUND);
+  my_vgcanvas_begin_path(vg);
+  my_vgcanvas_move_to(vg, 10, 10);
+  my_vgcanvas_line_to(vg, 50, 10);
+  my_vgcanvas_line_to(vg, 50, 50);
+  my_vgcanvas_stroke(vg);
+  /* soft parity: disks at every vertex except vertex 0 (i+1 < count),
+   * so an open 3-point polyline gets disks at v1 AND v2:
+   * 2 segments (12) + 2 disks (2 x 24) = 60 */
+  TEST_ASSERT_EQ_INT(gl.last_draw_count, 60);
+  /* disk fan centers at v1 and the final vertex */
+  TEST_ASSERT(mock_has_vertex(&gl, 50.0f, 10.0f));
+  TEST_ASSERT(mock_has_vertex(&gl, 50.0f, 50.0f));
+
+  /* closed contour: no disk at vertex 0 (soft parity), disks at v1..v2 */
+  gl.draw_calls = 0;
+  my_vgcanvas_begin_path(vg);
+  my_vgcanvas_move_to(vg, 10, 10);
+  my_vgcanvas_line_to(vg, 50, 10);
+  my_vgcanvas_line_to(vg, 50, 50);
+  my_vgcanvas_close_path(vg);
+  my_vgcanvas_stroke(vg);
+  /* 3 segments (18) + 2 disks (48) = 66 */
+  TEST_ASSERT_EQ_INT(gl.last_draw_count, 66);
+
+  my_vgcanvas_destroy(vg);
+}
+
+static void test_cap_join_state_saved_restored(void) {
+  mock_gl_t gl;
+  my_vgcanvas_t* vg;
+  mock_gl_init(&gl);
+  vg = my_vgcanvas_gles2_create_with_gl(NULL, 100, 80, &gl.gl);
+
+  my_vgcanvas_begin_frame(vg, NULL);
+  my_vgcanvas_set_line_width(vg, 4.0f);
+  my_vgcanvas_save(vg);
+  my_vgcanvas_set_line_cap(vg, MY_LINE_CAP_ROUND);
+  my_vgcanvas_restore(vg);
+  /* back to BUTT after restore: 1 segment = 6 verts */
+  my_vgcanvas_begin_path(vg);
+  my_vgcanvas_move_to(vg, 10, 10);
+  my_vgcanvas_line_to(vg, 50, 10);
+  my_vgcanvas_stroke(vg);
+  TEST_ASSERT_EQ_INT(gl.last_draw_count, 6);
+
+  my_vgcanvas_destroy(vg);
+}
+
 static void test_draw_text_not_supported(void) {
   mock_gl_t gl;
   my_vgcanvas_t* vg;
@@ -403,6 +509,9 @@ MYTEST_MAIN_BEGIN()
   MYTEST_RUN(test_stroke_rect_vertex_count);
   MYTEST_RUN(test_path_triangle_even_odd_spans);
   MYTEST_RUN(test_stroke_polyline_segments);
+  MYTEST_RUN(test_round_cap_adds_semicircle_fans);
+  MYTEST_RUN(test_round_join_adds_vertex_disks);
+  MYTEST_RUN(test_cap_join_state_saved_restored);
   MYTEST_RUN(test_draw_text_not_supported);
   MYTEST_RUN(test_draw_image_mock);
   MYTEST_RUN(test_draw_text_with_font);

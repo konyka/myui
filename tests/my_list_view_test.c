@@ -3,6 +3,7 @@
  * @brief Unit tests for the virtualized list_view (mock adapter).
  */
 #include "myui/widgets/my_list_view.h"
+#include "myui/widgets/my_scroll_bar.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -154,6 +155,144 @@ static void test_drag_scroll(void) {
   my_widget_unref(lv);
 }
 
+/* ---------------- variable row heights + invalidation (M10d) ---------------- */
+
+typedef struct var_adapter_t {
+  my_list_adapter_t base;
+  size_t count;
+  int32_t* heights;     /**< per-row heights (mutable by the test) */
+  size_t* height_calls; /**< per-row row_height() call counts */
+} var_adapter_t;
+
+static size_t var_get_count(my_list_adapter_t* adapter) {
+  return ((var_adapter_t*)adapter)->count;
+}
+
+static my_widget_t* var_create_row(my_list_adapter_t* adapter) {
+  (void)adapter;
+  return my_widget_create(NULL, "row");
+}
+
+static void var_bind_row(my_list_adapter_t* adapter, my_widget_t* row,
+                         size_t index) {
+  (void)adapter;
+  (void)row;
+  (void)index;
+}
+
+static int32_t var_row_height(my_list_adapter_t* adapter, size_t index) {
+  var_adapter_t* a = (var_adapter_t*)adapter;
+  a->height_calls[index]++;
+  return a->heights[index];
+}
+
+static const my_list_adapter_vtable_t VAR_ADAPTER_VTABLE = {
+    var_get_count, var_create_row, var_bind_row, var_row_height};
+
+static void var_adapter_init(var_adapter_t* a, size_t count, int32_t* heights,
+                             size_t* height_calls) {
+  memset(a, 0, sizeof(*a));
+  memset(height_calls, 0, count * sizeof(size_t));
+  a->base.vtable = &VAR_ADAPTER_VTABLE;
+  a->count = count;
+  a->heights = heights;
+  a->height_calls = height_calls;
+}
+
+static void test_invalidate_row_heights_rebuilds_visible(void) {
+  int32_t heights[100];
+  size_t calls[100];
+  var_adapter_t a;
+  my_widget_t* lv;
+  size_t i;
+  for (i = 0; i < 100; i++) {
+    heights[i] = 20;
+  }
+  var_adapter_init(&a, 100, heights, calls);
+  lv = my_list_view_create(NULL);
+  my_widget_set_rect(lv, &(my_rect_t){0, 0, 200, 100});
+  my_list_view_set_adapter(lv, (my_list_adapter_t*)&a);
+  TEST_ASSERT(my_widget_child_count(lv) > 0);
+  TEST_ASSERT_EQ_INT(my_widget_get_child(lv, 0)->rect.h, 20);
+
+  /* every row grows 20 -> 40: full invalidation rebuilds visible rows */
+  for (i = 0; i < 100; i++) {
+    heights[i] = 40;
+  }
+  my_list_view_invalidate_row_heights(lv);
+  TEST_ASSERT(my_widget_child_count(lv) > 0);
+  TEST_ASSERT_EQ_INT(my_widget_get_child(lv, 0)->rect.h, 40);
+
+  my_widget_unref(lv);
+}
+
+static void test_invalidate_row_height_truncates_tail(void) {
+  int32_t heights[100];
+  size_t calls[100];
+  var_adapter_t a;
+  my_list_view_t* l;
+  my_widget_t* lv;
+  size_t i, calls0;
+  for (i = 0; i < 100; i++) {
+    heights[i] = 20;
+  }
+  var_adapter_init(&a, 100, heights, calls);
+  lv = my_list_view_create(NULL);
+  l = (my_list_view_t*)lv;
+  my_widget_set_rect(lv, &(my_rect_t){0, 0, 200, 100});
+  my_list_view_set_adapter(lv, (my_list_adapter_t*)&a);
+
+  /* measure a good chunk of the prefix-sum cache (scroll to row ~20) */
+  my_list_view_set_scroll_offset(lv, 400);
+  TEST_ASSERT(my_darray_size(l->psum) >= 20);
+  calls0 = calls[0];
+  TEST_ASSERT(calls0 > 0);
+
+  /* row 5 grows: index invalidation keeps rows < 5 measured */
+  heights[5] = 60;
+  my_list_view_invalidate_row_height(lv, 5);
+  TEST_ASSERT_EQ_INT(calls[0], (int)calls0); /* prefix not re-measured */
+  TEST_ASSERT(my_darray_size(l->psum) >= 6);
+  TEST_ASSERT_EQ_INT((int64_t)(size_t)my_darray_get(l->psum, 5), 100);
+  TEST_ASSERT_EQ_INT((int64_t)(size_t)my_darray_get(l->psum, 6), 160);
+
+  my_widget_unref(lv);
+}
+
+static void test_invalidate_clamps_scroll_after_shrink(void) {
+  int32_t heights[100];
+  size_t calls[100];
+  var_adapter_t a;
+  my_widget_t* lv;
+  my_widget_t* bar;
+  size_t i;
+  for (i = 0; i < 100; i++) {
+    heights[i] = 20;
+  }
+  var_adapter_init(&a, 100, heights, calls);
+  lv = my_list_view_create(NULL);
+  my_widget_set_rect(lv, &(my_rect_t){0, 0, 200, 100});
+  my_list_view_set_adapter(lv, (my_list_adapter_t*)&a);
+  bar = my_scroll_bar_create(NULL);
+  my_list_view_set_scroll_bar(lv, bar);
+
+  /* scroll to the very bottom (content 2000, max offset 1900) */
+  my_list_view_set_scroll_offset(lv, 10000);
+  TEST_ASSERT_EQ_INT(my_list_view_get_scroll_offset(lv), 1900);
+
+  /* all rows shrink 20 -> 5: content 500, max offset 400 -> clamp back */
+  for (i = 0; i < 100; i++) {
+    heights[i] = 5;
+  }
+  my_list_view_invalidate_row_heights(lv);
+  TEST_ASSERT_EQ_INT(my_list_view_get_scroll_offset(lv), 400);
+  /* scroll bar re-synced to the clamped position (bottom = 1.0) */
+  TEST_ASSERT(my_scroll_bar_get_value(bar) > 0.99f);
+
+  my_widget_unref(bar);
+  my_widget_unref(lv);
+}
+
 static void test_empty_list(void) {
   mock_adapter_t a;
   my_widget_t* lv;
@@ -199,5 +338,8 @@ MYTEST_MAIN_BEGIN()
   MYTEST_RUN(test_wheel_scrolls);
   MYTEST_RUN(test_drag_scroll);
   MYTEST_RUN(test_empty_list);
+  MYTEST_RUN(test_invalidate_row_heights_rebuilds_visible);
+  MYTEST_RUN(test_invalidate_row_height_truncates_tail);
+  MYTEST_RUN(test_invalidate_clamps_scroll_after_shrink);
   MYTEST_RUN(test_no_leak_with_debug_allocator);
 MYTEST_MAIN_END()

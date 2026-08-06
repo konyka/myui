@@ -60,6 +60,8 @@ typedef struct gles_state_t {
   my_color_t fill_color;
   my_color_t stroke_color;
   float line_width;
+  my_line_cap_t line_cap;
+  my_line_join_t line_join;
   float tx;
   float ty;
   my_rect_t clip;
@@ -494,6 +496,33 @@ static void vbuf_segment(vbuf_t* b, float x0, float y0, float x1, float y1,
   vbuf_push(b, x0 - nx, y0 - ny);
 }
 
+/** @brief Semicircle fan (round cap): 8 triangles sweeping pi from a0. */
+static void vbuf_semicircle_fan(vbuf_t* b, float cx, float cy, float r,
+                                float a0) {
+  int i;
+  for (i = 0; i < 8; i++) {
+    float t0 = a0 + (float)i * 3.14159265f / 8.0f;
+    float t1 = a0 + (float)(i + 1) * 3.14159265f / 8.0f;
+    vbuf_push(b, cx, cy);
+    vbuf_push(b, cx + r * cosf(t0), cy + r * sinf(t0));
+    vbuf_push(b, cx + r * cosf(t1), cy + r * sinf(t1));
+  }
+}
+
+/** @brief Round cap at an open-contour endpoint: semicircle fan bulging
+ * outward along the endpoint tangent (full disk for degenerate segments).
+ * dx/dy = segment direction at the endpoint (need not be normalized). */
+static void vbuf_round_cap(vbuf_t* b, float cx, float cy, float dx, float dy,
+                           float half_w) {
+  float len = sqrtf(dx * dx + dy * dy);
+  if (len < 0.001f) {
+    vbuf_circle_fan(b, cx, cy, half_w, 8);
+    return;
+  }
+  /* the semicircle is centered on the outward direction (+dx/+dy) */
+  vbuf_semicircle_fan(b, cx, cy, half_w, atan2f(dy, dx) - 3.14159265f / 2.0f);
+}
+
 static my_ret_t gles_stroke(my_vgcanvas_t* vg) {
   my_vgcanvas_gles2_t* s = (my_vgcanvas_gles2_t*)vg;
   float half_w = s->state.line_width / 2.0f;
@@ -505,15 +534,29 @@ static my_ret_t gles_stroke(my_vgcanvas_t* vg) {
   vbuf_reset(&b, s);
   for (ci = 0; ci < s->contour_count; ci++) {
     const contour_t* c = &s->contours[ci];
-    for (i = 0; i + 1 < c->count; i++) {
-      vbuf_segment(&b, s->points[c->start + i].x, s->points[c->start + i].y,
-                   s->points[c->start + i + 1].x, s->points[c->start + i + 1].y,
-                   half_w);
+    size_t edges = c->count > 1 ? (c->closed ? c->count : c->count - 1) : 0;
+    if (c->count > 1 && !c->closed &&
+        s->state.line_cap == MY_LINE_CAP_ROUND) {
+      /* round caps on the two endpoints (aligned with soft, M9c) */
+      size_t last = c->start + c->count - 1;
+      vbuf_round_cap(&b, s->points[c->start].x, s->points[c->start].y,
+                     s->points[c->start].x - s->points[c->start + 1].x,
+                     s->points[c->start].y - s->points[c->start + 1].y, half_w);
+      vbuf_round_cap(&b, s->points[last].x, s->points[last].y,
+                     s->points[last].x - s->points[last - 1].x,
+                     s->points[last].y - s->points[last - 1].y, half_w);
     }
-    if (c->closed && c->count > 1) {
-      vbuf_segment(&b, s->points[c->start + c->count - 1].x,
-                   s->points[c->start + c->count - 1].y, s->points[c->start].x,
-                   s->points[c->start].y, half_w);
+    for (i = 0; i < edges; i++) {
+      size_t j = (i + 1) % c->count;
+      vbuf_segment(&b, s->points[c->start + i].x, s->points[c->start + i].y,
+                   s->points[c->start + j].x, s->points[c->start + j].y,
+                   half_w);
+      /* round joins: half-lw disk at each interior vertex (same coverage
+       * rule as soft: not at vertex 0 of closed contours) */
+      if (s->state.line_join == MY_LINE_JOIN_ROUND && i + 1 < c->count) {
+        vbuf_circle_fan(&b, s->points[c->start + j].x,
+                        s->points[c->start + j].y, half_w, 8);
+      }
     }
   }
   if (b.count > 0) {
@@ -523,14 +566,12 @@ static my_ret_t gles_stroke(my_vgcanvas_t* vg) {
 }
 
 static my_ret_t gles_set_line_cap(my_vgcanvas_t* vg, my_line_cap_t cap) {
-  (void)vg;
-  (void)cap; /* stored-only for now: GLES round cap/join is a TODO */
+  ((my_vgcanvas_gles2_t*)vg)->state.line_cap = cap;
   return MY_RET_OK;
 }
 
 static my_ret_t gles_set_line_join(my_vgcanvas_t* vg, my_line_join_t join) {
-  (void)vg;
-  (void)join;
+  ((my_vgcanvas_gles2_t*)vg)->state.line_join = join;
   return MY_RET_OK;
 }
 
@@ -776,6 +817,8 @@ my_vgcanvas_t* my_vgcanvas_gles2_create_with_gl(const my_allocator_t* allocator,
   s->state.fill_color = my_color_rgba(0, 0, 0, 255);
   s->state.stroke_color = my_color_rgba(0, 0, 0, 255);
   s->state.line_width = 1.0f;
+  s->state.line_cap = MY_LINE_CAP_BUTT;
+  s->state.line_join = MY_LINE_JOIN_MITER;
   s->state.font = NULL;
   s->state.font_size = 16;
   s->state.clip = my_rect_init(0, 0, width, height);

@@ -158,6 +158,36 @@ static void test_gles2_real_render(void) {
     TEST_ASSERT(px[0] > 200 && px[1] > 200 && px[2] < 60); /* yellow */
   }
 
+  /* round line caps (M10d): pixel beyond the endpoint is lit only with
+   * ROUND cap (line (16,32)->(48,32), lw 8, cap radius 4) */
+  {
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+    my_vgcanvas_begin_frame(vg, NULL);
+    my_vgcanvas_set_stroke_color(vg, my_color_rgb(255, 255, 255));
+    my_vgcanvas_set_line_width(vg, 8.0f);
+    my_vgcanvas_set_line_cap(vg, MY_LINE_CAP_BUTT);
+    my_vgcanvas_begin_path(vg);
+    my_vgcanvas_move_to(vg, 16, 32);
+    my_vgcanvas_line_to(vg, 48, 32);
+    my_vgcanvas_stroke(vg);
+    my_vgcanvas_end_frame(vg);
+    glFinish();
+    glReadPixels(50, 64 - 1 - 32, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, px);
+    TEST_ASSERT(px[0] < 60); /* BUTT: nothing beyond x=48 */
+
+    my_vgcanvas_begin_frame(vg, NULL);
+    my_vgcanvas_set_line_cap(vg, MY_LINE_CAP_ROUND);
+    my_vgcanvas_begin_path(vg);
+    my_vgcanvas_move_to(vg, 16, 32);
+    my_vgcanvas_line_to(vg, 48, 32);
+    my_vgcanvas_stroke(vg);
+    my_vgcanvas_end_frame(vg);
+    glFinish();
+    glReadPixels(50, 64 - 1 - 32, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, px);
+    TEST_ASSERT(px[0] > 200); /* ROUND: cap extends to x=52 */
+  }
+
   my_vgcanvas_destroy(vg);
 }
 
