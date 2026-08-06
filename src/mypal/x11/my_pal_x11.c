@@ -68,6 +68,7 @@ typedef struct x11_pal_t {
   EGLDisplay egl_dpy; /**< shared EGL display (lazy, EGL_NO_DISPLAY off) */
   EGLConfig egl_cfg;
   int egl_state; /**< 0 = untried, 1 = ready, -1 = unavailable */
+  bool egl_msaa; /**< the shared config carries EGL_SAMPLES=4 (M11c) */
 #endif
 } x11_pal_t;
 
@@ -277,9 +278,15 @@ typedef struct x11_gl_t {
 
 /** @brief Lazy one-time EGL display/config init (shared by all windows;
  * never eglTerminate'd -- the EGL display outlives individual windows
- * and is reclaimed at process exit). */
+ * and is reclaimed at process exit). Config negotiation (M11c): prefer
+ * EGL_SAMPLES=4 (MSAA), fall back to a plain config when unavailable. */
 static bool x11_egl_init(x11_pal_t* p) {
   EGLint major = 0, minor = 0, n = 0;
+  EGLint cfg_msaa_attrs[] = {EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
+                             EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
+                             EGL_RED_SIZE, 8, EGL_GREEN_SIZE, 8, EGL_BLUE_SIZE,
+                             8, EGL_SAMPLE_BUFFERS, 1, EGL_SAMPLES, 4,
+                             EGL_NONE};
   EGLint cfg_attrs[] = {EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
                         EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
                         EGL_RED_SIZE, 8, EGL_GREEN_SIZE, 8, EGL_BLUE_SIZE, 8,
@@ -290,8 +297,17 @@ static bool x11_egl_init(x11_pal_t* p) {
   p->egl_dpy = eglGetDisplay((EGLNativeDisplayType)p->display);
   if (p->egl_dpy == EGL_NO_DISPLAY ||
       !eglInitialize(p->egl_dpy, &major, &minor) ||
-      !eglBindAPI(EGL_OPENGL_ES_API) ||
-      !eglChooseConfig(p->egl_dpy, cfg_attrs, &p->egl_cfg, 1, &n) || n < 1) {
+      !eglBindAPI(EGL_OPENGL_ES_API)) {
+    p->egl_state = -1;
+    return false;
+  }
+  if (eglChooseConfig(p->egl_dpy, cfg_msaa_attrs, &p->egl_cfg, 1, &n) &&
+      n > 0) {
+    p->egl_msaa = true;
+  } else if (eglChooseConfig(p->egl_dpy, cfg_attrs, &p->egl_cfg, 1, &n) &&
+             n > 0) {
+    p->egl_msaa = false; /* no MSAA config: documented fallback */
+  } else {
     p->egl_state = -1;
     return false;
   }
@@ -323,6 +339,10 @@ static my_ret_t x11_gl_get_size(my_pal_gl_t* gl, int32_t* w, int32_t* h) {
   return MY_RET_OK;
 }
 
+static bool x11_gl_has_multisample(my_pal_gl_t* gl) {
+  return ((x11_gl_t*)gl)->win->pal->egl_msaa;
+}
+
 static void x11_gl_destroy(my_pal_gl_t* gl) {
   x11_gl_t* g = (x11_gl_t*)gl;
   if (g != NULL) {
@@ -336,7 +356,8 @@ static void x11_gl_destroy(my_pal_gl_t* gl) {
 }
 
 static const my_pal_gl_vtable_t s_x11_gl_vtable = {
-    x11_gl_make_current, x11_gl_swap, x11_gl_get_size, x11_gl_destroy};
+    x11_gl_make_current, x11_gl_swap, x11_gl_get_size,
+    x11_gl_has_multisample, x11_gl_destroy};
 
 static my_pal_gl_t* x11_win_gl_enable(my_pal_window_t* win) {
   x11_window_t* w = (x11_window_t*)win;
@@ -370,6 +391,8 @@ static my_pal_gl_t* x11_win_gl_enable(my_pal_window_t* win) {
   w->gl = (my_pal_gl_t*)g;
   if (x11_gl_make_current(w->gl) == MY_RET_OK) {
     eglSwapInterval(p->egl_dpy, 1); /* vsync */
+    /* MSAA (M11c) is surface-driven on ES2 (no core toggle); the config
+     * already carries EGL_SAMPLES=4 when egl_msaa is true */
   }
   return w->gl;
 }

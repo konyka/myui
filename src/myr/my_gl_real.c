@@ -9,6 +9,7 @@
 #ifdef MYUI_HAS_GLES2
 
 #include <GLES2/gl2.h>
+#include <GLES2/gl2ext.h> /* GL_MULTISAMPLE_EXT (ES2 core has no toggle) */
 
 static void real_viewport(void* ctx, int32_t w, int32_t h) {
   (void)ctx;
@@ -178,6 +179,20 @@ static void real_draw_textured(void* ctx, uint32_t program, uint32_t texture,
   glDisableVertexAttribArray((GLuint)uv_loc);
 }
 
+static void real_set_multisample(void* ctx, bool on) {
+  (void)ctx;
+  /* ES2 core has no GL_MULTISAMPLE toggle; the EXT constant shares the
+   * desktop value (0x809D). Drivers without the EXT flag
+   * GL_INVALID_ENUM -- swallow it: AA state stays surface-driven (the
+   * EGL config decides, see M11c config negotiation). */
+  if (on) {
+    glEnable(GL_MULTISAMPLE_EXT);
+  } else {
+    glDisable(GL_MULTISAMPLE_EXT);
+  }
+  (void)glGetError();
+}
+
 const my_gl_t* my_gl_real_default(void) {
   static const my_gl_t real = {real_viewport,      real_enable_scissor,
                                real_scissor,       real_clear_color,
@@ -186,7 +201,8 @@ const my_gl_t* my_gl_real_default(void) {
                                real_uniform2f,     real_uniform4f,
                                real_draw_arrays,   real_create_texture,
                                real_create_texture_rgba, real_delete_texture,
-                               real_draw_textured, NULL};
+                               real_draw_textured, real_set_multisample,
+                               NULL};
   return &real;
 }
 

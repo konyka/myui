@@ -23,13 +23,17 @@ static EGLDisplay g_dpy = EGL_NO_DISPLAY;
 static EGLContext g_ctx = EGL_NO_CONTEXT;
 static EGLSurface g_surf = EGL_NO_SURFACE;
 
-static int egl_setup(void) {
+static int egl_setup(int samples) {
   EGLint major, minor, n;
   EGLConfig cfg;
-  EGLint cfg_attrs[] = {EGL_SURFACE_TYPE, EGL_PBUFFER_BIT,
+  EGLint cfg_plain[] = {EGL_SURFACE_TYPE, EGL_PBUFFER_BIT,
                         EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
                         EGL_RED_SIZE, 8, EGL_GREEN_SIZE, 8, EGL_BLUE_SIZE, 8,
                         EGL_NONE};
+  EGLint cfg_msaa[] = {EGL_SURFACE_TYPE, EGL_PBUFFER_BIT,
+                       EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
+                       EGL_RED_SIZE, 8, EGL_GREEN_SIZE, 8, EGL_BLUE_SIZE, 8,
+                       EGL_SAMPLE_BUFFERS, 1, EGL_SAMPLES, 4, EGL_NONE};
   EGLint surf_attrs[] = {EGL_WIDTH, 64, EGL_HEIGHT, 64, EGL_NONE};
   EGLint ctx_attrs[] = {EGL_CONTEXT_CLIENT_VERSION, 2, EGL_NONE};
 
@@ -45,7 +49,11 @@ static int egl_setup(void) {
   if (!eglBindAPI(EGL_OPENGL_ES_API)) {
     return -1;
   }
-  if (!eglChooseConfig(g_dpy, cfg_attrs, &cfg, 1, &n) || n < 1) {
+  if (samples > 0) {
+    if (!eglChooseConfig(g_dpy, cfg_msaa, &cfg, 1, &n) || n < 1) {
+      return -2; /* no MSAA pbuffer config: caller skips */
+    }
+  } else if (!eglChooseConfig(g_dpy, cfg_plain, &cfg, 1, &n) || n < 1) {
     return -1;
   }
   g_ctx = eglCreateContext(g_dpy, cfg, EGL_NO_CONTEXT, ctx_attrs);
@@ -226,11 +234,63 @@ static void test_gles2_real_render(void) {
   my_vgcanvas_destroy(vg);
 }
 
+static void test_gles2_msaa_edge(void) {
+  my_vgcanvas_t* vg;
+  int x, y, intermediate = 0;
+  GLubyte px[4];
+
+  vg = my_vgcanvas_gles2_create(NULL, 64, 64);
+  TEST_ASSERT_NOT_NULL(vg);
+  if (vg == NULL) {
+    return;
+  }
+  my_vgcanvas_gles2_set_antialias(vg, true);
+  glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+  glClear(GL_COLOR_BUFFER_BIT);
+  my_vgcanvas_begin_frame(vg, NULL);
+  my_vgcanvas_set_stroke_color(vg, my_color_rgb(255, 255, 255));
+  my_vgcanvas_set_line_width(vg, 2.0f);
+  /* diagonal stroke: quad edges cross pixels at subpixel positions
+   * (fill would emit pixel-snapped spans -- useless for MSAA testing) */
+  my_vgcanvas_begin_path(vg);
+  my_vgcanvas_move_to(vg, 4.5f, 60.0f);
+  my_vgcanvas_line_to(vg, 60.0f, 4.5f);
+  my_vgcanvas_stroke(vg);
+  my_vgcanvas_end_frame(vg);
+  glFinish();
+  TEST_ASSERT(glGetError() == GL_NO_ERROR);
+  /* scan the diagonal band x+y ~ 64 for partially covered pixels */
+  for (y = 4; y < 60; y++) {
+    for (x = 4; x < 60; x++) {
+      if (x + y >= 60 && x + y <= 68) {
+        glReadPixels(x, 64 - 1 - y, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, px);
+        if (px[0] > 10 && px[0] < 245) {
+          intermediate = 1;
+        }
+      }
+    }
+  }
+  TEST_ASSERT(intermediate); /* MSAA: edge pixels have coverage values */
+  my_vgcanvas_destroy(vg);
+}
+
 MYTEST_MAIN_BEGIN()
-  if (egl_setup() != 0) {
-    fprintf(stdout, "SKIP: no usable EGL context\n");
-  } else {
-    MYTEST_RUN(test_gles2_real_render);
-    egl_teardown();
+  {
+    int rc = egl_setup(0);
+    if (rc != 0) {
+      fprintf(stdout, "SKIP: no usable EGL context\n");
+    } else {
+      MYTEST_RUN(test_gles2_real_render);
+      egl_teardown();
+    }
+  }
+  {
+    int rc = egl_setup(4);
+    if (rc != 0) {
+      fprintf(stdout, "SKIP: no MSAA pbuffer config\n");
+    } else {
+      MYTEST_RUN(test_gles2_msaa_edge);
+      egl_teardown();
+    }
   }
 MYTEST_MAIN_END()

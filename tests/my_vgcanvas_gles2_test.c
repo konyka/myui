@@ -28,6 +28,8 @@ typedef struct mock_gl_t {
   float first_xy[6]; /* first 3 vertices of the LAST draw call */
   float all_xy[4096]; /* all vertices of the LAST draw call (clipped) */
   int32_t all_count;  /* floats stored in all_xy */
+  int multisample_calls;
+  bool multisample_on;
 } mock_gl_t;
 
 static void mock_viewport(void* ctx, int32_t w, int32_t h) {
@@ -156,6 +158,12 @@ static void mock_draw_textured(void* ctx, uint32_t p, uint32_t tex,
   }
 }
 
+static void mock_set_multisample(void* ctx, bool on) {
+  mock_gl_t* m = (mock_gl_t*)ctx;
+  m->multisample_calls++;
+  m->multisample_on = on;
+}
+
 static void mock_gl_init(mock_gl_t* m) {
   memset(m, 0, sizeof(*m));
   m->gl.viewport = mock_viewport;
@@ -173,6 +181,7 @@ static void mock_gl_init(mock_gl_t* m) {
   m->gl.create_texture_rgba = mock_create_texture_rgba;
   m->gl.delete_texture = mock_delete_texture;
   m->gl.draw_textured_quads = mock_draw_textured;
+  m->gl.set_multisample = mock_set_multisample;
   m->gl.ctx = m;
 }
 
@@ -502,6 +511,22 @@ static void test_no_leak_with_debug_allocator(void) {
   my_allocator_debug_destroy(dbg);
 }
 
+static void test_set_antialias_toggles_multisample(void) {
+  mock_gl_t gl;
+  my_vgcanvas_t* vg;
+  mock_gl_init(&gl);
+  vg = my_vgcanvas_gles2_create_with_gl(NULL, 100, 80, &gl.gl);
+
+  TEST_ASSERT_EQ_INT(my_vgcanvas_gles2_set_antialias(vg, true), MY_RET_OK);
+  TEST_ASSERT_EQ_INT(gl.multisample_calls, 1);
+  TEST_ASSERT(gl.multisample_on);
+  my_vgcanvas_gles2_set_antialias(vg, false);
+  TEST_ASSERT_EQ_INT(gl.multisample_calls, 2);
+  TEST_ASSERT(!gl.multisample_on);
+
+  my_vgcanvas_destroy(vg);
+}
+
 MYTEST_MAIN_BEGIN()
   MYTEST_RUN(test_create_and_fill_rect);
   MYTEST_RUN(test_translate_applies);
@@ -512,6 +537,7 @@ MYTEST_MAIN_BEGIN()
   MYTEST_RUN(test_round_cap_adds_semicircle_fans);
   MYTEST_RUN(test_round_join_adds_vertex_disks);
   MYTEST_RUN(test_cap_join_state_saved_restored);
+  MYTEST_RUN(test_set_antialias_toggles_multisample);
   MYTEST_RUN(test_draw_text_not_supported);
   MYTEST_RUN(test_draw_image_mock);
   MYTEST_RUN(test_draw_text_with_font);

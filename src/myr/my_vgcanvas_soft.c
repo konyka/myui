@@ -954,10 +954,45 @@ static int32_t box_factor(int32_t src, int32_t dst) {
  * mean of the fx x fy source block at (tx*fx, ty*fy); edge blocks may be
  * partial (only valid pixels are averaged). Straight-alpha channels are
  * averaged independently -- semi-transparent edges deviate slightly from
- * premultiplied filtering (accepted, keeps it simple). */
+ * premultiplied filtering (accepted, keeps it simple).
+ *
+ * M11c fast path (little-endian): the 4 channels of a pixel are summed
+ * as TWO packed 16-bit lanes per uint32 (r|b in one, g|a in the other).
+ * Blocks are at most 8x8 = 64 px, so a lane peaks at 255*64 = 16320 and
+ * never carries into its neighbour lane. Identical sums to the scalar
+ * path -> pixel-exact output, ~2-3x faster at -O0. */
 static void box_average(const uint8_t* src, int32_t w, int32_t h, int32_t fx,
                         int32_t fy, uint8_t* tmp, int32_t nw, int32_t nh) {
   int32_t tx, ty;
+#if defined(__BYTE_ORDER__) && defined(__ORDER_LITTLE_ENDIAN__) && \
+    __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+  for (ty = 0; ty < nh; ty++) {
+    int32_t y0 = ty * fy;
+    int32_t y1 = y0 + fy < h ? y0 + fy : h;
+    for (tx = 0; tx < nw; tx++) {
+      int32_t x0 = tx * fx;
+      int32_t x1 = x0 + fx < w ? x0 + fx : w;
+      uint32_t acc_rb = 0, acc_ga = 0, cnt;
+      int32_t y;
+      uint8_t* out = tmp + ((size_t)ty * (size_t)nw + (size_t)tx) * 4u;
+      for (y = y0; y < y1; y++) {
+        const uint8_t* p = src + ((size_t)y * (size_t)w + (size_t)x0) * 4u;
+        const uint8_t* end = src + ((size_t)y * (size_t)w + (size_t)x1) * 4u;
+        for (; p < end; p += 4) {
+          uint32_t px;
+          memcpy(&px, p, 4);
+          acc_rb += px & 0x00FF00FFu;
+          acc_ga += (px >> 8) & 0x00FF00FFu;
+        }
+      }
+      cnt = (uint32_t)(x1 - x0) * (uint32_t)(y1 - y0);
+      out[0] = (uint8_t)((acc_rb & 0xFFFFu) / cnt);
+      out[1] = (uint8_t)((acc_ga & 0xFFFFu) / cnt);
+      out[2] = (uint8_t)((acc_rb >> 16) / cnt);
+      out[3] = (uint8_t)((acc_ga >> 16) / cnt);
+    }
+  }
+#else  /* portable scalar path (big-endian) */
   for (ty = 0; ty < nh; ty++) {
     int32_t y0 = ty * fy;
     int32_t y1 = y0 + fy < h ? y0 + fy : h;
@@ -965,7 +1000,7 @@ static void box_average(const uint8_t* src, int32_t w, int32_t h, int32_t fx,
       int32_t x0 = tx * fx;
       int32_t x1 = x0 + fx < w ? x0 + fx : w;
       uint32_t acc[4] = {0, 0, 0, 0};
-      uint32_t cnt = 0;
+      uint32_t cnt;
       int32_t x, y, c;
       for (y = y0; y < y1; y++) {
         for (x = x0; x < x1; x++) {
@@ -973,15 +1008,16 @@ static void box_average(const uint8_t* src, int32_t w, int32_t h, int32_t fx,
           for (c = 0; c < 4; c++) {
             acc[c] += p[c];
           }
-          cnt++;
         }
       }
+      cnt = (uint32_t)(x1 - x0) * (uint32_t)(y1 - y0);
       for (c = 0; c < 4; c++) {
         tmp[((size_t)ty * (size_t)nw + (size_t)tx) * 4u + (size_t)c] =
             (uint8_t)(acc[c] / cnt);
       }
     }
   }
+#endif
 }
 
 static my_ret_t soft_draw_image(my_vgcanvas_t* vg, const uint8_t* rgba,

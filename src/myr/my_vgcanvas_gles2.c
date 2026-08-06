@@ -107,6 +107,7 @@ typedef struct my_vgcanvas_gles2_t {
   uint32_t program;
   uint32_t text_program; /**< lazy: created on first draw_text */
   uint32_t img_program;  /**< lazy: created on first draw_image */
+  bool msaa;             /**< GL_MULTISAMPLE requested (M11c) */
   gles_tex_entry_t tex_cache[GLES_TEX_CACHE_SIZE];
   gles_img_tex_entry_t img_tex_cache[GLES_IMG_TEX_CACHE_SIZE];
   uint64_t img_tex_tick;
@@ -878,5 +879,17 @@ my_ret_t my_vgcanvas_gles2_resize(my_vgcanvas_t* vg, int32_t width,
   s->gl.viewport(s->gl.ctx, width, height);
   s->gl.uniform2f(s->gl.ctx, s->program, "u_resolution", (float)width,
                   (float)height);
+  return MY_RET_OK;
+}
+
+my_ret_t my_vgcanvas_gles2_set_antialias(my_vgcanvas_t* vg, bool enabled) {
+  my_vgcanvas_gles2_t* s = (my_vgcanvas_gles2_t*)vg;
+  if (s == NULL) {
+    return MY_RET_INVALID_PARAMS;
+  }
+  s->msaa = enabled;
+  if (s->gl.set_multisample != NULL) {
+    s->gl.set_multisample(s->gl.ctx, enabled);
+  }
   return MY_RET_OK;
 }

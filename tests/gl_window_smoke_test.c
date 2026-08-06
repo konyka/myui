@@ -45,6 +45,49 @@ static void render_once(my_pal_gl_t* gl, my_vgcanvas_t* vg) {
   g_frames++;
 }
 
+/** @brief M11c: when the GL mount negotiated an MSAA surface, a diagonal
+ * stroke must show partially covered (intermediate) edge pixels;
+ * otherwise verify the documented no-AA fallback path. */
+static void check_msaa(my_pal_gl_t* gl, my_vgcanvas_t* vg) {
+  TEST_ASSERT_EQ_INT(my_pal_gl_make_current(gl), MY_RET_OK);
+  TEST_ASSERT_EQ_INT(my_vgcanvas_gles2_set_antialias(vg, true), MY_RET_OK);
+  if (!my_pal_gl_has_multisample(gl)) {
+    fprintf(stdout, "gl window smoke: no MSAA config (fallback path)\n");
+    TEST_ASSERT(glGetError() == GL_NO_ERROR);
+    return;
+  }
+  fprintf(stdout, "gl window smoke: MSAA surface active\n");
+  glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+  glClear(GL_COLOR_BUFFER_BIT);
+  my_vgcanvas_begin_frame(vg, NULL);
+  my_vgcanvas_set_stroke_color(vg, my_color_rgb(255, 255, 255));
+  my_vgcanvas_set_line_width(vg, 2.0f);
+  my_vgcanvas_begin_path(vg);
+  my_vgcanvas_move_to(vg, 20.5f, 140.0f);
+  my_vgcanvas_line_to(vg, 220.0f, 19.5f);
+  my_vgcanvas_stroke(vg);
+  my_vgcanvas_end_frame(vg);
+  glFinish();
+  TEST_ASSERT(glGetError() == GL_NO_ERROR);
+  {
+    int x, y, intermediate = 0;
+    GLubyte px[4];
+    /* the stroke band: x+y ~ 160 (top-based) -> GL y = 160-y */
+    for (x = 30; x < 210 && !intermediate; x++) {
+      for (y = 20; y < 140; y++) {
+        if (x + y >= 158 && x + y <= 164) {
+          glReadPixels(x, 160 - y, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, px);
+          if (px[0] > 10 && px[0] < 245) {
+            intermediate = 1;
+            break;
+          }
+        }
+      }
+    }
+    TEST_ASSERT(intermediate); /* MSAA edge coverage visible */
+  }
+}
+
 static my_ret_t on_event(void* ctx, my_pal_window_t* win,
                          const my_event_t* e) {
   my_pal_gl_t* gl = (my_pal_gl_t*)ctx;
@@ -107,6 +150,7 @@ static void test_gl_window_smoke(void) {
   my_pal_set_event_handler(pal, on_event, gl);
   my_pal_window_show(win);
   render_once(gl, vg);
+  check_msaa(gl, vg);
 
   /* stay alive ~300ms (real window on screen), then quit */
   my_pal_main_loop_add_timer(g_loop, on_quit_timer, g_loop, 300);

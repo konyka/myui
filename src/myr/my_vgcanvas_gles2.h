@@ -35,4 +35,13 @@ my_vgcanvas_t* my_vgcanvas_gles2_create(const my_allocator_t* allocator,
 my_ret_t my_vgcanvas_gles2_resize(my_vgcanvas_t* vg, int32_t width,
                                   int32_t height);
 
+/**
+ * @brief Toggle multisample anti-aliasing (M11c): glEnable/Disable(
+ * GL_MULTISAMPLE) is recorded and applied. Effective ONLY when the
+ * underlying surface was created with samples (EGL_SAMPLES > 0; the PAL
+ * GL mounts prefer 4x and fall back to no AA, see my_pal_gl_has_
+ * multisample) -- on a plain surface this is a documented no-op.
+ */
+my_ret_t my_vgcanvas_gles2_set_antialias(my_vgcanvas_t* vg, bool enabled);
+
 #endif /* MY_VGCANVAS_GLES2_H */

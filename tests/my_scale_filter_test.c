@@ -186,6 +186,34 @@ static void test_box_checker_variance_below_nearest(void) {
   my_lcd_destroy(lcd);
 }
 
+static void test_box_gradient_exact(void) {
+  /* 4x4 -> 1x1 (4x tier): SWAR-packed accumulation (M11c) must produce
+   * pixel-exact identical sums to the scalar path */
+  uint8_t img[4 * 4 * 4];
+  int x, y;
+  my_lcd_t* lcd = my_lcd_mem_create(NULL, 1, 1, MY_PIXEL_FORMAT_BGRA8888);
+  my_vgcanvas_t* vg = my_vgcanvas_soft_create(NULL, lcd);
+  uint8_t r, g, b;
+  for (y = 0; y < 4; y++) {
+    for (x = 0; x < 4; x++) {
+      uint8_t* p = img + (y * 4 + x) * 4;
+      p[0] = (uint8_t)(x + y * 4); /* 0..15, mean 7.5 -> 7 */
+      p[1] = 255;
+      p[2] = (uint8_t)(x * 16); /* 0/16/32/48, mean 24 */
+      p[3] = 255;
+    }
+  }
+  my_vgcanvas_begin_frame(vg, NULL);
+  my_vgcanvas_soft_set_scale_filter(vg, MY_SCALE_FILTER_BILINEAR);
+  my_vgcanvas_draw_image(vg, img, 4, 4, &(my_rectf_t){0, 0, 1, 1}, NULL);
+  my_vgcanvas_end_frame(vg);
+  px_rgb(lcd, 0, 0, &r, &g, &b);
+  TEST_ASSERT(r == 7 && g == 255 && b == 24);
+
+  my_vgcanvas_destroy(vg);
+  my_lcd_destroy(lcd);
+}
+
 static void test_box_tier_partial_blocks(void) {
   /* 12x12 solid green -> 3x3 dst: ratio 0.25 -> 4x tier, 12/4=3 exact;
    * then 13x13 -> 3x3: partial edge blocks must not read OOB nor skew */
@@ -246,4 +274,5 @@ MYTEST_MAIN_BEGIN()
   MYTEST_RUN(test_box_solid_red_stays_red);
   MYTEST_RUN(test_box_checker_variance_below_nearest);
   MYTEST_RUN(test_box_tier_partial_blocks);
+  MYTEST_RUN(test_box_gradient_exact);
 MYTEST_MAIN_END()

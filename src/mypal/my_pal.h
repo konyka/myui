@@ -107,6 +107,9 @@ typedef struct my_pal_gl_vtable_t {
   my_ret_t (*swap_buffers)(my_pal_gl_t* gl);
   /** @brief Current drawable size in pixels; w/h may be NULL. */
   my_ret_t (*get_size)(my_pal_gl_t* gl, int32_t* w, int32_t* h);
+  /** @brief True when the surface carries multisamples (M11c; the port
+   * preferred EGL_SAMPLES=4 and got it, false = fell back to no AA). */
+  bool (*has_multisample)(my_pal_gl_t* gl);
   void (*destroy)(my_pal_gl_t* gl);
 } my_pal_gl_vtable_t;
 
@@ -126,6 +129,10 @@ static inline my_ret_t my_pal_gl_swap_buffers(my_pal_gl_t* gl) {
 static inline my_ret_t my_pal_gl_get_size(my_pal_gl_t* gl, int32_t* w,
                                           int32_t* h) {
   return gl->vtable->get_size(gl, w, h);
+}
+
+static inline bool my_pal_gl_has_multisample(my_pal_gl_t* gl) {
+  return gl->vtable->has_multisample(gl);
 }
 
 static inline void my_pal_gl_destroy(my_pal_gl_t* gl) {

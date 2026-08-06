@@ -44,6 +44,12 @@ typedef struct my_gl_t {
   /** @brief Draw textured quads (interleaved xy+uv, count = vertices). */
   void (*draw_textured_quads)(void* ctx, uint32_t program, uint32_t texture,
                               const float* xyuv, int32_t count);
+  /**
+   * @brief Toggle GL_MULTISAMPLE (M11c). Effective only when the current
+   * surface was created with samples (EGL_SAMPLES > 0); on plain
+   * surfaces this is a no-op state change. May be NULL (mocks).
+   */
+  void (*set_multisample)(void* ctx, bool on);
   void* ctx;
 } my_gl_t;
 
