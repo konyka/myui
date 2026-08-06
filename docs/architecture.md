@@ -221,3 +221,8 @@ PAL port 矩阵：
 - **缓存**：进程级 LRU 64 项，key = 文本（布局结果与字体/字号无关，故不纳入 key）；`my_text_layout_process` 返回**调用方所有的拷贝**（缓存持主副本），`my_text_layout_cache_flush/size` 为测试钩子。
 - **裁剪**：`MYUI_BIDI=OFF`（默认 ON）不编 SheenBidi（省 ~100KB），process 退化为恒等布局，draw/measure 路径不变。
 - 集成偏离记录：任务书假定"SheenBidi 的 shaping"，实际 3.0.0 无此模块（只有重排/镜像查找表），整形为 myui 自研（数据同来自本地 UCD）；SheenBidi 许可证为 Apache-2.0（非任务书所述 ISC，同为宽松许可，LICENSE 已 vendor）。
+
+## INCR 增量剪贴板与窗口级 undo 管理器（M11b）
+
+- **INCR（x11，ICCCM 2.7.2）**：阈值 64KB——clipboard 文本超过即走增量协议。**发送端**（本应用为 owner）：SelectionRequest 应答改为写 INCR 类型属性（32 位下界值）+ 对 requestor 窗口 `XSelectInput(PropertyChangeMask)`；对方每次删除属性（PropertyNotify/PropertyDelete）追加下一片（片大小 = min(64KB, XMaxRequestSize×4−64)，本机实测 4 片/200KB），最后一片删除后补零长度片收尾；同时只允许一个传输（并发请求拒绝），clipboard_set 中途换文档会发零长度片礼貌收尾。**接收端**：SelectionNotify 读到 INCR 类型即进收片循环——删属性（=向对方要下一片）→ 等 PropertyNewValue（单片 2s 超时，事件泵与 M9d 同款，其他事件照常分发）→ 读片拼接，直到零长度片；buf 满后继续收片但丢弃（让对方正常结束），总长上限 16MB 防挂死。**结构性修复**：SelectionRequest 服务与 INCR 发送推进移到 x11_dispatch 顶部、先于 handler NULL 检查——剪贴板服务不再依赖应用注册事件处理器（M9d 时代隐藏依赖，本次 fork 测试暴露）。窗口创建加 PropertyChangeMask。dummy/wayland 内存往返无 INCR 概念，行为不变。
+- **undo 管理器**（src/myui/my_undo_manager.[ch]）：单条共享时间序栈（`my_undo_stack` 扩展 tag——条目带控件标识，tag 不同不合并批）。`my_undo_stack_record_*_tagged` / `*_undo/redo_tagged` / `clear_tagged` 为栈级新 API（旧 API 等价 tag=NULL）。edit/text_area 共享模式（`my_edit_set_undo_shared` / text_area 同款，borrowed mgr）：用户编辑补丁投共享栈；**路由 undo/redo 语义**：弹顶条目 → 先经窗口分发器把焦点切到条目所属控件（无窗口根则跳过）→ 对该控件 apply。跨控件顺序天然正确（A 打字→B 打字→undo 两次先撤 B 再撤 A）。边界语义（注释写清）：切回私有模式（set_undo_shared(NULL)）**丢弃**该控件的共享条目（owner 已注销的条目无法被路由应用）；set_text 只清本控件条目（clear_tagged），共享模式 blur 仍断批；`my_window_set_undo_manager` 挂载供 `my_window_undo_manager_of_widget` 查找。管理器注册表存 apply 回调（darray 持堆分配 undo_target_t*——darray 是指针数组，此前按值压栈变量地址的写法被测试抓出）。

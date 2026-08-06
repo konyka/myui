@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "myc/my_str.h"
+#include "myui/my_undo_manager.h"
 #include "myui/my_undo_stack.h"
 #include "myui/my_window.h"
 #include "myui/widgets/my_scroll_bar.h"
@@ -403,8 +404,13 @@ static void user_insert(my_text_area_t* ta, const char* bytes, size_t n,
   if (ta_sel(ta, &r0, &c0, &r1, &c1)) {
     size_t s0 = ta_offset_of(ta, r0, c0);
     size_t s1 = ta_offset_of(ta, r1, c1);
-    if (!ta->applying_history && ta->undo != NULL) {
-      my_undo_stack_record_delete(ta->undo, s0, ta->text + s0, s1 - s0);
+    if (!ta->applying_history) {
+      if (ta->undo_shared != NULL) {
+        my_undo_manager_record_delete(ta->undo_shared, ta, s0, ta->text + s0,
+                                      s1 - s0);
+      } else if (ta->undo != NULL) {
+        my_undo_stack_record_delete(ta->undo, s0, ta->text + s0, s1 - s0);
+      }
     }
     ta_delete_bytes(ta, s0, s1);
     ta_cursor_to_offset(ta, s0);
@@ -414,8 +420,12 @@ static void user_insert(my_text_area_t* ta, const char* bytes, size_t n,
     return;
   }
   start = ta_offset_of(ta, ta->cursor_row, ta->cursor_col);
-  if (!ta->applying_history && ta->undo != NULL) {
-    my_undo_stack_record_insert(ta->undo, start, bytes, n);
+  if (!ta->applying_history) {
+    if (ta->undo_shared != NULL) {
+      my_undo_manager_record_insert(ta->undo_shared, ta, start, bytes, n);
+    } else if (ta->undo != NULL) {
+      my_undo_stack_record_insert(ta->undo, start, bytes, n);
+    }
   }
   ta_insert_bytes(ta, start, bytes, n);
   ta_cursor_to_offset(ta, start + n);
@@ -427,9 +437,14 @@ static void user_delete_range(my_text_area_t* ta, size_t start, size_t end) {
   if (ta->readonly) {
     return;
   }
-  if (!ta->applying_history && ta->undo != NULL) {
-    my_undo_stack_record_delete(ta->undo, start, ta->text + start,
-                                end - start);
+  if (!ta->applying_history) {
+    if (ta->undo_shared != NULL) {
+      my_undo_manager_record_delete(ta->undo_shared, ta, start,
+                                    ta->text + start, end - start);
+    } else if (ta->undo != NULL) {
+      my_undo_stack_record_delete(ta->undo, start, ta->text + start,
+                                  end - start);
+    }
   }
   ta_delete_bytes(ta, start, end);
   ta_cursor_to_offset(ta, start);
@@ -558,7 +573,7 @@ static void ta_move_to(my_text_area_t* ta, size_t row, size_t col,
   my_widget_invalidate((my_widget_t*)ta, NULL);
 }
 
-static void ta_apply_history(my_text_area_t* ta, my_undo_op_t* op) {
+static void ta_apply_history(my_text_area_t* ta, const my_undo_op_t* op) {
   ta->applying_history = true;
   ta_delete_bytes(ta, op->offset, op->offset + op->remove_len);
   ta_insert_bytes(ta, op->offset, op->bytes, op->bytes_len);
@@ -568,6 +583,11 @@ static void ta_apply_history(my_text_area_t* ta, my_undo_op_t* op) {
   my_widget_invalidate((my_widget_t*)ta, NULL);
 }
 
+/** @brief Shared-mode apply callback (M11b). */
+static void ta_apply_undo_op(void* widget, const my_undo_op_t* op) {
+  ta_apply_history((my_text_area_t*)widget, op);
+}
+
 static my_ret_t ta_on_key(my_text_area_t* ta, const my_event_t* event) {
   uint32_t key = event->u.key.key;
   uint8_t mods = event->u.key.modifiers;
@@ -575,18 +595,34 @@ static my_ret_t ta_on_key(my_text_area_t* ta, const my_event_t* event) {
   bool ctrl = (mods & MY_KEYMOD_CTRL) != 0;
 
   if (ctrl && (key == 'z' || key == 'Z')) {
-    my_undo_op_t op;
-    my_ret_t r = shift ? my_undo_stack_redo(ta->undo, &op)
-                       : my_undo_stack_undo(ta->undo, &op);
-    if (r == MY_RET_OK) {
-      ta_apply_history(ta, &op);
+    if (ta->undo_shared != NULL) {
+      if (shift) {
+        my_undo_manager_redo(ta->undo_shared);
+      } else {
+        my_undo_manager_undo(ta->undo_shared);
+      }
+      return MY_RET_OK;
+    }
+    {
+      my_undo_op_t op;
+      my_ret_t r = shift ? my_undo_stack_redo(ta->undo, &op)
+                         : my_undo_stack_undo(ta->undo, &op);
+      if (r == MY_RET_OK) {
+        ta_apply_history(ta, &op);
+      }
     }
     return MY_RET_OK;
   }
   if (ctrl && (key == 'y' || key == 'Y')) {
-    my_undo_op_t op;
-    if (my_undo_stack_redo(ta->undo, &op) == MY_RET_OK) {
-      ta_apply_history(ta, &op);
+    if (ta->undo_shared != NULL) {
+      my_undo_manager_redo(ta->undo_shared);
+      return MY_RET_OK;
+    }
+    {
+      my_undo_op_t op;
+      if (my_undo_stack_redo(ta->undo, &op) == MY_RET_OK) {
+        ta_apply_history(ta, &op);
+      }
     }
     return MY_RET_OK;
   }
@@ -943,7 +979,11 @@ static void ta_on_blur(void* ctx, const char* event, void* data) {
   my_text_area_t* ta = (my_text_area_t*)ctx;
   (void)event;
   (void)data;
-  my_undo_stack_break_batch(ta->undo);
+  if (ta->undo_shared != NULL) {
+    my_undo_manager_break_batch(ta->undo_shared);
+  } else {
+    my_undo_stack_break_batch(ta->undo);
+  }
   ta->focused = false;
   ta->cursor_visible = true;
   if (ta->blink_timer_id > 0 && ta->blink_loop != NULL) {
@@ -958,6 +998,9 @@ static void ta_destroy_chain(my_object_t* obj) {
   my_text_area_t* ta = (my_text_area_t*)obj;
   if (ta->blink_timer_id > 0 && ta->blink_loop != NULL) {
     my_pal_main_loop_remove_timer(ta->blink_loop, ta->blink_timer_id);
+  }
+  if (ta->undo_shared != NULL) {
+    my_undo_manager_unregister(ta->undo_shared, ta);
   }
   my_undo_stack_destroy(ta->undo);
   my_darray_destroy(ta->line_offsets);
@@ -1011,8 +1054,11 @@ my_ret_t my_text_area_set_text(my_widget_t* area, const char* text) {
   if (area == NULL) {
     return MY_RET_INVALID_PARAMS;
   }
-  /* programmatic replacement: not undoable; the document diverged */
-  if (ta->undo != NULL) {
+  /* programmatic replacement: not undoable; the document diverged. In
+   * shared mode only THIS widget's entries are dropped (M11b). */
+  if (ta->undo_shared != NULL) {
+    my_undo_manager_clear_widget(ta->undo_shared, ta);
+  } else if (ta->undo != NULL) {
     my_undo_stack_clear(ta->undo);
   }
   len = text != NULL ? strlen(text) : 0;
@@ -1089,6 +1135,25 @@ size_t my_text_area_visual_line_of_pos(my_widget_t* area, size_t row,
   }
   return ta_vline_of_pos((my_text_area_t*)area, row, col,
                          col_in_v != NULL ? col_in_v : &civ);
+}
+
+my_ret_t my_text_area_set_undo_shared(my_widget_t* area, void* mgr) {
+  my_text_area_t* ta = (my_text_area_t*)area;
+  if (area == NULL) {
+    return MY_RET_INVALID_PARAMS;
+  }
+  if (ta->undo_shared != NULL) {
+    /* leaving shared mode discards the widget's shared history
+     * (documented): entries whose owner is unregistered cannot be
+     * applied by a routed undo */
+    my_undo_manager_clear_widget(ta->undo_shared, ta);
+    my_undo_manager_unregister(ta->undo_shared, ta);
+  }
+  ta->undo_shared = (my_undo_manager_t*)mgr;
+  if (ta->undo_shared != NULL) {
+    return my_undo_manager_register(ta->undo_shared, ta, ta_apply_undo_op);
+  }
+  return MY_RET_OK;
 }
 
 my_ret_t my_text_area_set_readonly(my_widget_t* area, bool readonly) {

@@ -24,6 +24,7 @@ typedef struct my_window_t {
   bool vg_owned;
   my_pal_gl_t* gl;                   /**< GL mount when GL enabled (M10c) */
   bool gl_owned;
+  void* undo_manager;      /**< borrowed my_undo_manager_t (M11b) */
   my_color_t bg_color;
   my_theme_t* theme;                 /**< active theme */
   bool theme_owned;
@@ -63,6 +64,17 @@ my_pal_t* my_window_pal_of_widget(my_widget_t* widget);
 
 /** @brief The main loop of the window at the root (NULL when unknown). */
 my_pal_main_loop_t* my_window_loop_of_widget(my_widget_t* widget);
+
+/**
+ * @brief Attach a shared undo manager (M11b, borrowed; the app owns and
+ * destroys it). Widgets can then find it via
+ * my_window_undo_manager_of_widget.
+ */
+void my_window_set_undo_manager(my_window_t* win, void* mgr);
+
+/** @brief The undo manager of the window at the root of widget's tree
+ * (NULL when none / not under a window). */
+void* my_window_undo_manager_of_widget(my_widget_t* widget);
 
 /** @brief Test hook: use this vgcanvas instead of creating a soft one. */
 void my_window_set_vgcanvas(my_window_t* win, my_vgcanvas_t* vg);

@@ -46,6 +46,8 @@ typedef struct my_text_area_t {
   int32_t scroll_y;
   struct my_undo_stack_t* undo; /**< user-edit history (M10a) */
   bool applying_history;          /**< suppresses recording during undo/redo */
+  struct my_undo_manager_t* undo_shared; /**< borrowed shared stack (M11b;
+                                              NULL = private mode) */
   size_t max_len;           /**< codepoints cap, 0 = unlimited */
   bool readonly;
   char* hint;               /**< owned, shown when empty and unfocused */
@@ -66,6 +68,14 @@ const char* my_text_area_get_text(my_widget_t* area);
 my_ret_t my_text_area_set_hint(my_widget_t* area, const char* hint);
 my_ret_t my_text_area_set_readonly(my_widget_t* area, bool readonly);
 my_ret_t my_text_area_set_max_len(my_widget_t* area, size_t max_codepoints);
+/**
+ * @brief Switch to the shared undo manager (M11b, borrowed) or back to
+ * the private stack (mgr = NULL; the widget's shared entries are
+ * DISCARDED then, since a routed undo can no longer find their owner).
+ * In shared mode user edits record into mgr and Ctrl+Z/Y route through
+ * it (undo applies to the entry's owner widget and focuses it).
+ */
+my_ret_t my_text_area_set_undo_shared(my_widget_t* area, void* mgr);
 /** @brief Font for layout/measuring (borrowed). */
 void my_text_area_set_font(my_widget_t* area, my_font_t* font, int32_t size);
 

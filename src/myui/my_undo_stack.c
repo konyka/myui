@@ -9,6 +9,7 @@
 #include "myc/my_darray.h"
 
 typedef struct undo_entry_t {
+  void* tag;        /**< owner tag (M11b; NULL = untagged) */
   size_t offset;
   char* deleted;
   size_t deleted_len;
@@ -136,8 +137,9 @@ static char* memdup(my_undo_stack_t* s, const char* bytes, size_t len) {
   return p;
 }
 
-my_ret_t my_undo_stack_record_insert(my_undo_stack_t* stack, size_t offset,
-                                     const char* bytes, size_t len) {
+my_ret_t my_undo_stack_record_insert_tagged(my_undo_stack_t* stack, void* tag,
+                                            size_t offset, const char* bytes,
+                                            size_t len) {
   size_t n;
   undo_entry_t* last;
   if (stack == NULL || (bytes == NULL && len > 0)) {
@@ -146,7 +148,8 @@ my_ret_t my_undo_stack_record_insert(my_undo_stack_t* stack, size_t offset,
   drop_redo(stack);
   n = my_darray_size(stack->entries);
   last = n > 0 ? (undo_entry_t*)my_darray_get(stack->entries, n - 1) : NULL;
-  if (last != NULL && last->batchable && last->deleted_len == 0 &&
+  if (last != NULL && last->batchable && last->tag == tag &&
+      last->deleted_len == 0 &&
       offset == last->offset + last->inserted_len) {
     /* typing stream: append to the open batch */
     char* p = (char*)my_mem_realloc(stack->allocator, last->inserted,
@@ -165,6 +168,7 @@ my_ret_t my_undo_stack_record_insert(my_undo_stack_t* stack, size_t offset,
   if (last == NULL) {
     return MY_RET_OOM;
   }
+  last->tag = tag;
   last->offset = offset;
   last->inserted = memdup(stack, bytes, len);
   last->inserted_len = len;
@@ -177,8 +181,14 @@ my_ret_t my_undo_stack_record_insert(my_undo_stack_t* stack, size_t offset,
   return MY_RET_OK;
 }
 
-my_ret_t my_undo_stack_record_delete(my_undo_stack_t* stack, size_t offset,
+my_ret_t my_undo_stack_record_insert(my_undo_stack_t* stack, size_t offset,
                                      const char* bytes, size_t len) {
+  return my_undo_stack_record_insert_tagged(stack, NULL, offset, bytes, len);
+}
+
+my_ret_t my_undo_stack_record_delete_tagged(my_undo_stack_t* stack, void* tag,
+                                            size_t offset, const char* bytes,
+                                            size_t len) {
   size_t n;
   undo_entry_t* last;
   if (stack == NULL || (bytes == NULL && len > 0) || len == 0) {
@@ -187,8 +197,8 @@ my_ret_t my_undo_stack_record_delete(my_undo_stack_t* stack, size_t offset,
   drop_redo(stack);
   n = my_darray_size(stack->entries);
   last = n > 0 ? (undo_entry_t*)my_darray_get(stack->entries, n - 1) : NULL;
-  if (last != NULL && last->batchable && last->inserted_len == 0 &&
-      offset + len == last->offset) {
+  if (last != NULL && last->batchable && last->tag == tag &&
+      last->inserted_len == 0 && offset + len == last->offset) {
     /* backspace stream: prepend to the open batch */
     char* p = (char*)my_mem_alloc(stack->allocator, last->deleted_len + len);
     if (p == NULL) {
@@ -208,6 +218,7 @@ my_ret_t my_undo_stack_record_delete(my_undo_stack_t* stack, size_t offset,
   if (last == NULL) {
     return MY_RET_OOM;
   }
+  last->tag = tag;
   last->offset = offset;
   last->deleted = memdup(stack, bytes, len);
   last->deleted_len = len;
@@ -220,7 +231,31 @@ my_ret_t my_undo_stack_record_delete(my_undo_stack_t* stack, size_t offset,
   return MY_RET_OK;
 }
 
-my_ret_t my_undo_stack_undo(my_undo_stack_t* stack, my_undo_op_t* op) {
+my_ret_t my_undo_stack_record_delete(my_undo_stack_t* stack, size_t offset,
+                                     const char* bytes, size_t len) {
+  return my_undo_stack_record_delete_tagged(stack, NULL, offset, bytes, len);
+}
+
+void my_undo_stack_clear_tagged(my_undo_stack_t* stack, const void* tag) {
+  size_t i;
+  if (stack == NULL) {
+    return;
+  }
+  /* remove tagged entries from the end, keeping order of the rest */
+  for (i = my_darray_size(stack->entries); i-- > 0;) {
+    undo_entry_t* e = (undo_entry_t*)my_darray_get(stack->entries, i);
+    if (e->tag == tag) {
+      entry_free(stack, e);
+      my_darray_remove_at(stack->entries, i);
+      if (stack->undo_pos > i) {
+        stack->undo_pos--;
+      }
+    }
+  }
+}
+
+my_ret_t my_undo_stack_undo_tagged(my_undo_stack_t* stack, my_undo_op_t* op,
+                                   void** tag) {
   undo_entry_t* e;
   if (stack == NULL || op == NULL || !my_undo_stack_can_undo(stack)) {
     return MY_RET_NOT_FOUND;
@@ -232,10 +267,14 @@ my_ret_t my_undo_stack_undo(my_undo_stack_t* stack, my_undo_op_t* op) {
   op->remove_len = e->inserted_len;
   op->bytes = e->deleted != NULL ? e->deleted : "";
   op->bytes_len = e->deleted_len;
+  if (tag != NULL) {
+    *tag = e->tag;
+  }
   return MY_RET_OK;
 }
 
-my_ret_t my_undo_stack_redo(my_undo_stack_t* stack, my_undo_op_t* op) {
+my_ret_t my_undo_stack_redo_tagged(my_undo_stack_t* stack, my_undo_op_t* op,
+                                   void** tag) {
   undo_entry_t* e;
   if (stack == NULL || op == NULL || !my_undo_stack_can_redo(stack)) {
     return MY_RET_NOT_FOUND;
@@ -247,5 +286,16 @@ my_ret_t my_undo_stack_redo(my_undo_stack_t* stack, my_undo_op_t* op) {
   op->remove_len = e->deleted_len;
   op->bytes = e->inserted != NULL ? e->inserted : "";
   op->bytes_len = e->inserted_len;
+  if (tag != NULL) {
+    *tag = e->tag;
+  }
   return MY_RET_OK;
+}
+
+my_ret_t my_undo_stack_undo(my_undo_stack_t* stack, my_undo_op_t* op) {
+  return my_undo_stack_undo_tagged(stack, op, NULL);
+}
+
+my_ret_t my_undo_stack_redo(my_undo_stack_t* stack, my_undo_op_t* op) {
+  return my_undo_stack_redo_tagged(stack, op, NULL);
 }

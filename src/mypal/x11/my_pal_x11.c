@@ -6,7 +6,8 @@
  * Present path: the app draws into the window's lcd (a wrapper around an
  * my_lcd_mem BGRA8888 back buffer); my_lcd_end_frame() pushes the whole
  * frame with XPutImage (full-frame; dirty-rect partial present is a TODO).
- * Not done yet: IME, HiDPI, multi-window focus management, clipboard.
+ * Clipboard: owner of CLIPBOARD + direct/INCR serving and external fetch
+ * (M8c/M9d/M11b). Not done yet: IME, HiDPI, multi-window focus.
  */
 /* POSIX (clock_gettime/select/pipe/write) + glibc misc (suseconds_t)
  * under strict -std=c99; must precede ALL system header includes. */
@@ -17,6 +18,7 @@
 
 #include <pthread.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
@@ -51,6 +53,17 @@ typedef struct x11_pal_t {
   Atom atom_utf8;
   Atom atom_targets;
   Atom atom_clip_prop;
+  Atom atom_incr;
+  /** @brief INCR sender state (M11b; one transfer at a time). */
+  struct {
+    bool active;
+    Window requestor;
+    Atom property;
+    Atom target;
+    size_t offset;   /**< bytes already appended */
+    size_t len;      /**< strlen at transfer start */
+    size_t chunk;    /**< per-segment payload */
+  } incr_tx;
 #if defined(MYUI_PAL_GL_EGL)
   EGLDisplay egl_dpy; /**< shared EGL display (lazy, EGL_NO_DISPLAY off) */
   EGLConfig egl_cfg;
@@ -399,7 +412,7 @@ static my_pal_window_t* x11_window_create(my_pal_t* pal, int32_t w, int32_t h,
   XSelectInput(p->display, win->xwin,
                ExposureMask | StructureNotifyMask | ButtonPressMask |
                    ButtonReleaseMask | PointerMotionMask | KeyPressMask |
-                   KeyReleaseMask);
+                   KeyReleaseMask | PropertyChangeMask);
   {
     Atom protocol = p->wm_delete;
     XSetWMProtocols(p->display, win->xwin, &protocol, 1);
@@ -430,6 +443,129 @@ static my_pal_window_t* x11_window_create(my_pal_t* pal, int32_t w, int32_t h,
 
 /* ---------------- event translation ---------------- */
 
+static void x11_dispatch(x11_pal_t* p, const XEvent* xev);
+
+/* ---------------- INCR incremental transfer (M11b, ICCCM 2.7.2) ------ */
+
+/** @brief Payloads above this go through INCR instead of one write. */
+#define X11_INCR_THRESHOLD 65536u
+/** @brief Receiver-side total cap (anti-hang). */
+#define X11_INCR_RX_MAX (16u * 1024u * 1024u)
+
+static void x11_incr_tx_cancel(x11_pal_t* p) {
+  if (p->incr_tx.active) {
+    /* close politely: a zero-length segment ends the requestor's loop */
+    XChangeProperty(p->display, p->incr_tx.requestor, p->incr_tx.property,
+                    p->incr_tx.target, 8, PropModeAppend, NULL, 0);
+    XSelectInput(p->display, p->incr_tx.requestor, 0);
+    XFlush(p->display);
+    p->incr_tx.active = false;
+  }
+}
+
+/** @brief PropertyDelete on the transfer property: append the next
+ * segment (zero-length once everything was sent). */
+static void x11_incr_tx_advance(x11_pal_t* p) {
+  size_t remain;
+  if (!p->incr_tx.active) {
+    return;
+  }
+  if (p->clipboard == NULL) {
+    x11_incr_tx_cancel(p); /* document replaced mid-transfer */
+    return;
+  }
+  remain = p->incr_tx.len - p->incr_tx.offset;
+  if (remain > 0) {
+    size_t n = remain < p->incr_tx.chunk ? remain : p->incr_tx.chunk;
+    XChangeProperty(p->display, p->incr_tx.requestor, p->incr_tx.property,
+                    p->incr_tx.target, 8, PropModeAppend,
+                    (const unsigned char*)(p->clipboard + p->incr_tx.offset),
+                    (int)n);
+    p->incr_tx.offset += n;
+    XFlush(p->display);
+    return;
+  }
+  /* the requestor deleted the last data segment: zero-length ends it */
+  XChangeProperty(p->display, p->incr_tx.requestor, p->incr_tx.property,
+                  p->incr_tx.target, 8, PropModeAppend, NULL, 0);
+  XSelectInput(p->display, p->incr_tx.requestor, 0);
+  XFlush(p->display);
+  p->incr_tx.active = false;
+}
+
+/** @brief INCR receive loop: delete -> wait for the next segment -> read
+ * and append, until a zero-length segment. Drains (and discards) even
+ * when buf is full so the owner can finish; capped at X11_INCR_RX_MAX. */
+static my_ret_t x11_clipboard_fetch_incr(x11_pal_t* p, Atom prop, char* buf,
+                                         size_t size) {
+  Display* dpy = p->display;
+  x11_window_t* w = (x11_window_t*)my_darray_get(p->windows, 0);
+  size_t total = 0, seen = 0;
+  if (w == NULL) {
+    return MY_RET_NOT_FOUND;
+  }
+  for (;;) {
+    uint64_t deadline = x11_now_ms() + 2000;
+    bool got_chunk = false;
+    Atom actual;
+    int format;
+    unsigned long nitems, remaining;
+    unsigned char* data = NULL;
+    XDeleteProperty(dpy, w->xwin, prop); /* ack: request the next segment */
+    XFlush(dpy);
+    while (!got_chunk && x11_now_ms() < deadline) {
+      while (XPending(dpy) > 0) {
+        XEvent ev;
+        XNextEvent(dpy, &ev);
+        if (ev.type == PropertyNotify && ev.xproperty.window == w->xwin &&
+            ev.xproperty.atom == prop &&
+            ev.xproperty.state == PropertyNewValue) {
+          got_chunk = true;
+        } else {
+          x11_dispatch(p, &ev); /* keep the app (and any tx) progressing */
+        }
+      }
+      if (!got_chunk) {
+        struct timeval tv;
+        fd_set rfds;
+        int fd = ConnectionNumber(dpy);
+        tv.tv_sec = 0;
+        tv.tv_usec = 10000;
+        FD_ZERO(&rfds);
+        FD_SET(fd, &rfds);
+        select(fd + 1, &rfds, NULL, NULL, &tv);
+      }
+    }
+    if (!got_chunk) {
+      break; /* owner stalled: give up with what we have */
+    }
+    if (XGetWindowProperty(dpy, w->xwin, prop, 0, 1 << 22, False,
+                           AnyPropertyType, &actual, &format, &nitems,
+                           &remaining, &data) != Success ||
+        data == NULL) {
+      break;
+    }
+    if (nitems == 0) { /* final segment */
+      XFree(data);
+      buf[total] = '\0';
+      return MY_RET_OK;
+    }
+    seen += nitems;
+    if (total < size - 1) {
+      size_t room = size - 1 - total;
+      size_t n = nitems < room ? nitems : room;
+      memcpy(buf + total, data, n);
+      total += n;
+    }
+    XFree(data);
+    if (seen >= X11_INCR_RX_MAX) {
+      break; /* runaway owner: stop acking, keep the prefix */
+    }
+  }
+  buf[total] = '\0';
+  return total > 0 ? MY_RET_OK : MY_RET_FAIL;
+}
+
 static x11_window_t* x11_find_window(x11_pal_t* p, Window xwin) {
   size_t i, n = my_darray_size(p->windows);
   for (i = 0; i < n; i++) {
@@ -455,9 +591,80 @@ static uint8_t x11_modifiers(unsigned int state) {
   return mods;
 }
 
+/** @brief Serve our cached clipboard text (UTF8_STRING/STRING/TARGETS);
+ * large payloads go INCR. Handler-independent: clipboard serving must
+ * work even without a registered app handler (M11b). */
+static void x11_serve_selection_request(x11_pal_t* p,
+                                        const XSelectionRequestEvent* req) {
+  XSelectionEvent notify;
+  Atom target = req->target;
+  Atom prop = req->property;
+  if (prop == None) {
+    prop = target;
+  }
+  memset(&notify, 0, sizeof(notify));
+  notify.type = SelectionNotify;
+  notify.requestor = req->requestor;
+  notify.selection = req->selection;
+  notify.target = target;
+  notify.time = req->time;
+  notify.property = None;
+  if (target == p->atom_targets) {
+    Atom types[3];
+    types[0] = p->atom_targets;
+    types[1] = p->atom_utf8;
+    types[2] = XA_STRING;
+    XChangeProperty(p->display, req->requestor, prop, XA_ATOM, 32,
+                    PropModeReplace, (unsigned char*)types, 3);
+    notify.property = prop;
+  } else if ((target == p->atom_utf8 || target == XA_STRING) &&
+             p->clipboard != NULL) {
+    size_t clen = strlen(p->clipboard);
+    if (clen <= X11_INCR_THRESHOLD) {
+      XChangeProperty(p->display, req->requestor, prop, target, 8,
+                      PropModeReplace, (unsigned char*)p->clipboard,
+                      (int)clen);
+      notify.property = prop;
+    } else if (!p->incr_tx.active) {
+      /* large payload: answer INCR, then serve segments as the
+       * requestor deletes the property (ICCCM 2.7.2) */
+      uint32_t lower_bound = (uint32_t)clen;
+      long maxb = XMaxRequestSize(p->display) * 4 - 64;
+      p->incr_tx.active = true;
+      p->incr_tx.requestor = req->requestor;
+      p->incr_tx.property = prop;
+      p->incr_tx.target = target;
+      p->incr_tx.offset = 0;
+      p->incr_tx.len = clen;
+      p->incr_tx.chunk = maxb > 1024 ? (size_t)maxb : 1024;
+      if (p->incr_tx.chunk > X11_INCR_THRESHOLD) {
+        p->incr_tx.chunk = X11_INCR_THRESHOLD;
+      }
+      XChangeProperty(p->display, req->requestor, prop, p->atom_incr, 32,
+                      PropModeReplace, (unsigned char*)&lower_bound, 1);
+      XSelectInput(p->display, req->requestor, PropertyChangeMask);
+      notify.property = prop;
+    }
+    /* else: one transfer at a time; refuse (property stays None) */
+  }
+  XSendEvent(p->display, req->requestor, False, 0, (XEvent*)&notify);
+}
+
 static void x11_dispatch(x11_pal_t* p, const XEvent* xev) {
   my_event_t e;
   x11_window_t* w;
+  /* clipboard serving + INCR sender progress are handler-independent */
+  if (xev->type == PropertyNotify && p->incr_tx.active &&
+      xev->xproperty.window == p->incr_tx.requestor &&
+      xev->xproperty.atom == p->incr_tx.property &&
+      xev->xproperty.state == PropertyDelete) {
+    x11_incr_tx_advance(p);
+    return;
+  }
+  if (xev->type == SelectionRequest) {
+    x11_serve_selection_request(p, (const XSelectionRequestEvent*)&xev->xselectionrequest);
+    return;
+  }
   if (p->handler == NULL) {
     return;
   }
@@ -526,40 +733,7 @@ static void x11_dispatch(x11_pal_t* p, const XEvent* xev) {
       }
       break;
     case SelectionRequest:
-      /* serve our cached clipboard text (UTF8_STRING/STRING/TARGETS) */
-      {
-        XSelectionRequestEvent* req = (XSelectionRequestEvent*)&xev->xselectionrequest;
-        XSelectionEvent notify;
-        Atom target = req->target;
-        Atom prop = req->property;
-        if (prop == None) {
-          prop = target;
-        }
-        memset(&notify, 0, sizeof(notify));
-        notify.type = SelectionNotify;
-        notify.requestor = req->requestor;
-        notify.selection = req->selection;
-        notify.target = target;
-        notify.time = req->time;
-        notify.property = None;
-        if (target == p->atom_targets) {
-          Atom types[3];
-          types[0] = p->atom_targets;
-          types[1] = p->atom_utf8;
-          types[2] = XA_STRING;
-          XChangeProperty(p->display, req->requestor, prop, XA_ATOM, 32,
-                          PropModeReplace, (unsigned char*)types, 3);
-          notify.property = prop;
-        } else if ((target == p->atom_utf8 || target == XA_STRING) &&
-                   p->clipboard != NULL) {
-          XChangeProperty(p->display, req->requestor, prop, target, 8,
-                          PropModeReplace, (unsigned char*)p->clipboard,
-                          (int)strlen(p->clipboard));
-          notify.property = prop;
-        }
-        XSendEvent(p->display, req->requestor, False, 0, (XEvent*)&notify);
-      }
-      break;
+      break; /* served handler-independently (see x11_dispatch top) */
     case ClientMessage:
       if (w != NULL && (Atom)xev->xclient.data.l[0] == p->wm_delete) {
         e.type = MY_EVENT_QUIT;
@@ -792,6 +966,7 @@ static my_ret_t x11_clipboard_set(my_pal_t* pal, const char* text) {
   if (text != NULL && copy == NULL) {
     return MY_RET_OOM;
   }
+  x11_incr_tx_cancel(p); /* replacing the document mid-transfer (M11b) */
   my_mem_free(p->allocator, p->clipboard);
   p->clipboard = copy;
   /* own the selection via the first window (in-app roundtrip; serving
@@ -808,7 +983,8 @@ static my_ret_t x11_clipboard_set(my_pal_t* pal, const char* text) {
  * @brief Fetch from an EXTERNAL selection owner: XConvertSelection +
  * synchronous wait for SelectionNotify (~500ms). Other events are
  * dispatched normally while waiting (reentrancy-safe: the app handler
- * may paint/post; INCR incremental transfer is a TODO).
+ * may paint/post). Large payloads arrive via INCR: the incremental
+ * receive loop runs in x11_clipboard_fetch_incr (M11b).
  */
 static my_ret_t x11_clipboard_fetch(x11_pal_t* p, Atom target, char* buf,
                                     size_t size) {
@@ -841,11 +1017,18 @@ static my_ret_t x11_clipboard_fetch(x11_pal_t* p, Atom target, char* buf,
                                  AnyPropertyType, &actual, &format, &nitems,
                                  &remaining, &data) == Success &&
               data != NULL) {
-            size_t n = nitems < size - 1 ? nitems : size - 1;
-            memcpy(buf, data, n);
-            buf[n] = '\0';
-            XFree(data);
-            ret = MY_RET_OK;
+            if (actual == p->atom_incr) {
+              /* large payload: enter the incremental receive loop (M11b) */
+              XFree(data);
+              return x11_clipboard_fetch_incr(p, prop, buf, size);
+            }
+            {
+              size_t n = nitems < size - 1 ? nitems : size - 1;
+              memcpy(buf, data, n);
+              buf[n] = '\0';
+              XFree(data);
+              ret = MY_RET_OK;
+            }
           } else if (data != NULL) {
             XFree(data);
           }
@@ -936,6 +1119,7 @@ my_pal_t* my_pal_x11_create(const my_allocator_t* allocator) {
   p->atom_utf8 = XInternAtom(display, "UTF8_STRING", False);
   p->atom_targets = XInternAtom(display, "TARGETS", False);
   p->atom_clip_prop = XInternAtom(display, "MYUI_CLIP_PROP", False);
+  p->atom_incr = XInternAtom(display, "INCR", False);
   p->windows = my_darray_create(allocator, 0);
   if (p->windows == NULL) {
     XCloseDisplay(display);

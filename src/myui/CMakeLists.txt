@@ -11,6 +11,7 @@ add_library(myui STATIC
   my_window_manager.c
   my_xml.c
   my_undo_stack.c
+  my_undo_manager.c
   my_ui_loader.c
   my_image_loader.c
   my_stb_image.c

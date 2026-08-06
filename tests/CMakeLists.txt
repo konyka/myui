@@ -6,6 +6,7 @@ set(MYUI_X11_TESTS
   "${CMAKE_CURRENT_SOURCE_DIR}/my_pal_x11_keymap_test.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/x11_smoke_test.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/x11_clipboard_external_test.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/x11_clipboard_incr_test.c"
 )
 # gles2 smoke test needs EGL+GLES2 dev libraries
 set(MYUI_GLES2_TESTS

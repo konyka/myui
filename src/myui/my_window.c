@@ -249,6 +249,26 @@ my_pal_main_loop_t* my_window_loop_of_widget(my_widget_t* widget) {
   return NULL;
 }
 
+void my_window_set_undo_manager(my_window_t* win, void* mgr) {
+  if (win != NULL) {
+    win->undo_manager = mgr;
+  }
+}
+
+void* my_window_undo_manager_of_widget(my_widget_t* widget) {
+  my_widget_t* root = widget;
+  if (widget == NULL) {
+    return NULL;
+  }
+  while (root->parent != NULL) {
+    root = root->parent;
+  }
+  if (my_str_eq(root->widget_type, "window")) {
+    return ((my_window_t*)root)->undo_manager;
+  }
+  return NULL;
+}
+
 my_ret_t my_window_on_pal_event(my_window_t* win, const my_event_t* event) {
   my_widget_t* root;
   if (win == NULL || event == NULL) {

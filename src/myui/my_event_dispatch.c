@@ -133,6 +133,13 @@ static void set_focus(my_event_dispatcher_t* d, my_widget_t* widget) {
   }
 }
 
+void my_event_dispatcher_set_focus(my_event_dispatcher_t* dispatcher,
+                                   my_widget_t* widget) {
+  if (dispatcher != NULL) {
+    set_focus(dispatcher, nearest_focusable(widget));
+  }
+}
+
 bool my_event_dispatch(my_event_dispatcher_t* dispatcher,
                        const my_event_t* event) {
   my_widget_t* target;

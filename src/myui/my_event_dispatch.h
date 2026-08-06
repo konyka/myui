@@ -45,4 +45,11 @@ bool my_event_dispatch(my_event_dispatcher_t* dispatcher, const my_event_t* even
 void my_event_dispatcher_forget(my_event_dispatcher_t* dispatcher,
                                 my_widget_t* widget);
 
+/**
+ * @brief Switch the key focus programmatically (M11b), emitting
+ * "blur"/"focus" like a pointer-driven focus change. NULL = blur all.
+ */
+void my_event_dispatcher_set_focus(my_event_dispatcher_t* dispatcher,
+                                   my_widget_t* widget);
+
 #endif /* MY_EVENT_DISPATCH_H */

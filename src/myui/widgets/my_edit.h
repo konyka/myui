@@ -29,6 +29,8 @@ typedef struct my_edit_t {
   size_t max_len;      /**< max codepoints, 0 = unlimited */
   struct my_undo_stack_t* undo; /**< user-edit history (M10a) */
   bool applying_history;          /**< suppresses recording during undo/redo */
+  struct my_undo_manager_t* undo_shared; /**< borrowed shared stack (M11b;
+                                              NULL = private mode) */
   bool readonly;
   bool password;
   bool focused;
@@ -51,6 +53,15 @@ my_ret_t my_edit_set_password(my_widget_t* edit, bool password);
 my_ret_t my_edit_set_max_len(my_widget_t* edit, size_t max_codepoints);
 /** @brief Font used to measure for click-to-locate (borrowed). */
 void my_edit_set_font(my_widget_t* edit, my_font_t* font, int32_t size);
+
+/**
+ * @brief Switch to the shared undo manager (M11b, borrowed) or back to
+ * the private stack (mgr = NULL; the widget's shared entries are
+ * DISCARDED then, since a routed undo can no longer find their owner).
+ * In shared mode user edits record into mgr and Ctrl+Z/Y route through
+ * it (undo applies to the entry's owner widget and focuses it).
+ */
+my_ret_t my_edit_set_undo_shared(my_widget_t* edit, void* mgr);
 
 /** @brief Selected range as byte offsets (ordered). No selection: a == b. */
 void my_edit_get_selection(my_widget_t* edit, size_t* start, size_t* end);

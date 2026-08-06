@@ -48,6 +48,28 @@ my_ret_t my_undo_stack_record_insert(my_undo_stack_t* stack, size_t offset,
 my_ret_t my_undo_stack_record_delete(my_undo_stack_t* stack, size_t offset,
                                      const char* bytes, size_t len);
 
+/**
+ * @brief Tagged variants (M11b): entries carry an opaque owner tag (e.g.
+ * the editing widget). A tag change breaks the open batch naturally --
+ * interleaved edits of two owners never merge. Untagged calls behave as
+ * tag = NULL.
+ */
+my_ret_t my_undo_stack_record_insert_tagged(my_undo_stack_t* stack, void* tag,
+                                            size_t offset, const char* bytes,
+                                            size_t len);
+my_ret_t my_undo_stack_record_delete_tagged(my_undo_stack_t* stack, void* tag,
+                                            size_t offset, const char* bytes,
+                                            size_t len);
+
+/** @brief Drop all entries owned by `tag` (undo_pos adjusted). */
+void my_undo_stack_clear_tagged(my_undo_stack_t* stack, const void* tag);
+
+/** @brief Tagged undo/redo: also return the entry's owner tag. */
+my_ret_t my_undo_stack_undo_tagged(my_undo_stack_t* stack, my_undo_op_t* op,
+                                   void** tag);
+my_ret_t my_undo_stack_redo_tagged(my_undo_stack_t* stack, my_undo_op_t* op,
+                                   void** tag);
+
 /** @brief Close the current batch (focus loss, cursor jumps, etc). */
 void my_undo_stack_break_batch(my_undo_stack_t* stack);
 

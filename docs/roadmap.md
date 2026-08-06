@@ -29,6 +29,7 @@
 - **M10d GLES cap/join + 行高失效 + 收尾** ✅ 已完成：GLES ROUND cap（端点半圆 8 段三角扇）/ROUND join（顶点 lw/2 圆盘 8 段三角扇，覆盖规则同 soft），两后端描边能力对齐；`my_list_view_invalidate_row_height(s)` 变高行动态行高失效（全量重建 / index 起截断前缀和，滚动钳制 + 可视区 + 滚动条即时同步）；mock 顶点断言 + EGL 端点外像素读回；bench -L 全跑无回归。
 - **M10 完成**。
 - **M11a BiDi + 阿拉伯整形** ✅ 已完成：vendored SheenBidi-3.0.0（Apache-2.0，3rd/SheenBidi，unity TU 放宽警告，`MYUI_BIDI` 默认 ON 可裁剪）；`my_text_layout`（逻辑序→LTR 快速路径→整形→UBA 重排，文本键 LRU 64 + 调用方拷贝语义）；阿拉伯整形自研（3.0.0 无 shaping 模块，按本地 UCD 生成连接类/形表，محمد→词首/中/尾形逐断言）；soft/gles2 draw_text+measure 接入（x 恒为左缘，编辑控件 RTL 光标列 TODO）；demo_widgets 阿/希 i18n 窗口 + dummy dump 目检（字形连接正确、词序 RTL 反转正确）；Noto 字体渲染测试（缺字体 skip）+ GLES 阿拉伯读回；BIDI=OFF 构建 54/54 绿。
+- **M11b INCR 剪贴板 + 窗口级 undo** ✅ 已完成：x11 INCR 双向（阈值 64KB、片 min(64KB, maxreq−64)、零长度片收尾、接收 16MB 上限 + buf 满后排空丢弃；fork 子进程双向实测——收 13 片/200KB 完整、发 4 片校验通过）；结构性修复：剪贴板服务/INCR 推进不再依赖应用事件处理器；undo_stack tag 扩展 + `my_undo_manager` 共享时间序栈（跨控件 undo 顺序 + 焦点路由 + 切回私有丢共享历史的边界语义），edit/text_area `set_undo_shared` 接入。
 
 ## 性能基线汇总（M10d 刷新，GCC 16，-O0 Debug，本机）
 
@@ -44,4 +45,4 @@
 | list_view 万行滚动（固定/变高） | 0.002 ms/次（~22 行控件） |
 | 1051 控件构建 / relayout / 10 万 hit_test | 0.30 / 0.05 / 29.0 ms |
 
-- **M11+ 候选**：IME、INCR 增量剪贴板、UAX#14 断行、两端对齐（justify）、wrap 下撤销的视觉位置、编辑控件 RTL 光标（视觉-逻辑映射）、Lam-Alef 合字、UBA 镜像（L4）、竖排、盒式 pass 优化（滑动窗口分摊）、GLES AA（MSAA）、跨控件 undo 管理器、stroke 关节单轮廓合并。**SDK 顺延**：iOS/HarmonyOS/Android/Web/win32/sdl2 port、Metal backend、FreeBSD/linux_fb 实机复核。
+- **M11+ 候选**：IME、UAX#14 断行、两端对齐（justify）、wrap 下撤销的视觉位置、编辑控件 RTL 光标（视觉-逻辑映射）、Lam-Alef 合字、UBA 镜像（L4）、竖排、盒式 pass 优化（滑动窗口分摊）、GLES AA（MSAA）、INCR 并发多传输、wayland 剪贴板协议接入（wl_data_device）、stroke 关节单轮廓合并。**SDK 顺延**：iOS/HarmonyOS/Android/Web/win32/sdl2 port、Metal backend、FreeBSD/linux_fb 实机复核。

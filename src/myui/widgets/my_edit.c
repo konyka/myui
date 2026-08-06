@@ -7,6 +7,7 @@
 #include <string.h>
 
 #include "myc/my_str.h"
+#include "myui/my_undo_manager.h"
 #include "myui/my_undo_stack.h"
 #include "myui/my_window.h"
 
@@ -81,8 +82,11 @@ static void edit_set_text_internal(my_edit_t* e, const char* text, bool notify) 
   if (copy == NULL) {
     return;
   }
-  /* programmatic replacement: not undoable; the document diverged */
-  if (e->undo != NULL) {
+  /* programmatic replacement: not undoable; the document diverged. In
+   * shared mode only THIS widget's entries are dropped (M11b). */
+  if (e->undo_shared != NULL) {
+    my_undo_manager_clear_widget(e->undo_shared, e);
+  } else if (e->undo != NULL) {
     my_undo_stack_clear(e->undo);
   }
   my_mem_free(e->allocator, e->text);
@@ -151,8 +155,13 @@ static void user_delete_range(my_edit_t* e, size_t start, size_t end) {
   if (e->readonly) {
     return;
   }
-  if (!e->applying_history && e->undo != NULL) {
-    my_undo_stack_record_delete(e->undo, start, e->text + start, end - start);
+  if (!e->applying_history) {
+    if (e->undo_shared != NULL) {
+      my_undo_manager_record_delete(e->undo_shared, e, start, e->text + start,
+                                    end - start);
+    } else if (e->undo != NULL) {
+      my_undo_stack_record_delete(e->undo, start, e->text + start, end - start);
+    }
   }
   edit_delete_range(e, start, end);
   emit_changed(e);
@@ -166,10 +175,27 @@ static void user_insert(my_edit_t* e, const char* bytes, size_t n) {
   if (has_selection(e)) {
     delete_selection(e);
   }
-  if (!e->applying_history && e->undo != NULL) {
-    my_undo_stack_record_insert(e->undo, e->cursor, bytes, n);
+  if (!e->applying_history) {
+    if (e->undo_shared != NULL) {
+      my_undo_manager_record_insert(e->undo_shared, e, e->cursor, bytes, n);
+    } else if (e->undo != NULL) {
+      my_undo_stack_record_insert(e->undo, e->cursor, bytes, n);
+    }
   }
   edit_insert(e, bytes, n);
+  emit_changed(e);
+  my_widget_invalidate((my_widget_t*)e, NULL);
+}
+
+/** @brief Apply one undo/redo op (shared-mode apply callback, M11b). */
+static void edit_apply_undo_op(void* widget, const my_undo_op_t* op) {
+  my_edit_t* e = (my_edit_t*)widget;
+  e->applying_history = true;
+  edit_delete_range(e, op->offset, op->offset + op->remove_len);
+  edit_insert(e, op->bytes, op->bytes_len);
+  e->cursor = op->offset + op->bytes_len;
+  e->anchor = e->cursor;
+  e->applying_history = false;
   emit_changed(e);
   my_widget_invalidate((my_widget_t*)e, NULL);
 }
@@ -244,34 +270,36 @@ static my_ret_t edit_on_key(my_edit_t* e, const my_event_t* event) {
   size_t len = edit_len_bytes(e);
 
   if (ctrl && (key == 'z' || key == 'Z')) {
-    /* Ctrl+Z undo / Ctrl+Shift+Z redo (M10a) */
-    my_undo_op_t op;
-    my_ret_t r = ((mods & MY_KEYMOD_SHIFT) != 0)
-                     ? my_undo_stack_redo(e->undo, &op)
-                     : my_undo_stack_undo(e->undo, &op);
-    if (r == MY_RET_OK) {
-      e->applying_history = true;
-      edit_delete_range(e, op.offset, op.offset + op.remove_len);
-      edit_insert(e, op.bytes, op.bytes_len);
-      e->cursor = op.offset + op.bytes_len;
-      e->anchor = e->cursor;
-      e->applying_history = false;
-      emit_changed(e);
-      my_widget_invalidate((my_widget_t*)e, NULL);
+    /* Ctrl+Z undo / Ctrl+Shift+Z redo (M10a); shared mode routes (M11b) */
+    if (e->undo_shared != NULL) {
+      if ((mods & MY_KEYMOD_SHIFT) != 0) {
+        my_undo_manager_redo(e->undo_shared);
+      } else {
+        my_undo_manager_undo(e->undo_shared);
+      }
+      return MY_RET_OK;
+    }
+    {
+      my_undo_op_t op;
+      my_ret_t r = ((mods & MY_KEYMOD_SHIFT) != 0)
+                       ? my_undo_stack_redo(e->undo, &op)
+                       : my_undo_stack_undo(e->undo, &op);
+      if (r == MY_RET_OK) {
+        edit_apply_undo_op(e, &op);
+      }
     }
     return MY_RET_OK;
   }
   if (ctrl && (key == 'y' || key == 'Y')) {
-    my_undo_op_t op;
-    if (my_undo_stack_redo(e->undo, &op) == MY_RET_OK) {
-      e->applying_history = true;
-      edit_delete_range(e, op.offset, op.offset + op.remove_len);
-      edit_insert(e, op.bytes, op.bytes_len);
-      e->cursor = op.offset + op.bytes_len;
-      e->anchor = e->cursor;
-      e->applying_history = false;
-      emit_changed(e);
-      my_widget_invalidate((my_widget_t*)e, NULL);
+    if (e->undo_shared != NULL) {
+      my_undo_manager_redo(e->undo_shared);
+      return MY_RET_OK;
+    }
+    {
+      my_undo_op_t op;
+      if (my_undo_stack_redo(e->undo, &op) == MY_RET_OK) {
+        edit_apply_undo_op(e, &op);
+      }
     }
     return MY_RET_OK;
   }
@@ -437,7 +465,11 @@ static void edit_on_blur(void* ctx, const char* event, void* data) {
   my_edit_t* e = (my_edit_t*)ctx;
   (void)event;
   (void)data;
-  my_undo_stack_break_batch(e->undo);
+  if (e->undo_shared != NULL) {
+    my_undo_manager_break_batch(e->undo_shared);
+  } else {
+    my_undo_stack_break_batch(e->undo);
+  }
   e->focused = false;
   e->cursor_visible = true; /* hidden anyway when unfocused */
   if (e->blink_timer_id > 0 && e->blink_loop != NULL) {
@@ -519,6 +551,9 @@ static void edit_destroy_chain(my_object_t* obj) {
   if (e->blink_timer_id > 0 && e->blink_loop != NULL) {
     my_pal_main_loop_remove_timer(e->blink_loop, e->blink_timer_id);
   }
+  if (e->undo_shared != NULL) {
+    my_undo_manager_unregister(e->undo_shared, e);
+  }
   my_undo_stack_destroy(e->undo);
   my_mem_free(e->allocator, e->text);
   my_mem_free(e->allocator, e->masked);
@@ -564,6 +599,25 @@ my_ret_t my_edit_set_text(my_widget_t* edit, const char* text) {
 const char* my_edit_get_text(my_widget_t* edit) {
   my_edit_t* e = (my_edit_t*)edit;
   return edit == NULL || e->text == NULL ? "" : e->text;
+}
+
+my_ret_t my_edit_set_undo_shared(my_widget_t* edit, void* mgr) {
+  my_edit_t* e = (my_edit_t*)edit;
+  if (edit == NULL) {
+    return MY_RET_INVALID_PARAMS;
+  }
+  if (e->undo_shared != NULL) {
+    /* leaving shared mode discards the widget's shared history
+     * (documented): entries whose owner is unregistered cannot be
+     * applied by a routed undo */
+    my_undo_manager_clear_widget(e->undo_shared, e);
+    my_undo_manager_unregister(e->undo_shared, e);
+  }
+  e->undo_shared = (my_undo_manager_t*)mgr;
+  if (e->undo_shared != NULL) {
+    return my_undo_manager_register(e->undo_shared, e, edit_apply_undo_op);
+  }
+  return MY_RET_OK;
 }
 
 my_ret_t my_edit_set_hint(my_widget_t* edit, const char* hint) {
