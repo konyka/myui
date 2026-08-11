@@ -33,6 +33,7 @@
 - **M11c GLES MSAA + 盒式优化** ✅ 已完成：EGL config 优先 EGL_SAMPLES=4（x11/wayland/pbuffer 本机全拿到，对角描边边缘中间值断言通过，拿不到走文档化回落）；`my_vgcanvas_gles2_set_antialias` 落地（ES2 无核心开关，EXT 切换 + surface 驱动语义写清）；盒式 pass SWAR 打包累加（和逐项相同逐像素等价）——2000x1500→400x300：-O0 28.9→12.0ms、-O2 9.8→4.8ms/帧。
 - **M11d 对齐 + 描边关节合并 + 收尾** ✅ 已完成：`my_text_align_t`（LEFT/CENTER/RIGHT/JUSTIFY）+ label/text_area 对齐（CENTER/RIGHT 行宽偏移，选区/光标同偏；JUSTIFY 仅 wrap 非末段视觉行拉伸词距，无 wrap 无效）；XML/MVVM align 属性；soft stroke 关节覆盖率合并（单次调用内全部条带+圆盘共享覆盖率缓冲饱和加，半透明关节 alpha 不再翻倍：~224→~128，跨调用与 AA level 0 边界注释钉死）；golden round_cap 场景按流程再生（仅关节重叠像素变化）。
 - **M11 完成**。
+- **M12a 编辑控件 RTL** ✅ 已完成：text_layout 边界-视觉双向映射（单光标"前字符逻辑尾边"语义 + 规范边界往返一致、别名边界仅逻辑可达）；方向键/Home/End 按视觉方向（LTR 恒等零回归）；edit/text_area 光标 x/点击/选区跨 run 分段矩形接入；goal_col 统一为视觉边界索引；wrap+RTL 行级重排与跨行视觉连续性列 TODO；修 OFF 模式映射数组未初始化段错误；BIDI=OFF 构建 59/59 绿。
 
 ## 性能基线汇总（M10d 刷新，GCC 16，-O0 Debug，本机）
 
@@ -49,4 +50,4 @@
 | list_view 万行滚动（固定/变高） | 0.002 ms/次（~22 行控件） |
 | 1051 控件构建 / relayout / 10 万 hit_test | 0.30 / 0.05 / 29.0 ms |
 
-- **M12+ 候选**：IME、wayland 剪贴板协议接入（wl_data_device）、UAX#14 断行、Lam-Alef 合字、UBA 镜像（L4）、编辑控件 RTL 光标（视觉-逻辑映射）、wrap 下撤销的视觉位置、JUSTIFY 的选区/光标位置跟随、竖排、双线性采样器整数化（盒式尾部）、INCR 并发多传输、GLES 真窗口 IME/HiDPI。**SDK 顺延**：iOS/HarmonyOS/Android/Web/win32/sdl2 port、Metal backend、FreeBSD/linux_fb 实机复核。
+- **M12+ 候选**：IME、wayland 剪贴板协议接入（wl_data_device）、UAX#14 断行、Lam-Alef 合字、UBA 镜像（L4）、wrap+RTL 混排视觉行级重排、跨行视觉连续性、wrap 下撤销的视觉位置、JUSTIFY 的选区/光标位置跟随、竖排、双线性采样器整数化（盒式尾部）、INCR 并发多传输、HiDPI。**SDK 顺延**：iOS/HarmonyOS/Android/Web/win32/sdl2 port、Metal backend、FreeBSD/linux_fb 实机复核。

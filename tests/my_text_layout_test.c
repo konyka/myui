@@ -117,6 +117,102 @@ static void test_rtl_paragraph_reversed(void) {
   my_text_layout_destroy(l);
 }
 
+/* ---------------- boundary <-> visual mapping (M12a) ----------------
+ * "abc אבג def": logical a0 b1 c2 sp3 א4 ב5 ג6 sp7 d8 e9 f10;
+ * visual: a b c sp ג ב א sp d e f (8px cells, NULL font). */
+
+static const char MIXED[] = "abc \xD7\x90\xD7\x91\xD7\x92 def";
+
+static void test_boundary_visual_x(void) {
+  my_text_layout_t* l = my_text_layout_process(NULL, MIXED);
+  TEST_ASSERT_NOT_NULL(l);
+  TEST_ASSERT_EQ_INT(my_text_layout_visual_x(l, NULL, 8, 0), 0);
+  TEST_ASSERT_EQ_INT(my_text_layout_visual_x(l, NULL, 8, 3), 24);
+  TEST_ASSERT_EQ_INT(my_text_layout_visual_x(l, NULL, 8, 4), 32);
+  TEST_ASSERT_EQ_INT(my_text_layout_visual_x(l, NULL, 8, 5), 48);
+  TEST_ASSERT_EQ_INT(my_text_layout_visual_x(l, NULL, 8, 6), 40);
+  /* alias: boundary 7 (after gimel) shares boundary 4's visual spot at
+   * the run's left end (documented single-cursor rule) */
+  TEST_ASSERT_EQ_INT(my_text_layout_visual_x(l, NULL, 8, 7), 32);
+  TEST_ASSERT_EQ_INT(my_text_layout_visual_x(l, NULL, 8, 8), 64);
+  TEST_ASSERT_EQ_INT(my_text_layout_visual_x(l, NULL, 8, 11), 88);
+  my_text_layout_destroy(l);
+}
+
+static void test_boundary_right_walk(void) {
+  my_text_layout_t* l = my_text_layout_process(NULL, MIXED);
+  static const size_t expect[] = {1, 2, 3, 4, 6, 5, 8, 9, 10, 11};
+  size_t b = 0, i;
+  TEST_ASSERT_NOT_NULL(l);
+  for (i = 0; i < 10; i++) {
+    b = my_text_layout_boundary_right(l, b);
+    TEST_ASSERT_EQ_INT(b, expect[i]);
+  }
+  TEST_ASSERT_EQ_INT(my_text_layout_boundary_right(l, 11), 11); /* at end */
+  my_text_layout_destroy(l);
+}
+
+static void test_boundary_left_walk(void) {
+  my_text_layout_t* l = my_text_layout_process(NULL, MIXED);
+  static const size_t expect[] = {10, 9, 8, 5, 6, 4, 3, 2, 1, 0};
+  size_t b = 11, i;
+  TEST_ASSERT_NOT_NULL(l);
+  for (i = 0; i < 10; i++) {
+    b = my_text_layout_boundary_left(l, b);
+    TEST_ASSERT_EQ_INT(b, expect[i]);
+  }
+  TEST_ASSERT_EQ_INT(my_text_layout_boundary_left(l, 0), 0); /* at start */
+  my_text_layout_destroy(l);
+}
+
+static void test_boundary_home_end_pure_rtl(void) {
+  my_text_layout_t* l = my_text_layout_process(NULL, ALEF_BET_GIMEL);
+  TEST_ASSERT_NOT_NULL(l);
+  TEST_ASSERT_EQ_INT(my_text_layout_boundary_home(l), 3); /* visual start */
+  TEST_ASSERT_EQ_INT(my_text_layout_boundary_end(l), 0);   /* visual end */
+  TEST_ASSERT_EQ_INT(my_text_layout_visual_x(l, NULL, 8, 0), 24);
+  TEST_ASSERT_EQ_INT(my_text_layout_visual_x(l, NULL, 8, 3), 0);
+  my_text_layout_destroy(l);
+}
+
+static void test_logical_at_x_clicks(void) {
+  my_text_layout_t* l = my_text_layout_process(NULL, MIXED);
+  TEST_ASSERT_NOT_NULL(l);
+  TEST_ASSERT_EQ_INT(my_text_layout_logical_at_x(l, NULL, 8, 0), 0);
+  TEST_ASSERT_EQ_INT(my_text_layout_logical_at_x(l, NULL, 8, 34), 4); /* ג L */
+  TEST_ASSERT_EQ_INT(my_text_layout_logical_at_x(l, NULL, 8, 36), 6); /* ג R */
+  TEST_ASSERT_EQ_INT(my_text_layout_logical_at_x(l, NULL, 8, 40), 6); /* ב L */
+  TEST_ASSERT_EQ_INT(my_text_layout_logical_at_x(l, NULL, 8, 44), 5); /* ב mid->R */
+  TEST_ASSERT_EQ_INT(my_text_layout_logical_at_x(l, NULL, 8, 46), 5); /* ב R */
+  TEST_ASSERT_EQ_INT(my_text_layout_logical_at_x(l, NULL, 8, 60), 8); /* sp R */
+  TEST_ASSERT_EQ_INT(my_text_layout_logical_at_x(l, NULL, 8, 500), 11);
+  my_text_layout_destroy(l);
+}
+
+static void test_selection_visual_rects(void) {
+  my_text_layout_t* l = my_text_layout_process(NULL, MIXED);
+  my_rectf_t r[4];
+  size_t n;
+  TEST_ASSERT_NOT_NULL(l);
+
+  n = my_text_layout_visual_rects(l, NULL, 8, 0, 11, r, 4);
+  TEST_ASSERT_EQ_INT(n, 1);
+  TEST_ASSERT(r[0].x == 0.0f && r[0].w == 88.0f);
+
+  /* Hebrew run only [4,7): one rect over גבא (x 32, w 24) */
+  n = my_text_layout_visual_rects(l, NULL, 8, 4, 7, r, 4);
+  TEST_ASSERT_EQ_INT(n, 1);
+  TEST_ASSERT(r[0].x == 32.0f && r[0].w == 24.0f);
+
+  /* "c"+"א" across the run boundary [3,5): two segments */
+  n = my_text_layout_visual_rects(l, NULL, 8, 3, 5, r, 4);
+  TEST_ASSERT_EQ_INT(n, 2);
+  TEST_ASSERT(r[0].x == 24.0f && r[0].w == 8.0f);
+  TEST_ASSERT(r[1].x == 48.0f && r[1].w == 8.0f);
+  my_text_layout_destroy(l);
+}
+
+
 #endif /* MYUI_BIDI */
 
 static void test_cache_hit_and_eviction(void) {
@@ -174,6 +270,12 @@ MYTEST_MAIN_BEGIN()
   MYTEST_RUN(test_arabic_layout_visual_order);
   MYTEST_RUN(test_hebrew_in_ltr_paragraph);
   MYTEST_RUN(test_rtl_paragraph_reversed);
+  MYTEST_RUN(test_boundary_visual_x);
+  MYTEST_RUN(test_boundary_right_walk);
+  MYTEST_RUN(test_boundary_left_walk);
+  MYTEST_RUN(test_boundary_home_end_pure_rtl);
+  MYTEST_RUN(test_logical_at_x_clicks);
+  MYTEST_RUN(test_selection_visual_rects);
 #endif
   MYTEST_RUN(test_cache_hit_and_eviction);
   MYTEST_RUN(test_no_leak_with_debug_allocator);

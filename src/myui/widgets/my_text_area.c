@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "myc/my_str.h"
+#include "myr/my_text_layout.h"
 #include "myui/my_undo_manager.h"
 #include "myui/my_undo_stack.h"
 #include "myui/my_window.h"
@@ -588,6 +589,17 @@ static void ta_apply_undo_op(void* widget, const my_undo_op_t* op) {
   ta_apply_history((my_text_area_t*)widget, op);
 }
 
+/* ---------------- RTL mapping (M12a): per visual line segment ---------
+ * Wrap breaking itself stays in LOGICAL order; only drawing, cursor,
+ * clicks and selection go through the visual mapping (visual-order wrap
+ * rebreaking for mixed paragraphs is a documented TODO). */
+
+/** @brief Fresh NUL-terminated text of a visual line (caller frees). */
+static char* ta_vline_text(my_text_area_t* ta, const my_visual_line_t* vl);
+static my_text_layout_t* ta_layout_rtl(my_text_area_t* ta,
+                                       const my_visual_line_t* vl,
+                                       char** out_text);
+
 static my_ret_t ta_on_key(my_text_area_t* ta, const my_event_t* event) {
   uint32_t key = event->u.key.key;
   uint8_t mods = event->u.key.modifiers;
@@ -672,81 +684,132 @@ static my_ret_t ta_on_key(my_text_area_t* ta, const my_event_t* event) {
 
   switch (key) {
     case MY_KEY_LEFT:
-      if (ta->cursor_col > 0) {
-        ta_move_to(ta, ta->cursor_row, ta->cursor_col - 1, shift);
-      } else if (ta->cursor_row > 0) {
-        ta_move_to(ta, ta->cursor_row - 1,
-                   ta_line_cp_len(ta, ta->cursor_row - 1), shift);
-      }
-      if (!shift) {
-        ta->goal_col = ta->cursor_col;
-      }
-      return MY_RET_OK;
-    case MY_KEY_RIGHT:
-      if (ta->cursor_col < ta_line_cp_len(ta, ta->cursor_row)) {
-        ta_move_to(ta, ta->cursor_row, ta->cursor_col + 1, shift);
-      } else if (ta->cursor_row + 1 < ta_line_count(ta)) {
-        ta_move_to(ta, ta->cursor_row + 1, 0, shift);
-      }
-      if (!shift) {
-        ta->goal_col = ta->cursor_col;
-      }
-      return MY_RET_OK;
-    case MY_KEY_UP:
-      if (ta->wrap) {
-        size_t civ, vi = ta_vline_of_pos(ta, ta->cursor_row, ta->cursor_col,
-                                         &civ);
-        if (vi > 0) {
-          const my_visual_line_t* v = ta_vline_at(ta, vi - 1);
-          size_t nc = ta->goal_col < v->len_cp ? ta->goal_col : v->len_cp;
-          ta_move_to(ta, v->phys, v->start_cp + nc, shift);
+    case MY_KEY_RIGHT: {
+      /* RTL (M12a): arrows move VISUALLY within the current line. Line
+       * crossings fall back to logical line ends (visual continuity of
+       * mixed paragraphs across lines is a documented TODO). */
+      size_t vi = ta->wrap ? ta_vline_of_pos(ta, ta->cursor_row,
+                                             ta->cursor_col, &(size_t){0})
+                           : ta->cursor_row;
+      const my_visual_line_t* vl = ta_vline_at(ta, vi);
+      char* seg = NULL;
+      my_text_layout_t* l = ta_layout_rtl(ta, vl, &seg);
+      if (l != NULL) {
+        size_t col_in = ta->cursor_col - vl->start_cp;
+        bool at_visual_start = col_in == my_text_layout_boundary_home(l);
+        bool at_visual_end = col_in == my_text_layout_boundary_end(l);
+        if (key == MY_KEY_LEFT && at_visual_start) {
+          if (ta->cursor_row > 0) {
+            ta_move_to(ta, ta->cursor_row - 1,
+                       ta_line_cp_len(ta, ta->cursor_row - 1), shift);
+          }
+        } else if (key == MY_KEY_RIGHT && at_visual_end) {
+          if (ta->cursor_row + 1 < ta_line_count(ta)) {
+            ta_move_to(ta, ta->cursor_row + 1, 0, shift);
+          }
+        } else {
+          size_t nb =
+              key == MY_KEY_LEFT ? my_text_layout_boundary_left(l, col_in)
+                                 : my_text_layout_boundary_right(l, col_in);
+          ta_move_to(ta, ta->cursor_row, vl->start_cp + nb, shift);
         }
-      } else if (ta->cursor_row > 0) {
-        ta_move_to(ta, ta->cursor_row - 1, ta->goal_col, shift);
-      }
-      return MY_RET_OK;
-    case MY_KEY_DOWN:
-      if (ta->wrap) {
-        size_t civ, vi = ta_vline_of_pos(ta, ta->cursor_row, ta->cursor_col,
-                                         &civ);
-        if (vi + 1 < ta_vline_count(ta)) {
-          const my_visual_line_t* v = ta_vline_at(ta, vi + 1);
-          size_t nc = ta->goal_col < v->len_cp ? ta->goal_col : v->len_cp;
-          ta_move_to(ta, v->phys, v->start_cp + nc, shift);
+        if (!shift) {
+          /* goal column tracks the VISUAL boundary index (identity for
+           * pure LTR, so the legacy semantics are unchanged) */
+          ta->goal_col = my_text_layout_visual_of_logical(
+              l, ta->cursor_col - vl->start_cp);
         }
-      } else if (ta->cursor_row + 1 < ta_line_count(ta)) {
-        ta_move_to(ta, ta->cursor_row + 1, ta->goal_col, shift);
+        my_mem_free(ta->allocator, seg);
+        my_text_layout_destroy(l);
+        return MY_RET_OK;
       }
-      return MY_RET_OK;
-    case MY_KEY_HOME:
-      if (ctrl) {
-        ta_move_to(ta, 0, 0, shift);
-      } else if (ta->wrap) {
-        /* wrap semantics: Home = start of the VISUAL line (documented) */
-        size_t civ, vi = ta_vline_of_pos(ta, ta->cursor_row, ta->cursor_col,
-                                         &civ);
-        const my_visual_line_t* v = ta_vline_at(ta, vi);
-        ta_move_to(ta, v->phys, v->start_cp, shift);
+      if (key == MY_KEY_LEFT) {
+        if (ta->cursor_col > 0) {
+          ta_move_to(ta, ta->cursor_row, ta->cursor_col - 1, shift);
+        } else if (ta->cursor_row > 0) {
+          ta_move_to(ta, ta->cursor_row - 1,
+                     ta_line_cp_len(ta, ta->cursor_row - 1), shift);
+        }
       } else {
-        ta_move_to(ta, ta->cursor_row, 0, shift);
+        if (ta->cursor_col < ta_line_cp_len(ta, ta->cursor_row)) {
+          ta_move_to(ta, ta->cursor_row, ta->cursor_col + 1, shift);
+        } else if (ta->cursor_row + 1 < ta_line_count(ta)) {
+          ta_move_to(ta, ta->cursor_row + 1, 0, shift);
+        }
       }
       if (!shift) {
         ta->goal_col = ta->cursor_col;
       }
       return MY_RET_OK;
+    }
+    case MY_KEY_UP:
+    case MY_KEY_DOWN: {
+      /* goal column = visual boundary index (identity for LTR). With an
+       * RTL target line the column goes through the mapping (M12a). */
+      size_t civ = 0, vi;
+      const my_visual_line_t* v = NULL;
+      if (ta->wrap) {
+        vi = ta_vline_of_pos(ta, ta->cursor_row, ta->cursor_col, &civ);
+        if (key == MY_KEY_UP && vi > 0) {
+          v = ta_vline_at(ta, vi - 1);
+        } else if (key == MY_KEY_DOWN && vi + 1 < ta_vline_count(ta)) {
+          v = ta_vline_at(ta, vi + 1);
+        }
+      } else {
+        if (key == MY_KEY_UP && ta->cursor_row > 0) {
+          v = ta_vline_at(ta, ta->cursor_row - 1);
+        } else if (key == MY_KEY_DOWN &&
+                   ta->cursor_row + 1 < ta_line_count(ta)) {
+          v = ta_vline_at(ta, ta->cursor_row + 1);
+        }
+      }
+      if (v != NULL) {
+        char* seg = NULL;
+        my_text_layout_t* l = ta_layout_rtl(ta, v, &seg);
+        size_t nc = ta->goal_col < v->len_cp ? ta->goal_col : v->len_cp;
+        if (l != NULL) {
+          nc = my_text_layout_logical_at_visual(l, nc);
+          if (nc > v->len_cp) {
+            nc = v->len_cp;
+          }
+          my_mem_free(ta->allocator, seg);
+          my_text_layout_destroy(l);
+        }
+        ta_move_to(ta, v->phys, v->start_cp + nc, shift);
+      }
+      return MY_RET_OK;
+    }
+    case MY_KEY_HOME:
     case MY_KEY_END:
       if (ctrl) {
-        ta_move_to(ta, ta_line_count(ta) - 1,
-                   ta_line_cp_len(ta, ta_line_count(ta) - 1), shift);
-      } else if (ta->wrap) {
-        /* wrap semantics: End = end of the VISUAL line (documented) */
-        size_t civ, vi = ta_vline_of_pos(ta, ta->cursor_row, ta->cursor_col,
-                                         &civ);
-        const my_visual_line_t* v = ta_vline_at(ta, vi);
-        ta_move_to(ta, v->phys, v->start_cp + v->len_cp, shift);
+        if (key == MY_KEY_HOME) {
+          ta_move_to(ta, 0, 0, shift);
+        } else {
+          ta_move_to(ta, ta_line_count(ta) - 1,
+                     ta_line_cp_len(ta, ta_line_count(ta) - 1), shift);
+        }
       } else {
-        ta_move_to(ta, ta->cursor_row,
-                   ta_line_cp_len(ta, ta->cursor_row), shift);
+        /* visual line start/end (wrap semantics documented); with RTL
+         * the visual edge maps to a logical boundary inside the line */
+        size_t civ = 0, vi = ta->wrap
+                                 ? ta_vline_of_pos(ta, ta->cursor_row,
+                                                   ta->cursor_col, &civ)
+                                 : ta->cursor_row;
+        const my_visual_line_t* v = ta_vline_at(ta, vi);
+        char* seg = NULL;
+        my_text_layout_t* l = ta_layout_rtl(ta, v, &seg);
+        size_t col;
+        if (l != NULL) {
+          col = v->start_cp + (key == MY_KEY_HOME
+                                   ? my_text_layout_boundary_home(l)
+                                   : my_text_layout_boundary_end(l));
+          my_mem_free(ta->allocator, seg);
+          my_text_layout_destroy(l);
+        } else {
+          col = key == MY_KEY_HOME ? v->start_cp
+                                   : v->start_cp + v->len_cp;
+        }
+        ta_move_to(ta, v->phys, col, shift);
       }
       if (!shift) {
         ta->goal_col = ta->cursor_col;
@@ -811,6 +874,47 @@ static my_ret_t ta_on_key(my_text_area_t* ta, const my_event_t* event) {
   return MY_RET_FAIL;
 }
 
+/* ---------------- RTL mapping (M12a): per visual line segment ---------
+ * Wrap breaking itself stays in LOGICAL order; only drawing, cursor,
+ * clicks and selection go through the visual mapping (visual-order wrap
+ * rebreaking for mixed paragraphs is a documented TODO). */
+
+/** @brief Fresh NUL-terminated text of a visual line (caller frees). */
+static char* ta_vline_text(my_text_area_t* ta, const my_visual_line_t* vl) {
+  size_t start = ta_offset_of(ta, vl->phys, vl->start_cp);
+  size_t end = ta_offset_of(ta, vl->phys, vl->start_cp + vl->len_cp);
+  char* s;
+  if (end <= start) {
+    return NULL;
+  }
+  s = (char*)my_mem_alloc(ta->allocator, end - start + 1);
+  if (s != NULL) {
+    memcpy(s, ta->text + start, end - start);
+    s[end - start] = '\0';
+  }
+  return s;
+}
+
+/** @brief Layout of a visual line's text when it needs bidi (out_text
+ * receives the segment string to free), else NULL (fast path). */
+static my_text_layout_t* ta_layout_rtl(my_text_area_t* ta,
+                                       const my_visual_line_t* vl,
+                                       char** out_text) {
+  char* s = ta_vline_text(ta, vl);
+  if (s == NULL) {
+    return NULL;
+  }
+  if (my_text_layout_may_need_bidi(s)) {
+    my_text_layout_t* l = my_text_layout_process(ta->allocator, s);
+    if (l != NULL) {
+      *out_text = s;
+      return l;
+    }
+  }
+  my_mem_free(ta->allocator, s);
+  return NULL;
+}
+
 /* ---------------- events ---------------- */
 
 static my_ret_t ta_on_event(my_widget_t* widget, const my_event_t* event) {
@@ -819,12 +923,33 @@ static my_ret_t ta_on_event(my_widget_t* widget, const my_event_t* event) {
     case MY_EVENT_POINTER_DOWN: {
       int32_t lx = event->u.pointer.x, ly = event->u.pointer.y;
       int32_t line_h = ta->font_size > 0 ? ta->font_size : 16;
-      size_t row, col;
+      size_t row;
+      const my_visual_line_t* vl;
+      char* seg = NULL;
+      my_text_layout_t* l;
+      size_t col;
       my_widget_global_to_local(widget, &lx, &ly);
       row = (size_t)((ly - TA_PAD_Y + ta->scroll_y) / line_h);
-      col = (size_t)((lx - TA_PAD_X + ta->scroll_x + TA_CELL_W / 2) /
-                     TA_CELL_W);
-      ta_move_to(ta, row, col, false);
+      if (row >= ta_vline_count(ta)) {
+        row = ta_vline_count(ta) > 0 ? ta_vline_count(ta) - 1 : 0;
+      }
+      vl = ta_vline_at(ta, row); /* row is a VISUAL index (wrap-aware) */
+      l = ta_layout_rtl(ta, vl, &seg);
+      if (l != NULL) {
+        /* RTL (M12a): visual hit-test inside the line */
+        col = vl->start_cp +
+              my_text_layout_logical_at_x(l, ta->font, ta->font_size,
+                                          lx - TA_PAD_X + ta->scroll_x);
+        my_mem_free(ta->allocator, seg);
+        my_text_layout_destroy(l);
+      } else {
+        col = (size_t)((lx - TA_PAD_X + ta->scroll_x + TA_CELL_W / 2) /
+                       TA_CELL_W);
+        if (col > vl->start_cp + vl->len_cp) {
+          col = vl->start_cp + vl->len_cp;
+        }
+      }
+      ta_move_to(ta, vl->phys, col, false);
       ta->goal_col = ta->cursor_col;
       return MY_RET_OK;
     }
@@ -944,14 +1069,37 @@ static void ta_on_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
                             ? c1
                             : vl->start_cp + vl->len_cp;
             if (s1 > s0) {
+              /* RTL (M12a): the contiguous logical selection may show as
+               * several visual segments at run boundaries */
+              my_text_layout_t* rl =
+                  my_text_layout_may_need_bidi(line)
+                      ? my_text_layout_process(ta->allocator, line)
+                      : NULL;
               my_vgcanvas_set_fill_color(vg, my_color_rgb(130, 170, 230));
-              my_vgcanvas_fill_rect(
-                  vg, &(my_rectf_t){(float)(TA_PAD_X + delta +
-                                                (int32_t)(s0 - vl->start_cp) *
-                                                    TA_CELL_W -
-                                                ta->scroll_x),
-                                    (float)ty, (float)(s1 - s0) * TA_CELL_W,
-                                    (float)line_h});
+              if (rl != NULL) {
+                my_rectf_t rects[4];
+                size_t n = my_text_layout_visual_rects(
+                    rl, ta->font, ta->font_size, s0 - vl->start_cp,
+                    s1 - vl->start_cp, rects, 4);
+                size_t k;
+                for (k = 0; k < n && k < 4; k++) {
+                  my_vgcanvas_fill_rect(
+                      vg, &(my_rectf_t){(float)(TA_PAD_X + delta +
+                                                    (int32_t)rects[k].x -
+                                                    ta->scroll_x),
+                                        (float)ty, rects[k].w,
+                                        (float)line_h});
+                }
+                my_text_layout_destroy(rl);
+              } else {
+                my_vgcanvas_fill_rect(
+                    vg, &(my_rectf_t){(float)(TA_PAD_X + delta +
+                                                  (int32_t)(s0 - vl->start_cp) *
+                                                      TA_CELL_W -
+                                                  ta->scroll_x),
+                                      (float)ty, (float)(s1 - s0) * TA_CELL_W,
+                                      (float)line_h});
+              }
             }
           }
           my_vgcanvas_set_fill_color(vg, my_color_from_rgba32(fg));
@@ -1008,13 +1156,42 @@ static void ta_on_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
     size_t civ = 0, cvi = ta->wrap
                               ? ta_vline_of_pos(ta, ta->cursor_row,
                                                 ta->cursor_col, &civ)
-                              : 0;
-    int32_t cx = TA_PAD_X +
-                 (int32_t)(ta->wrap ? civ : ta->cursor_col) * TA_CELL_W -
-                 ta->scroll_x;
+                              : ta->cursor_row;
+    const my_visual_line_t* cv = ta_vline_at(ta, cvi);
+    char* ctext = ta_vline_text(ta, cv);
+    int32_t cx = TA_PAD_X - ta->scroll_x;
     int32_t cy = TA_PAD_Y +
                  (int32_t)(ta->wrap ? cvi : ta->cursor_row) * line_h -
                  ta->scroll_y;
+    if (ctext != NULL) {
+      int32_t inner_w = widget->rect.w - 2 * TA_PAD_X;
+      int32_t lw = 0;
+      size_t col_in = ta->cursor_col - cv->start_cp;
+      /* same base as the text line (scroll + align), then the mapped
+       * visual x for RTL, cell math otherwise (M12a) */
+      if (ta->font != NULL) {
+        my_vgcanvas_measure_text(vg, ctext, &lw, NULL);
+      } else {
+        lw = (int32_t)cv->len_cp * TA_CELL_W;
+      }
+      if (ta->align == MY_TEXT_ALIGN_CENTER) {
+        cx += (inner_w - lw) / 2;
+      } else if (ta->align == MY_TEXT_ALIGN_RIGHT) {
+        cx += inner_w - lw;
+      }
+      if (my_text_layout_may_need_bidi(ctext)) {
+        my_text_layout_t* cl = my_text_layout_process(ta->allocator, ctext);
+        if (cl != NULL) {
+          cx += my_text_layout_visual_x(cl, ta->font, ta->font_size, col_in);
+          my_text_layout_destroy(cl);
+        }
+      } else {
+        cx += (int32_t)col_in * TA_CELL_W;
+      }
+      my_mem_free(ta->allocator, ctext);
+    } else {
+      cx += (int32_t)(ta->wrap ? civ : ta->cursor_col) * TA_CELL_W;
+    }
     my_vgcanvas_set_fill_color(vg, my_color_from_rgba32(fg));
     my_vgcanvas_fill_rect(vg, &(my_rectf_t){(float)cx, (float)cy, 1,
                                             (float)line_h});

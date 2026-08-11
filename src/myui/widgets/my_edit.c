@@ -7,6 +7,7 @@
 #include <string.h>
 
 #include "myc/my_str.h"
+#include "myr/my_text_layout.h"
 #include "myui/my_undo_manager.h"
 #include "myui/my_undo_stack.h"
 #include "myui/my_window.h"
@@ -223,6 +224,52 @@ static int32_t text_px(my_edit_t* e, const char* s, size_t n) {
   return w;
 }
 
+/* ---------------- RTL cursor/click/selection mapping (M12a) ---------- */
+
+/** @brief Layout of the shown text when it needs bidi, else NULL (the
+ * plain-LTR fast path keeps the legacy logic untouched). */
+static my_text_layout_t* edit_layout_rtl(my_edit_t* e, const char* shown) {
+  if (shown != NULL && *shown != '\0' && my_text_layout_may_need_bidi(shown)) {
+    return my_text_layout_process(e->allocator, shown);
+  }
+  return NULL;
+}
+
+/** @brief Codepoint index of a byte offset (cursor is at cp boundaries). */
+static size_t edit_cp_index_of(const char* s, size_t byte_off) {
+  size_t pos = 0, idx = 0;
+  while (pos < byte_off && s[pos] != '\0') {
+    pos = cp_next(s, pos);
+    idx++;
+  }
+  return idx;
+}
+
+/** @brief Byte offset of a codepoint index. */
+static size_t edit_byte_of_cp(const char* s, size_t cp_idx) {
+  size_t pos = 0;
+  while (cp_idx > 0 && s[pos] != '\0') {
+    pos = cp_next(s, pos);
+    cp_idx--;
+  }
+  return pos;
+}
+
+/** @brief Cursor pixel x: visual mapping for RTL text, prefix width
+ * otherwise (bit-identical to the legacy path for LTR). */
+static int32_t edit_cursor_px(my_edit_t* e, const char* shown,
+                              size_t byte_off) {
+  my_text_layout_t* l = edit_layout_rtl(e, shown);
+  int32_t x;
+  if (l == NULL) {
+    return text_px(e, shown, byte_off);
+  }
+  x = my_text_layout_visual_x(l, e->font, e->font_size,
+                              edit_cp_index_of(shown, byte_off));
+  my_text_layout_destroy(l);
+  return x;
+}
+
 /** @brief Cursor byte offset for a click at local x (pixels). */
 static size_t locate_cursor(my_edit_t* e, int32_t local_x) {
   const char* s = e->password ? e->masked : e->text;
@@ -232,6 +279,16 @@ static size_t locate_cursor(my_edit_t* e, int32_t local_x) {
     return 0;
   }
   len = strlen(s);
+  {
+    /* RTL (M12a): hit-test in visual space via the layout mapping */
+    my_text_layout_t* l = edit_layout_rtl(e, s);
+    if (l != NULL) {
+      size_t idx = my_text_layout_logical_at_x(l, e->font, e->font_size,
+                                               target);
+      my_text_layout_destroy(l);
+      return edit_byte_of_cp(s, idx);
+    }
+  }
   while (pos < len) {
     size_t next = cp_next(s, pos);
     int32_t w0 = text_px(e, s, pos);
@@ -248,7 +305,7 @@ static void ensure_cursor_visible(my_edit_t* e) {
   const char* s = e->password ? e->masked : e->text;
   my_widget_t* w = (my_widget_t*)e;
   int32_t inner_w = w->rect.w - 2 * EDIT_PAD_X;
-  int32_t cx = s != NULL ? text_px(e, s, e->cursor) : 0;
+  int32_t cx = s != NULL ? edit_cursor_px(e, s, e->cursor) : 0;
   if (inner_w <= 0) {
     return;
   }
@@ -358,8 +415,19 @@ static my_ret_t edit_on_key(my_edit_t* e, const my_event_t* event) {
   switch (key) {
     case MY_KEY_LEFT:
     case MY_KEY_RIGHT: {
-      size_t next = key == MY_KEY_LEFT ? cp_prev(e->text, e->cursor)
-                                       : cp_next(e->text, e->cursor);
+      /* RTL (M12a): arrows move VISUALLY via the layout boundary map */
+      my_text_layout_t* l = edit_layout_rtl(e, e->text);
+      size_t next;
+      if (l != NULL) {
+        size_t idx = edit_cp_index_of(e->text, e->cursor);
+        idx = key == MY_KEY_LEFT ? my_text_layout_boundary_left(l, idx)
+                                 : my_text_layout_boundary_right(l, idx);
+        next = edit_byte_of_cp(e->text, idx);
+        my_text_layout_destroy(l);
+      } else {
+        next = key == MY_KEY_LEFT ? cp_prev(e->text, e->cursor)
+                                  : cp_next(e->text, e->cursor);
+      }
       e->cursor = next;
       if (!shift) {
         e->anchor = next;
@@ -368,21 +436,34 @@ static my_ret_t edit_on_key(my_edit_t* e, const my_event_t* event) {
       my_widget_invalidate((my_widget_t*)e, NULL);
       return MY_RET_OK;
     }
-    case MY_KEY_HOME:
+    case MY_KEY_HOME: {
+      my_text_layout_t* l = edit_layout_rtl(e, e->text);
       e->cursor = 0;
+      if (l != NULL) {
+        e->cursor =
+            edit_byte_of_cp(e->text, my_text_layout_boundary_home(l));
+        my_text_layout_destroy(l);
+      }
       if (!shift) {
-        e->anchor = 0;
+        e->anchor = e->cursor;
       }
       my_widget_invalidate((my_widget_t*)e, NULL);
       return MY_RET_OK;
-    case MY_KEY_END:
+    }
+    case MY_KEY_END: {
+      my_text_layout_t* l = edit_layout_rtl(e, e->text);
       e->cursor = len;
+      if (l != NULL) {
+        e->cursor = edit_byte_of_cp(e->text, my_text_layout_boundary_end(l));
+        my_text_layout_destroy(l);
+      }
       if (!shift) {
-        e->anchor = len;
+        e->anchor = e->cursor;
       }
       ensure_cursor_visible(e);
       my_widget_invalidate((my_widget_t*)e, NULL);
       return MY_RET_OK;
+    }
     case MY_KEY_BACKSPACE:
       if (has_selection(e)) {
         user_delete_range(e, e->cursor < e->anchor ? e->cursor : e->anchor,
@@ -520,12 +601,31 @@ static void edit_on_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
     if (has_selection(e)) {
       size_t a = e->cursor < e->anchor ? e->cursor : e->anchor;
       size_t b = e->cursor < e->anchor ? e->anchor : e->cursor;
-      int32_t x0 = text_px(e, shown, a) - e->scroll_x;
-      int32_t x1 = text_px(e, shown, b) - e->scroll_x;
+      my_text_layout_t* l = edit_layout_rtl(e, shown);
       my_vgcanvas_set_fill_color(vg, my_color_rgb(130, 170, 230));
-      my_vgcanvas_fill_rect(vg, &(my_rectf_t){(float)(EDIT_PAD_X + x0),
-                                              EDIT_PAD_Y, (float)(x1 - x0),
-                                              (float)(widget->rect.h - 2 * EDIT_PAD_Y)});
+      if (l != NULL) {
+        /* RTL (M12a): a contiguous logical selection may show as
+         * several visual segments at run boundaries */
+        my_rectf_t rects[4];
+        size_t n = my_text_layout_visual_rects(
+            l, e->font, e->font_size, edit_cp_index_of(shown, a),
+            edit_cp_index_of(shown, b), rects, 4);
+        size_t k;
+        for (k = 0; k < n && k < 4; k++) {
+          my_vgcanvas_fill_rect(
+              vg, &(my_rectf_t){(float)(EDIT_PAD_X + (int32_t)rects[k].x -
+                                        e->scroll_x),
+                                EDIT_PAD_Y, rects[k].w,
+                                (float)(widget->rect.h - 2 * EDIT_PAD_Y)});
+        }
+        my_text_layout_destroy(l);
+      } else {
+        int32_t x0 = text_px(e, shown, a) - e->scroll_x;
+        int32_t x1 = text_px(e, shown, b) - e->scroll_x;
+        my_vgcanvas_fill_rect(vg, &(my_rectf_t){(float)(EDIT_PAD_X + x0),
+                                                EDIT_PAD_Y, (float)(x1 - x0),
+                                                (float)(widget->rect.h - 2 * EDIT_PAD_Y)});
+      }
     }
     my_vgcanvas_set_fill_color(vg, my_color_from_rgba32(fg));
     my_vgcanvas_draw_text(vg, shown, (float)(EDIT_PAD_X - e->scroll_x),
@@ -534,7 +634,7 @@ static void edit_on_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
 
   /* cursor (blinks at 500ms when focused) */
   if (e->focused && e->cursor_visible) {
-    int32_t cx = shown != NULL ? text_px(e, shown, e->cursor) : 0;
+    int32_t cx = shown != NULL ? edit_cursor_px(e, shown, e->cursor) : 0;
     my_vgcanvas_set_fill_color(vg, my_color_from_rgba32(fg));
     my_vgcanvas_fill_rect(vg, &(my_rectf_t){(float)(EDIT_PAD_X + cx - e->scroll_x),
                                             EDIT_PAD_Y + 1, 1,

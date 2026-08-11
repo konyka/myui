@@ -25,12 +25,16 @@
 
 #include "myc/my_mem.h"
 #include "myc/my_types.h"
+#include "myr/my_font.h"
+#include "myr/my_rect.h"
 
 /** @brief One laid-out string (caller-owned copy). */
 typedef struct my_text_layout_t {
   const my_allocator_t* allocator;
   uint32_t* visual_cps;        /**< len items: shaped + reordered */
   uint32_t* visual_to_logical; /**< len items: visual i -> logical index */
+  uint32_t* logical_to_visual; /**< len items: logical i -> visual index */
+  uint8_t* visual_rtl;         /**< len items: visual cp's run is RTL */
   char* visual_utf8;           /**< visual_cps re-encoded as UTF-8 */
   size_t len;
   bool has_rtl;                /**< any RTL-level run (or RTL base) */
@@ -59,5 +63,53 @@ void my_text_layout_cache_flush(void);
 
 /** @brief Occupied cache slots (tests). */
 size_t my_text_layout_cache_size(void);
+
+/* ---------------- editing support: boundary <-> visual (M12a) --------
+ * A CURSOR always sits between two logical codepoints (a "logical
+ * boundary", 0..len). Its visual position is defined by ONE consistent
+ * rule -- the previous logical codepoint's logical-trailing edge (RTL
+ * codepoints trail to the LEFT visually). No dual/secondary cursors:
+ * at run transitions a boundary has one canonical visual spot, and a
+ * newly typed char may appear elsewhere (documented quirk of every
+ * single-cursor model). Width math uses `font` (glyph advances); NULL
+ * font = 8px cell per codepoint (the widgets' no-font fallback). */
+
+/** @brief Visual x (px) of a logical boundary. */
+int32_t my_text_layout_visual_x(const my_text_layout_t* l,
+                                const my_font_t* font, int32_t size,
+                                size_t logical_boundary);
+
+/** @brief Nearest logical boundary for a click at visual x. */
+size_t my_text_layout_logical_at_x(const my_text_layout_t* l,
+                                   const my_font_t* font, int32_t size,
+                                   int32_t x);
+
+/** @brief Left/Right keys move VISUALLY (RTL run: Left = logical +1). */
+size_t my_text_layout_boundary_left(const my_text_layout_t* l,
+                                    size_t logical_boundary);
+size_t my_text_layout_boundary_right(const my_text_layout_t* l,
+                                     size_t logical_boundary);
+
+/** @brief Home/End: visual line start/end boundaries. */
+size_t my_text_layout_boundary_home(const my_text_layout_t* l);
+size_t my_text_layout_boundary_end(const my_text_layout_t* l);
+
+/** @brief Raw boundary conversions (canonical rules above; used for
+ * goal-column style vertical navigation). */
+size_t my_text_layout_visual_of_logical(const my_text_layout_t* l,
+                                        size_t logical_boundary);
+size_t my_text_layout_logical_at_visual(const my_text_layout_t* l,
+                                        size_t visual_boundary);
+
+/**
+ * @brief Selection highlight segments: visual x/w rects for a logical
+ * range [l0, l1) (contiguous logical text may appear as several visual
+ * segments at run boundaries). y/h left to the caller (0.0f here).
+ * @return segment count (0..cap).
+ */
+size_t my_text_layout_visual_rects(const my_text_layout_t* l,
+                                   const struct my_font_t* font, int32_t size,
+                                   size_t l0, size_t l1, my_rectf_t* out,
+                                   size_t cap);
 
 #endif /* MY_TEXT_LAYOUT_H */

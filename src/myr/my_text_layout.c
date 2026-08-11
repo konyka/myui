@@ -102,6 +102,8 @@ typedef struct tl_master_t {
   char* text;  /**< key (owned copy) */
   uint32_t* cps;
   uint32_t* map;
+  uint32_t* inv;   /**< logical_to_visual */
+  uint8_t* vrtl;   /**< per visual cp: run is RTL */
   char* utf8;
   size_t len;
   bool has_rtl;
@@ -112,6 +114,8 @@ static void tl_master_free(tl_master_t* m) {
   my_mem_free(NULL, m->text);
   my_mem_free(NULL, m->cps);
   my_mem_free(NULL, m->map);
+  my_mem_free(NULL, m->inv);
+  my_mem_free(NULL, m->vrtl);
   my_mem_free(NULL, m->utf8);
   memset(m, 0, sizeof(*m));
 }
@@ -129,7 +133,9 @@ static bool tl_master_compute(tl_master_t* m, const char* text) {
   }
   m->len = len;
   m->map = (uint32_t*)my_mem_alloc(NULL, (len > 0 ? len : 1) * sizeof(uint32_t));
-  if (m->map == NULL) {
+  m->inv = (uint32_t*)my_mem_alloc(NULL, (len > 0 ? len : 1) * sizeof(uint32_t));
+  m->vrtl = (uint8_t*)my_mem_calloc(NULL, (len > 0 ? len : 1), 1);
+  if (m->map == NULL || m->inv == NULL || m->vrtl == NULL) {
     tl_master_free(m);
     return false;
   }
@@ -182,6 +188,7 @@ static bool tl_master_compute(tl_master_t* m, const char* text) {
                   runs[ri].offset + (rtl ? runs[ri].length - 1u - k : k);
               m->cps[vi] = tmp[logical];
               m->map[vi] = (uint32_t)logical;
+              m->vrtl[vi] = rtl ? 1u : 0u;
               vi++;
             }
           }
@@ -203,7 +210,7 @@ static bool tl_master_compute(tl_master_t* m, const char* text) {
     }
   }
 #else
-  (void)may;
+  may = false; /* BIDI compiled out: always the identity layout */
 #endif
   if (!may || m->len == 0) {
     /* identity: visual == logical */
@@ -211,6 +218,9 @@ static bool tl_master_compute(tl_master_t* m, const char* text) {
       m->map[i] = (uint32_t)i;
     }
     m->has_rtl = false;
+  }
+  for (i = 0; i < len; i++) { /* inverse map (valid for both paths) */
+    m->inv[m->map[i]] = (uint32_t)i;
   }
   m->utf8 = tl_encode_all(NULL, m->cps, len);
   if (m->utf8 == NULL) {
@@ -241,12 +251,18 @@ static my_text_layout_t* tl_copy(const my_allocator_t* alloc,
     l->visual_cps = (uint32_t*)my_mem_alloc(alloc, m->len * sizeof(uint32_t));
     l->visual_to_logical =
         (uint32_t*)my_mem_alloc(alloc, m->len * sizeof(uint32_t));
-    if (l->visual_cps == NULL || l->visual_to_logical == NULL) {
+    l->logical_to_visual =
+        (uint32_t*)my_mem_alloc(alloc, m->len * sizeof(uint32_t));
+    l->visual_rtl = (uint8_t*)my_mem_alloc(alloc, m->len);
+    if (l->visual_cps == NULL || l->visual_to_logical == NULL ||
+        l->logical_to_visual == NULL || l->visual_rtl == NULL) {
       my_text_layout_destroy(l);
       return NULL;
     }
     memcpy(l->visual_cps, m->cps, m->len * sizeof(uint32_t));
     memcpy(l->visual_to_logical, m->map, m->len * sizeof(uint32_t));
+    memcpy(l->logical_to_visual, m->inv, m->len * sizeof(uint32_t));
+    memcpy(l->visual_rtl, m->vrtl, m->len);
   }
   l->visual_utf8 = my_strdup(alloc, m->utf8 != NULL ? m->utf8 : "");
   if (l->visual_utf8 == NULL) {
@@ -295,6 +311,8 @@ void my_text_layout_destroy(my_text_layout_t* layout) {
     const my_allocator_t* alloc = layout->allocator;
     my_mem_free(alloc, layout->visual_cps);
     my_mem_free(alloc, layout->visual_to_logical);
+    my_mem_free(alloc, layout->logical_to_visual);
+    my_mem_free(alloc, layout->visual_rtl);
     my_mem_free(alloc, layout->visual_utf8);
     my_mem_free(alloc, layout);
   }
@@ -313,6 +331,220 @@ size_t my_text_layout_cache_size(void) {
     if (g_cache[i].text != NULL) {
       n++;
     }
+  }
+  return n;
+}
+
+/* ---------------- boundary <-> visual (M12a) ---------------- */
+
+/** @brief Width of one visual codepoint (glyph advance; 8px cell when
+ * font is NULL). */
+static float tl_cp_w(const my_font_t* font, int32_t size, uint32_t cp) {
+  my_glyph_t g;
+  if (font == NULL) {
+    return 8.0f;
+  }
+  if (my_font_get_glyph((my_font_t*)font, cp, size, &g) != MY_RET_OK) {
+    return 0.0f;
+  }
+  return (float)g.advance;
+}
+
+/** @brief Visual boundary index (0..len) of a logical boundary:
+ * previous logical codepoint's logical-trailing edge. */
+static size_t tl_vb_of_lb(const my_text_layout_t* l, size_t b) {
+  size_t vi;
+  if (l->len == 0) {
+    return 0;
+  }
+  if (b == 0) {
+    /* leading edge of logical cp 0 */
+    vi = l->logical_to_visual[0];
+    return l->visual_rtl[vi] != 0 ? vi + 1 : vi;
+  }
+  if (b > l->len) {
+    b = l->len;
+  }
+  vi = l->logical_to_visual[b - 1];
+  return l->visual_rtl[vi] != 0 ? vi : vi + 1;
+}
+
+/** @brief Logical boundary at a visual boundary (previous visual
+ * codepoint's trailing edge). */
+static size_t tl_lb_of_vb(const my_text_layout_t* l, size_t v) {
+  size_t prev;
+  if (l->len == 0 || v == 0) {
+    if (l->len == 0) {
+      return 0;
+    }
+    return l->visual_rtl[0] != 0 ? l->visual_to_logical[0] + 1
+                                 : l->visual_to_logical[0];
+  }
+  if (v > l->len) {
+    v = l->len;
+  }
+  prev = v - 1;
+  return l->visual_rtl[prev] != 0 ? l->visual_to_logical[prev]
+                                  : l->visual_to_logical[prev] + 1;
+}
+
+/* At run transitions two logical boundaries can share one visual spot
+ * (the classic dual-cursor situation -- we stay single-cursor, so only
+ * one of them is "canonical" there). Arrow keys and clicks therefore
+ * walk CANONICAL visual boundaries only: a visual boundary v is
+ * canonical when the round trip lands back on v. Alias boundaries
+ * remain reachable via logical ops (typing, Backspace, Home/End). */
+static bool tl_canonical(const my_text_layout_t* l, size_t v) {
+  return tl_vb_of_lb(l, tl_lb_of_vb(l, v)) == v;
+}
+
+/** @brief Nearest canonical visual boundary at or after v (<= len). */
+static size_t tl_canon_right(const my_text_layout_t* l, size_t v) {
+  while (v < l->len && !tl_canonical(l, v)) {
+    v++;
+  }
+  return v;
+}
+
+/** @brief Nearest canonical visual boundary at or before v. */
+static size_t tl_canon_left(const my_text_layout_t* l, size_t v) {
+  while (v > 0 && !tl_canonical(l, v)) {
+    v--;
+  }
+  return v;
+}
+
+int32_t my_text_layout_visual_x(const my_text_layout_t* l,
+                                const my_font_t* font, int32_t size,
+                                size_t logical_boundary) {
+  size_t v, i;
+  float x = 0.0f;
+  if (l == NULL) {
+    return 0;
+  }
+  v = tl_vb_of_lb(l, logical_boundary);
+  for (i = 0; i < v; i++) {
+    x += tl_cp_w(font, size, l->visual_cps[i]);
+  }
+  return (int32_t)(x + 0.5f);
+}
+
+size_t my_text_layout_logical_at_x(const my_text_layout_t* l,
+                                   const my_font_t* font, int32_t size,
+                                   int32_t x) {
+  float acc = 0.0f;
+  size_t i;
+  if (l == NULL || l->len == 0) {
+    return 0;
+  }
+  if (x <= 0) {
+    return tl_lb_of_vb(l, 0);
+  }
+  for (i = 0; i < l->len; i++) {
+    float w = tl_cp_w(font, size, l->visual_cps[i]);
+    if ((float)x < acc + w / 2.0f) {
+      /* left half: nearest canonical boundary at or before visual i */
+      return tl_lb_of_vb(l, tl_canon_left(l, i));
+    }
+    if ((float)x < acc + w) {
+      /* right half: nearest canonical boundary at or after visual i+1 */
+      return tl_lb_of_vb(l, tl_canon_right(l, i + 1));
+    }
+    acc += w;
+  }
+  return tl_lb_of_vb(l, l->len);
+}
+
+size_t my_text_layout_boundary_left(const my_text_layout_t* l,
+                                    size_t logical_boundary) {
+  size_t v;
+  if (l == NULL || l->len == 0) {
+    return 0;
+  }
+  v = tl_vb_of_lb(l, logical_boundary);
+  if (v == 0) {
+    return tl_lb_of_vb(l, 0); /* already at the visual start */
+  }
+  return tl_lb_of_vb(l, tl_canon_left(l, v - 1));
+}
+
+size_t my_text_layout_boundary_right(const my_text_layout_t* l,
+                                     size_t logical_boundary) {
+  size_t v;
+  if (l == NULL || l->len == 0) {
+    return 0;
+  }
+  v = tl_vb_of_lb(l, logical_boundary);
+  if (v >= l->len) {
+    return tl_lb_of_vb(l, l->len); /* already at the visual end */
+  }
+  return tl_lb_of_vb(l, tl_canon_right(l, v + 1));
+}
+
+size_t my_text_layout_boundary_home(const my_text_layout_t* l) {
+  if (l == NULL) {
+    return 0;
+  }
+  return tl_lb_of_vb(l, 0);
+}
+
+size_t my_text_layout_boundary_end(const my_text_layout_t* l) {
+  if (l == NULL) {
+    return 0;
+  }
+  return tl_lb_of_vb(l, l->len);
+}
+
+size_t my_text_layout_visual_of_logical(const my_text_layout_t* l,
+                                        size_t logical_boundary) {
+  if (l == NULL) {
+    return 0;
+  }
+  return tl_vb_of_lb(l, logical_boundary);
+}
+
+size_t my_text_layout_logical_at_visual(const my_text_layout_t* l,
+                                        size_t visual_boundary) {
+  if (l == NULL) {
+    return 0;
+  }
+  return tl_lb_of_vb(l, visual_boundary);
+}
+
+size_t my_text_layout_visual_rects(const my_text_layout_t* l,
+                                   const my_font_t* font, int32_t size,
+                                   size_t l0, size_t l1, my_rectf_t* out,
+                                   size_t cap) {
+  size_t j, n = 0;
+  float x = 0.0f;
+  bool open = false;
+  float seg_x = 0.0f, seg_w = 0.0f;
+  if (l == NULL || out == NULL || cap == 0 || l0 >= l1 || l0 >= l->len) {
+    return 0;
+  }
+  if (l1 > l->len) {
+    l1 = l->len;
+  }
+  for (j = 0; j < l->len; j++) {
+    float w = tl_cp_w(font, size, l->visual_cps[j]);
+    bool in_sel = l->visual_to_logical[j] >= l0 &&
+                  l->visual_to_logical[j] < l1;
+    if (in_sel && !open) {
+      open = true;
+      seg_x = x;
+      seg_w = 0.0f;
+    }
+    if (in_sel) {
+      seg_w += w;
+    }
+    if (open && (!in_sel || j + 1 == l->len)) {
+      if (n < cap) {
+        out[n] = my_rectf_init(seg_x, 0.0f, seg_w, 0.0f);
+      }
+      n++;
+      open = false;
+    }
+    x += w;
   }
   return n;
 }

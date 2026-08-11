@@ -222,6 +222,13 @@ PAL port 矩阵：
 - **裁剪**：`MYUI_BIDI=OFF`（默认 ON）不编 SheenBidi（省 ~100KB），process 退化为恒等布局，draw/measure 路径不变。
 - 集成偏离记录：任务书假定"SheenBidi 的 shaping"，实际 3.0.0 无此模块（只有重排/镜像查找表），整形为 myui 自研（数据同来自本地 UCD）；SheenBidi 许可证为 Apache-2.0（非任务书所述 ISC，同为宽松许可，LICENSE 已 vendor）。
 
+## RTL 编辑模型：视觉-逻辑映射（M12a）
+
+- **边界语义定案（单光标）**：光标永远在两个逻辑字符之间（逻辑边界 0..len）。其视觉位置由一条规则确定——**前一个逻辑字符的逻辑尾边**（RTL 字符向左"收尾"）：LTR 字符尾边=右缘，RTL 字符尾边=左缘。run 交界处两个逻辑边界可共享同一视觉点（经典双光标场景，我们保持单光标：点击/方向键只落"规范"视觉边界——往返映射能回到自身的边界；别名边界仍可由打字/退格/Home/End 到达）。已知怪癖（所有单光标模型共有）：run 边界处新敲的字符可能出现在光标以外的位置。
+- **text_layout 新 API**：`visual_x(logical_boundary)`（光标 x）、`logical_at_x`（点击，左右半字宽取最近规范边界）、`boundary_left/right`（方向键**按视觉方向**，内部只走规范边界，LTR 下退化为恒等）、`boundary_home/end`（视觉行首/尾）、`visual_rects(l0,l1)`（选区分段矩形，跨 run 时多段）、`visual_of_logical/logical_at_visual`（goal 列换算）。宽度经 font 字形 advance；NULL font = 8px 格子（控件无字体兜底约定）。布局新增 per-cp run 方向与 logical→visual 逆映射（缓存随文本自然失效）。
+- **edit 接入**：光标 x/点击定位/选区高亮（跨 run 分段）/方向键/Home/End 全部经映射——**仅当文本 may_need_bidi 时**；纯 LTR 走原等宽/measure 路径（逐位零回归，现有测试未动）。text_area 接入按视觉行段同理：wrap 折行本身保持逻辑序（**wrap+RTL 混排的视觉行级重排留 TODO**）；上下移动 goal_col 语义统一为**视觉边界索引**（LTR 下恒等于 codepoint 列，零回归）；跨行左右移动回落逻辑行首/尾（跨行视觉连续性同 TODO）。
+- BIDI=OFF 下 RTL 分支整体裁掉（identity 布局 + 测试按宏跳过）；M12a 还修复了 OFF 模式 `may` 未归零导致映射数组未初始化的段错误（tl_master_compute 强制 identity）。
+
 ## INCR 增量剪贴板与窗口级 undo 管理器（M11b）
 
 - **INCR（x11，ICCCM 2.7.2）**：阈值 64KB——clipboard 文本超过即走增量协议。**发送端**（本应用为 owner）：SelectionRequest 应答改为写 INCR 类型属性（32 位下界值）+ 对 requestor 窗口 `XSelectInput(PropertyChangeMask)`；对方每次删除属性（PropertyNotify/PropertyDelete）追加下一片（片大小 = min(64KB, XMaxRequestSize×4−64)，本机实测 4 片/200KB），最后一片删除后补零长度片收尾；同时只允许一个传输（并发请求拒绝），clipboard_set 中途换文档会发零长度片礼貌收尾。**接收端**：SelectionNotify 读到 INCR 类型即进收片循环——删属性（=向对方要下一片）→ 等 PropertyNewValue（单片 2s 超时，事件泵与 M9d 同款，其他事件照常分发）→ 读片拼接，直到零长度片；buf 满后继续收片但丢弃（让对方正常结束），总长上限 16MB 防挂死。**结构性修复**：SelectionRequest 服务与 INCR 发送推进移到 x11_dispatch 顶部、先于 handler NULL 检查——剪贴板服务不再依赖应用注册事件处理器（M9d 时代隐藏依赖，本次 fork 测试暴露）。窗口创建加 PropertyChangeMask。dummy/wayland 内存往返无 INCR 概念，行为不变。
