@@ -9,6 +9,7 @@
 #include "mypal/linux_fb/my_pal_linux_fb.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
@@ -87,6 +88,7 @@ typedef struct fb_pal_t {
   my_pal_event_handler_t handler;
   void* handler_ctx;
   char* clipboard;
+  float scale; /**< MYUI_SCALE env or 1.0 (M12c) */
 } fb_pal_t;
 
 static uint64_t fb_now_ms(void) {
@@ -452,12 +454,17 @@ static void fb_pal_destroy(my_pal_t* pal) {
   my_mem_free(p->allocator, p);
 }
 
+static float fb_get_scale(my_pal_t* pal) {
+  return ((fb_pal_t*)pal)->scale;
+}
+
 static const my_pal_vtable_t s_fb_pal_vtable = {fb_window_create,
                                                 fb_main_loop_create,
                                                 fb_time_now_ms,
                                                 fb_set_event_handler,
                                                 fb_clipboard_set,
                                                 fb_clipboard_get,
+                                                fb_get_scale,
                                                 fb_pal_destroy};
 
 my_pal_t* my_pal_linux_fb_create(const my_allocator_t* allocator,
@@ -479,6 +486,18 @@ my_pal_t* my_pal_linux_fb_create(const my_allocator_t* allocator,
   p->osal = *osal;
   p->fb_fd = -1;
   p->input_fd = -1;
+  /* HiDPI override (M12c): MYUI_SCALE=float, default 1.0. The fb window
+   * is the physical fullscreen surface; scale only drives vg scaling. */
+  p->scale = 1.0f;
+  {
+    const char* env = getenv("MYUI_SCALE");
+    if (env != NULL) {
+      float v = (float)atof(env);
+      if (v > 0.0f) {
+        p->scale = v;
+      }
+    }
+  }
 
   p->fb_fd = osal->open(osal->ctx, fb_dev != NULL ? fb_dev : "/dev/fb0", 2);
   if (p->fb_fd < 0) {

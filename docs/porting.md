@@ -23,6 +23,7 @@
   - [ ] `get_lcd()`：给 myr 绘制的 `my_lcd_t*`；最简单方案 = 内嵌 `my_lcd_mem`，`end_frame` 时整块拷贝/上屏（x11 port 就是这么做的）
   - [ ] `set_title` / `resize`（重建 lcd 缓冲）/ `show` / `get_size` / `destroy`
   - [ ] `gl_enable`（M10c，可打桩返回 NULL）：窗口的 GL 挂载点，见下节
+  - [ ] `get_scale_factor`（M12c，可返回 1.0 打桩）：显示器缩放比。PAL 边界一律**逻辑像素**——窗口尺寸与事件坐标报逻辑值；port 内部把渲染缓冲物理化（x11 照抄：窗口/缓冲按 logical*scale 建、事件 ÷scale；wayland：shm 缓冲 ×scale + `wl_surface_set_buffer_scale`，事件直通；dummy：注入即可测全链路）。scale 检测来源：x11=Xft.dpi→物理 DPI→1.0，wayland=wl_output.scale，嵌入式=环境变量或 1.0。
 - [ ] 主循环 `my_pal_main_loop_t` vtable
   - [ ] `run`：阻塞等待（select/poll/平台 wait），超时取 `my_timer_manager_due_in_ms`，分发事件 + `my_timer_manager_fire`
   - [ ] `quit`：可跨线程调用，须唤醒 run（pipe/事件/wakeup 消息）

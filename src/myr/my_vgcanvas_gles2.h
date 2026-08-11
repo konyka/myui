@@ -44,4 +44,11 @@ my_ret_t my_vgcanvas_gles2_resize(my_vgcanvas_t* vg, int32_t width,
  */
 my_ret_t my_vgcanvas_gles2_set_antialias(my_vgcanvas_t* vg, bool enabled);
 
+/**
+ * @brief HiDPI display scale (M12c): vertices/device coords = (user +
+ * translate) * scale, font sizes multiply; viewport stays physical.
+ * Default 1.0 (pass-through). Lives in the state stack.
+ */
+my_ret_t my_vgcanvas_gles2_set_scale(my_vgcanvas_t* vg, float scale);
+
 #endif /* MY_VGCANVAS_GLES2_H */

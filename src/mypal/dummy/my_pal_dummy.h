@@ -17,6 +17,10 @@ my_pal_t* my_pal_dummy_create(const my_allocator_t* allocator);
 /** @brief Test hook: set the dummy platform's monotonic clock. */
 void my_pal_dummy_set_now_ms(my_pal_t* pal, uint64_t now_ms);
 
+/** @brief Test hook (M12c): inject a display scale factor (default 1).
+ * Takes effect for windows created/resized afterwards. */
+void my_pal_dummy_set_scale_factor(my_pal_t* pal, float scale);
+
 /**
  * @brief Test hook (dummy loops only): dispatch up to n queued events,
  * FIFO. @return number of events dispatched (0 when queue is empty or

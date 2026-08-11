@@ -5,6 +5,7 @@
 #include "myr/my_lcd_mem.h"
 #include "myr/my_vgcanvas_soft.h"
 
+#include <math.h>
 #include <string.h>
 
 #include "mytest.h"
@@ -186,6 +187,65 @@ static void test_box_checker_variance_below_nearest(void) {
   my_lcd_destroy(lcd);
 }
 
+/* M12c: fixed-point bilinear must match a float reference within +-1
+ * per channel (weight quantization 1/256). */
+static void test_fixedpoint_matches_float_within_1(void) {
+  uint8_t img[3 * 3 * 4];
+  int x, y;
+  my_lcd_t* lcd = my_lcd_mem_create(NULL, 7, 5, MY_PIXEL_FORMAT_BGRA8888);
+  my_vgcanvas_t* vg = my_vgcanvas_soft_create(NULL, lcd);
+  static const int DW = 7, DH = 5;
+  for (y = 0; y < 3; y++) {
+    for (x = 0; x < 3; x++) {
+      uint8_t* p = img + (y * 3 + x) * 4;
+      p[0] = (uint8_t)(x * 80 + y * 20);
+      p[1] = (uint8_t)(255 - x * 60);
+      p[2] = (uint8_t)(x * 10 + y * 70);
+      p[3] = 255;
+    }
+  }
+  my_vgcanvas_begin_frame(vg, NULL);
+  my_vgcanvas_soft_set_scale_filter(vg, MY_SCALE_FILTER_BILINEAR);
+  my_vgcanvas_draw_image(vg, img, 3, 3, &(my_rectf_t){0, 0, DW, DH}, NULL);
+  my_vgcanvas_end_frame(vg);
+
+  for (y = 0; y < DH; y++) {
+    for (x = 0; x < DW; x++) {
+      /* float reference for the same pixel-center mapping */
+      float gx = ((float)x + 0.5f) * 3.0f / (float)DW - 0.5f;
+      float gy = ((float)y + 0.5f) * 3.0f / (float)DH - 0.5f;
+      int x0 = (int)floorf(gx), y0 = (int)floorf(gy);
+      float ax = gx - (float)x0, ay = gy - (float)y0;
+      int x1, y1, c;
+      uint8_t r, g, b;
+      if (x0 < 0) { x0 = 0; ax = 0.0f; }
+      if (y0 < 0) { y0 = 0; ay = 0.0f; }
+      x1 = x0 + 1 < 3 ? x0 + 1 : 2;
+      y1 = y0 + 1 < 3 ? y0 + 1 : 2;
+      if (x0 >= 3) { x0 = 2; x1 = 2; ax = 0.0f; }
+      if (y0 >= 3) { y0 = 2; y1 = 2; ay = 0.0f; }
+      px_rgb(lcd, x, y, &r, &g, &b);
+      {
+        uint8_t got[3] = {r, g, b};
+        for (c = 0; c < 3; c++) {
+          float v00 = (float)img[(y0 * 3 + x0) * 4 + c];
+          float v10 = (float)img[(y0 * 3 + x1) * 4 + c];
+          float v01 = (float)img[(y1 * 3 + x0) * 4 + c];
+          float v11 = (float)img[(y1 * 3 + x1) * 4 + c];
+          float top = v00 + (v10 - v00) * ax;
+          float bot = v01 + (v11 - v01) * ax;
+          int want = (int)(top + (bot - top) * ay + 0.5f);
+          int d = (int)got[c] - want;
+          TEST_ASSERT(d >= -1 && d <= 1);
+        }
+      }
+    }
+  }
+
+  my_vgcanvas_destroy(vg);
+  my_lcd_destroy(lcd);
+}
+
 static void test_box_gradient_exact(void) {
   /* 4x4 -> 1x1 (4x tier): SWAR-packed accumulation (M11c) must produce
    * pixel-exact identical sums to the scalar path */
@@ -275,4 +335,5 @@ MYTEST_MAIN_BEGIN()
   MYTEST_RUN(test_box_checker_variance_below_nearest);
   MYTEST_RUN(test_box_tier_partial_blocks);
   MYTEST_RUN(test_box_gradient_exact);
+  MYTEST_RUN(test_fixedpoint_matches_float_within_1);
 MYTEST_MAIN_END()

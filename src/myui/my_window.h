@@ -25,6 +25,7 @@ typedef struct my_window_t {
   my_pal_gl_t* gl;                   /**< GL mount when GL enabled (M10c) */
   bool gl_owned;
   void* undo_manager;      /**< borrowed my_undo_manager_t (M11b) */
+  float scale;             /**< cached display scale (M12c HiDPI) */
   my_color_t bg_color;
   my_theme_t* theme;                 /**< active theme */
   bool theme_owned;

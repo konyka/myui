@@ -83,6 +83,11 @@ my_window_t* my_window_create(const my_allocator_t* allocator, my_pal_t* pal,
     return NULL;
   }
   win->bg_color = my_color_rgb(32, 32, 32);
+  win->scale = my_pal_get_scale_factor(pal); /* HiDPI (M12c): applied to
+                                                the vgcanvas in ensure/GL */
+  if (win->scale <= 0.0f) {
+    win->scale = 1.0f;
+  }
   win->vg = NULL;
   win->vg_owned = false;
   win->modal = false;
@@ -133,6 +138,9 @@ my_ret_t my_window_enable_gl(my_window_t* win) {
     my_pal_gl_destroy(gl);
     return MY_RET_FAIL;
   }
+  if (win->scale != 1.0f) {
+    my_vgcanvas_gles2_set_scale(vg, win->scale);
+  }
   if (win->vg_owned) {
     my_vgcanvas_destroy(win->vg);
   }
@@ -166,6 +174,9 @@ static my_vgcanvas_t* window_ensure_vg(my_window_t* win) {
     win->vg = my_vgcanvas_soft_create(win->allocator,
                                       my_pal_window_get_lcd(win->pal_window));
     win->vg_owned = win->vg != NULL;
+    if (win->vg != NULL && win->scale != 1.0f) {
+      my_vgcanvas_soft_set_scale(win->vg, win->scale);
+    }
     if (win->vg != NULL && win->font != NULL) {
       my_vgcanvas_set_font(win->vg, win->font, win->font_size);
     }

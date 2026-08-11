@@ -19,6 +19,12 @@
  * @brief Create a software vgcanvas drawing on lcd (borrowed, NOT owned;
  * the caller destroys the lcd). NULL allocator = default.
  */
+/** @brief HiDPI display scale (M12c): device coords = (user+translate) *
+ * scale, font sizes multiply, line widths scale through the same device
+ * conversion. Default 1.0 (pass-through). Set right after creation (or
+ * per window); it lives in the state stack (save/restore safe). */
+void my_vgcanvas_soft_set_scale(my_vgcanvas_t* vg, float scale);
+
 my_vgcanvas_t* my_vgcanvas_soft_create(const my_allocator_t* allocator,
                                        my_lcd_t* lcd);
 

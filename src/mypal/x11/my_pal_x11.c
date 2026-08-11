@@ -48,6 +48,7 @@ typedef struct x11_pal_t {
   my_darray_t* windows; /**< x11_window_t* registry for event routing */
   my_pal_event_handler_t handler;
   void* handler_ctx;
+  float scale; /**< Xft.dpi/96 or physical DPI estimate (M12c) */
   char* clipboard;        /**< cached text (we serve it when we own) */
   Atom atom_clipboard;
   Atom atom_utf8;
@@ -80,8 +81,10 @@ typedef struct x11_window_t {
   const my_allocator_t* allocator;
   Window xwin;
   GC gc;
-  int32_t w;
+  int32_t w;          /**< LOGICAL size (M12c) */
   int32_t h;
+  int32_t pw;         /**< physical buffer size = logical*scale */
+  int32_t ph;
   my_lcd_t* mem_lcd;   /**< back buffer (owned) */
   my_lcd_t* front_lcd; /**< wrapper lcd: end_frame presents (owned) */
   XImage* ximage;      /**< wraps the back buffer (data borrowed) */
@@ -97,7 +100,7 @@ static uint64_t x11_now_ms(void) {
 static void x11_present(x11_window_t* win) {
   x11_pal_t* p = win->pal;
   XPutImage(p->display, win->xwin, win->gc, win->ximage, 0, 0, 0, 0,
-            (unsigned)win->w, (unsigned)win->h);
+            (unsigned)win->pw, (unsigned)win->ph);
   XFlush(p->display);
 }
 
@@ -187,7 +190,10 @@ static my_ret_t x11_win_resize(my_pal_window_t* win, int32_t width, int32_t heig
   if (width <= 0 || height <= 0) {
     return MY_RET_INVALID_PARAMS;
   }
-  XResizeWindow(w->pal->display, w->xwin, (unsigned)width, (unsigned)height);
+  /* app sizes are logical (M12c): the X window is physical */
+  XResizeWindow(w->pal->display, w->xwin,
+                (unsigned)(width * w->pal->scale + 0.5f),
+                (unsigned)(height * w->pal->scale + 0.5f));
   /* buffers are re-created on the ConfigureNotify event */
   return MY_RET_OK;
 }
@@ -214,16 +220,16 @@ static my_lcd_t* x11_win_get_lcd(my_pal_window_t* win) {
   return ((x11_window_t*)win)->front_lcd;
 }
 
-/** @brief Re-create back buffer + XImage at the current size. */
+/** @brief Re-create back buffer + XImage at the current physical size. */
 static my_ret_t x11_win_recreate_buffers(x11_window_t* w) {
   x11_pal_t* p = w->pal;
-  my_lcd_t* mem = my_lcd_mem_create(w->allocator, (uint32_t)w->w, (uint32_t)w->h,
-                                    MY_PIXEL_FORMAT_BGRA8888);
+  my_lcd_t* mem = my_lcd_mem_create(w->allocator, (uint32_t)w->pw,
+                                    (uint32_t)w->ph, MY_PIXEL_FORMAT_BGRA8888);
   XImage* image;
   if (mem == NULL) {
     return MY_RET_OOM;
   }
-  image = x11_image_create(p, mem, w->w, w->h);
+  image = x11_image_create(p, mem, w->pw, w->ph);
   if (image == NULL) {
     my_lcd_destroy(mem);
     return MY_RET_FAIL;
@@ -331,10 +337,10 @@ static my_ret_t x11_gl_swap(my_pal_gl_t* gl) {
 static my_ret_t x11_gl_get_size(my_pal_gl_t* gl, int32_t* w, int32_t* h) {
   x11_gl_t* g = (x11_gl_t*)gl;
   if (w != NULL) {
-    *w = g->win->w;
+    *w = g->win->pw; /* drawable size is physical pixels */
   }
   if (h != NULL) {
-    *h = g->win->h;
+    *h = g->win->ph;
   }
   return MY_RET_OK;
 }
@@ -425,11 +431,14 @@ static my_pal_window_t* x11_window_create(my_pal_t* pal, int32_t w, int32_t h,
   win->base.vtable = &s_x11_window_vtable;
   win->pal = p;
   win->allocator = p->allocator;
-  win->w = w;
+  win->w = w; /* logical; the X window + buffers are physical (M12c) */
   win->h = h;
+  win->pw = (int32_t)(w * p->scale + 0.5f);
+  win->ph = (int32_t)(h * p->scale + 0.5f);
 
   win->xwin = XCreateSimpleWindow(p->display, RootWindow(p->display, p->screen),
-                                  0, 0, (unsigned)w, (unsigned)h, 0, 0,
+                                  0, 0, (unsigned)win->pw, (unsigned)win->ph,
+                                  0, 0,
                                   (unsigned long)BlackPixel(p->display, p->screen));
   win->gc = XCreateGC(p->display, win->xwin, 0, NULL);
   XSelectInput(p->display, win->xwin,
@@ -704,9 +713,12 @@ static void x11_dispatch(x11_pal_t* p, const XEvent* xev) {
       break;
     case ConfigureNotify:
       if (w != NULL &&
-          (xev->xconfigure.width != w->w || xev->xconfigure.height != w->h)) {
-        w->w = xev->xconfigure.width;
-        w->h = xev->xconfigure.height;
+          (xev->xconfigure.width != w->pw || xev->xconfigure.height != w->ph)) {
+        /* X reports physical pixels; app-facing sizes are logical */
+        w->pw = xev->xconfigure.width;
+        w->ph = xev->xconfigure.height;
+        w->w = (int32_t)((float)w->pw / p->scale + 0.5f);
+        w->h = (int32_t)((float)w->ph / p->scale + 0.5f);
         x11_win_recreate_buffers(w);
         e.type = MY_EVENT_RESIZE;
         e.u.resize.w = w->w;
@@ -719,8 +731,8 @@ static void x11_dispatch(x11_pal_t* p, const XEvent* xev) {
       if (w != NULL && (xev->xbutton.button == 4 || xev->xbutton.button == 5) &&
           xev->type == ButtonPress) {
         e.type = MY_EVENT_POINTER_WHEEL;
-        e.u.pointer.x = xev->xbutton.x;
-        e.u.pointer.y = xev->xbutton.y;
+        e.u.pointer.x = (int32_t)((float)xev->xbutton.x / p->scale + 0.5f);
+        e.u.pointer.y = (int32_t)((float)xev->xbutton.y / p->scale + 0.5f);
         e.u.pointer.delta = xev->xbutton.button == 4 ? 1 : -1;
         p->handler(p->handler_ctx, (my_pal_window_t*)w, &e);
         break;
@@ -728,8 +740,8 @@ static void x11_dispatch(x11_pal_t* p, const XEvent* xev) {
       if (w != NULL && xev->xbutton.button <= 3) {
         e.type = xev->type == ButtonPress ? MY_EVENT_POINTER_DOWN
                                           : MY_EVENT_POINTER_UP;
-        e.u.pointer.x = xev->xbutton.x;
-        e.u.pointer.y = xev->xbutton.y;
+        e.u.pointer.x = (int32_t)((float)xev->xbutton.x / p->scale + 0.5f);
+        e.u.pointer.y = (int32_t)((float)xev->xbutton.y / p->scale + 0.5f);
         e.u.pointer.button = (uint8_t)xev->xbutton.button;
         e.u.pointer.modifiers = x11_modifiers(xev->xbutton.state);
         p->handler(p->handler_ctx, (my_pal_window_t*)w, &e);
@@ -738,8 +750,8 @@ static void x11_dispatch(x11_pal_t* p, const XEvent* xev) {
     case MotionNotify:
       if (w != NULL) {
         e.type = MY_EVENT_POINTER_MOVE;
-        e.u.pointer.x = xev->xmotion.x;
-        e.u.pointer.y = xev->xmotion.y;
+        e.u.pointer.x = (int32_t)((float)xev->xmotion.x / p->scale + 0.5f);
+        e.u.pointer.y = (int32_t)((float)xev->xmotion.y / p->scale + 0.5f);
         e.u.pointer.button = 0;
         e.u.pointer.modifiers = x11_modifiers(xev->xmotion.state);
         p->handler(p->handler_ctx, (my_pal_window_t*)w, &e);
@@ -1106,6 +1118,58 @@ static my_ret_t x11_clipboard_get(my_pal_t* pal, char* buf, size_t size) {
   return x11_clipboard_fetch(p, XA_STRING, buf, size);
 }
 
+/** @brief Scale factor from Xft.dpi (rounded to nearest 0.25 step of
+ * dpi/96; 1.0 when dpi <= 0 or implausible). Exported for unit tests. */
+float my_pal_x11_scale_from_xft_dpi(double dpi) {
+  int32_t steps;
+  if (dpi <= 48.0 || dpi > 1000.0) {
+    return 1.0f;
+  }
+  steps = (int32_t)(dpi / 96.0 * 4.0 + 0.5); /* truncation = rounding */
+  return (float)steps / 4.0f;
+}
+
+/** @brief Parse "Xft.dpi:\t<value>" out of an Xrm resource database
+ * string (newline separated). Returns 0 when absent. Exported for unit
+ * tests. */
+double my_pal_x11_parse_xft_dpi(const char* xrm_db) {
+  static const char KEY[] = "Xft.dpi:";
+  const char* p = xrm_db;
+  if (xrm_db == NULL) {
+    return 0.0;
+  }
+  while (*p != '\0') {
+    if (strncmp(p, KEY, sizeof(KEY) - 1) == 0) {
+      return atof(p + sizeof(KEY) - 1);
+    }
+    p = strchr(p, '\n');
+    if (p == NULL) {
+      break;
+    }
+    p++;
+  }
+  return 0.0;
+}
+
+/** @brief Display scale: Xft.dpi resource, else physical DPI estimate. */
+static float x11_detect_scale(x11_pal_t* p) {
+  char* xrm = XResourceManagerString(p->display);
+  double dpi = my_pal_x11_parse_xft_dpi(xrm);
+  if (dpi <= 0.0) {
+    /* physical fallback: dots per inch of the default screen */
+    int mm = HeightMMOfScreen(ScreenOfDisplay(p->display, p->screen));
+    int px = DisplayHeight(p->display, p->screen);
+    if (mm > 0 && px > 0) {
+      dpi = (double)px * 25.4 / (double)mm;
+    }
+  }
+  return my_pal_x11_scale_from_xft_dpi(dpi);
+}
+
+static float x11_get_scale(my_pal_t* pal) {
+  return ((x11_pal_t*)pal)->scale;
+}
+
 static void x11_pal_destroy(my_pal_t* pal) {
   x11_pal_t* p = (x11_pal_t*)pal;
   if (p == NULL) {
@@ -1120,7 +1184,7 @@ static void x11_pal_destroy(my_pal_t* pal) {
 static const my_pal_vtable_t s_x11_pal_vtable = {
     x11_window_create, x11_main_loop_create, x11_pal_time_now_ms,
     x11_pal_set_event_handler, x11_clipboard_set, x11_clipboard_get,
-    x11_pal_destroy};
+    x11_get_scale, x11_pal_destroy};
 
 my_pal_t* my_pal_x11_create(const my_allocator_t* allocator) {
   x11_pal_t* p;
@@ -1137,6 +1201,7 @@ my_pal_t* my_pal_x11_create(const my_allocator_t* allocator) {
   p->allocator = allocator;
   p->display = display;
   p->screen = DefaultScreen(display);
+  p->scale = x11_detect_scale(p);
   p->wm_delete = XInternAtom(display, "WM_DELETE_WINDOW", False);
   p->atom_clipboard = XInternAtom(display, "CLIPBOARD", False);
   p->atom_utf8 = XInternAtom(display, "UTF8_STRING", False);

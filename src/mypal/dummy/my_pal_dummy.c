@@ -17,6 +17,7 @@ typedef struct dummy_pal_t {
   my_pal_event_handler_t handler;
   void* handler_ctx;
   char* clipboard;                    /**< in-memory clipboard text */
+  float scale;                        /**< injectable (M12c, default 1) */
 } dummy_pal_t;
 
 static dummy_pal_t* pal_from(my_pal_t* pal) {
@@ -49,11 +50,15 @@ static my_ret_t dummy_win_set_title(my_pal_window_t* win, const char* title) {
 
 static my_ret_t dummy_win_resize(my_pal_window_t* win, int32_t width, int32_t height) {
   dummy_window_t* w = (dummy_window_t*)win;
+  dummy_pal_t* p = (dummy_pal_t*)w->pal;
   my_lcd_t* lcd;
   if (width <= 0 || height <= 0) {
     return MY_RET_INVALID_PARAMS;
   }
-  lcd = my_lcd_mem_create(w->allocator, (uint32_t)width, (uint32_t)height,
+  /* sizes are logical (M12c): the lcd is the physical buffer */
+  lcd = my_lcd_mem_create(w->allocator,
+                          (uint32_t)(width * p->scale + 0.5f),
+                          (uint32_t)(height * p->scale + 0.5f),
                           MY_PIXEL_FORMAT_BGRA8888);
   if (lcd == NULL) {
     return MY_RET_OOM;
@@ -120,7 +125,10 @@ static my_pal_window_t* dummy_window_create(my_pal_t* pal, int32_t w, int32_t h,
   win->allocator = p->allocator;
   win->w = w;
   win->h = h;
-  win->lcd = my_lcd_mem_create(p->allocator, (uint32_t)w, (uint32_t)h,
+  /* sizes are logical (M12c): the lcd is the physical buffer */
+  win->lcd = my_lcd_mem_create(p->allocator,
+                               (uint32_t)(w * p->scale + 0.5f),
+                               (uint32_t)(h * p->scale + 0.5f),
                                MY_PIXEL_FORMAT_BGRA8888);
   if (win->lcd == NULL) {
     my_mem_free(p->allocator, win);
@@ -306,6 +314,10 @@ static my_ret_t dummy_clipboard_get(my_pal_t* pal, char* buf, size_t size) {
   return MY_RET_OK;
 }
 
+static float dummy_get_scale(my_pal_t* pal) {
+  return pal_from(pal)->scale;
+}
+
 static void dummy_pal_destroy(my_pal_t* pal) {
   dummy_pal_t* p = pal_from(pal);
   if (p != NULL) {
@@ -317,7 +329,13 @@ static void dummy_pal_destroy(my_pal_t* pal) {
 static const my_pal_vtable_t s_dummy_pal_vtable = {
     dummy_window_create, dummy_main_loop_create, dummy_time_now_ms,
     dummy_set_event_handler, dummy_clipboard_set, dummy_clipboard_get,
-    dummy_pal_destroy};
+    dummy_get_scale, dummy_pal_destroy};
+
+void my_pal_dummy_set_scale_factor(my_pal_t* pal, float scale) {
+  if (pal != NULL && scale > 0.0f) {
+    pal_from(pal)->scale = scale;
+  }
+}
 
 my_pal_t* my_pal_dummy_create(const my_allocator_t* allocator) {
   dummy_pal_t* p = (dummy_pal_t*)my_mem_calloc(allocator, 1, sizeof(dummy_pal_t));
@@ -326,6 +344,7 @@ my_pal_t* my_pal_dummy_create(const my_allocator_t* allocator) {
   }
   p->base.vtable = &s_dummy_pal_vtable;
   p->allocator = allocator;
+  p->scale = 1.0f;
   return (my_pal_t*)p;
 }
 

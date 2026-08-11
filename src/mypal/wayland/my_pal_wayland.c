@@ -60,6 +60,8 @@ typedef struct wl_pal_t {
   my_darray_t* windows; /**< wl_window_t* registry */
   my_pal_event_handler_t handler;
   void* handler_ctx;
+  struct wl_output* output; /**< first output (M12c scale source) */
+  int32_t output_scale;   /**< wl_output.scale (integer, default 1) */
   char* clipboard; /* payload cache (memory roundtrip + data_source) */
   /** @brief wl_data_device clipboard (M12b). */
   struct wl_data_device_manager* data_mgr;
@@ -112,7 +114,9 @@ static void present(wl_window_t* w) {
     return;
   }
   wl_surface_attach(w->surface, w->wlbuf, 0, 0);
-  wl_surface_damage(w->surface, 0, 0, w->w, w->h);
+  /* damage is in BUFFER (physical) coordinates */
+  wl_surface_damage(w->surface, 0, 0, w->w * w->pal->output_scale,
+                    w->h * w->pal->output_scale);
   wl_surface_commit(w->surface);
   w->buffer_busy = true;
 }
@@ -168,10 +172,14 @@ static const my_lcd_vtable_t s_wl_lcd_vtable = {wl_lcd_w,      wl_lcd_h,
                                                 wl_lcd_fill,   wl_lcd_blend,
                                                 wl_lcd_destroy};
 
-/* shm buffer create (memfd + mmap, WL_SHM_FORMAT_XRGB8888) */
+/* shm buffer create (memfd + mmap, WL_SHM_FORMAT_XRGB8888). Window w/h
+ * is LOGICAL; the buffer is physical = logical*output_scale (M12c),
+ * presented with wl_surface_set_buffer_scale. */
 static bool wl_buffer_create(wl_window_t* w) {
   struct wl_shm_pool* pool;
-  w->shm_size = (size_t)w->w * (size_t)w->h * 4u;
+  int32_t bw = w->w * w->pal->output_scale;
+  int32_t bh = w->h * w->pal->output_scale;
+  w->shm_size = (size_t)bw * (size_t)bh * 4u;
   w->shm_fd = memfd_create("myui-wl", 0);
   if (w->shm_fd < 0 || ftruncate(w->shm_fd, (off_t)w->shm_size) != 0) {
     return false;
@@ -183,7 +191,7 @@ static bool wl_buffer_create(wl_window_t* w) {
     return false;
   }
   pool = wl_shm_create_pool(w->pal->shm, w->shm_fd, (int)w->shm_size);
-  w->wlbuf = wl_shm_pool_create_buffer(pool, 0, w->w, w->h, w->w * 4,
+  w->wlbuf = wl_shm_pool_create_buffer(pool, 0, bw, bh, bw * 4,
                                        WL_SHM_FORMAT_XRGB8888);
   wl_shm_pool_destroy(pool);
   return w->wlbuf != NULL;
@@ -255,8 +263,9 @@ static void on_toplevel_configure(void* data, struct xdg_toplevel* tl,
     w->h = height;
 #if defined(MYUI_PAL_GL_EGL)
     if (w->egl_win != NULL) {
-      /* keep the EGL window surface in sync with the compositor size */
-      wl_egl_window_resize(w->egl_win, width, height, 0, 0);
+      /* keep the EGL window surface in sync: physical pixels */
+      wl_egl_window_resize(w->egl_win, width * w->pal->output_scale,
+                           height * w->pal->output_scale, 0, 0);
     }
 #endif
     if (wl_buffer_create(w)) {
@@ -264,11 +273,13 @@ static void on_toplevel_configure(void* data, struct xdg_toplevel* tl,
       my_lcd_destroy(w->lcd);
       {
         wl_lcd_t* xl = (wl_lcd_t*)my_mem_calloc(w->allocator, 1, sizeof(wl_lcd_t));
+        int32_t bw = width * w->pal->output_scale;
+        int32_t bh = height * w->pal->output_scale;
         xl->base.vtable = &s_wl_lcd_vtable;
-        xl->mem = my_lcd_mem_create_from_buffer(w->allocator, (uint32_t)w->w,
-                                                (uint32_t)w->h,
+        xl->mem = my_lcd_mem_create_from_buffer(w->allocator, (uint32_t)bw,
+                                                (uint32_t)bh,
                                                 MY_PIXEL_FORMAT_BGRA8888,
-                                                w->pixels, (uint32_t)w->w * 4u);
+                                                w->pixels, (uint32_t)bw * 4u);
         xl->win = w;
         w->lcd = (my_lcd_t*)xl;
       }
@@ -644,6 +655,57 @@ static void on_seat_name(void* data, struct wl_seat* seat, const char* name) {
 static const struct wl_seat_listener SEAT_LISTENER = {
     .capabilities = on_seat_capabilities, .name = on_seat_name};
 
+/* ---------------- wl_output (M12c: display scale source) ------------- */
+
+static void on_output_geometry(void* data, struct wl_output* output, int32_t x,
+                               int32_t y, int32_t pw, int32_t ph, int32_t sub,
+                               const char* make, const char* model,
+                               int32_t transform) {
+  (void)data;
+  (void)output;
+  (void)x;
+  (void)y;
+  (void)pw;
+  (void)ph;
+  (void)sub;
+  (void)make;
+  (void)model;
+  (void)transform;
+}
+
+static void on_output_mode(void* data, struct wl_output* output,
+                           uint32_t flags, int32_t w, int32_t h,
+                           int32_t refresh) {
+  (void)data;
+  (void)output;
+  (void)flags;
+  (void)w;
+  (void)h;
+  (void)refresh;
+}
+
+static void on_output_done(void* data, struct wl_output* output) {
+  (void)data;
+  (void)output;
+}
+
+static void on_output_scale(void* data, struct wl_output* output,
+                            int32_t factor) {
+  wl_pal_t* p = (wl_pal_t*)data;
+  (void)output;
+  if (factor > 0) {
+    p->output_scale = factor;
+  }
+}
+
+static const struct wl_output_listener s_output_listener = {
+    .geometry = on_output_geometry,
+    .mode = on_output_mode,
+    .done = on_output_done,
+    .scale = on_output_scale,
+};
+
+
 static void on_registry_global(void* data, struct wl_registry* registry,
                                uint32_t name, const char* interface,
                                uint32_t version) {
@@ -663,8 +725,14 @@ static void on_registry_global(void* data, struct wl_registry* registry,
   } else if (strcmp(interface, wl_data_device_manager_interface.name) == 0) {
     p->data_mgr = (struct wl_data_device_manager*)wl_registry_bind(
         registry, name, &wl_data_device_manager_interface, 3);
+  } else if (strcmp(interface, wl_output_interface.name) == 0 &&
+             p->output == NULL) {
+    p->output = (struct wl_output*)wl_registry_bind(registry, name,
+                                                    &wl_output_interface, 2);
+    wl_output_add_listener(p->output, &s_output_listener, p);
   }
 }
+
 
 static void on_registry_remove(void* data, struct wl_registry* registry,
                                uint32_t name) {
@@ -822,10 +890,10 @@ static my_ret_t wl_gl_swap(my_pal_gl_t* gl) {
 static my_ret_t wl_gl_get_size(my_pal_gl_t* gl, int32_t* w, int32_t* h) {
   wl_gl_t* g = (wl_gl_t*)gl;
   if (w != NULL) {
-    *w = g->win->w;
+    *w = g->win->w * g->win->pal->output_scale; /* drawable = physical */
   }
   if (h != NULL) {
-    *h = g->win->h;
+    *h = g->win->h * g->win->pal->output_scale;
   }
   return MY_RET_OK;
 }
@@ -869,7 +937,8 @@ static my_pal_gl_t* wl_win_gl_enable(my_pal_window_t* win) {
   }
   g->base.vtable = &s_wl_gl_vtable;
   g->win = w;
-  w->egl_win = wl_egl_window_create(w->surface, w->w, w->h);
+  w->egl_win = wl_egl_window_create(w->surface, w->w * p->output_scale,
+                                    w->h * p->output_scale);
   if (w->egl_win == NULL) {
     my_mem_free(w->allocator, g);
     return NULL;
@@ -941,6 +1010,7 @@ static my_pal_window_t* wl_window_create(my_pal_t* pal, int32_t w, int32_t h,
     xdg_toplevel_set_title(win->toplevel, title);
   }
   wl_surface_commit(win->surface); /* initial commit: wait for configure */
+  wl_surface_set_buffer_scale(win->surface, p->output_scale); /* M12c */
 
   if (!wl_buffer_create(win)) {
     wl_win_destroy((my_pal_window_t*)win);
@@ -954,9 +1024,10 @@ static my_pal_window_t* wl_window_create(my_pal_t* pal, int32_t w, int32_t h,
     return NULL;
   }
   xl->base.vtable = &s_wl_lcd_vtable;
-  xl->mem = my_lcd_mem_create_from_buffer(p->allocator, (uint32_t)w,
-                                          (uint32_t)h, MY_PIXEL_FORMAT_BGRA8888,
-                                          win->pixels, (uint32_t)w * 4u);
+  xl->mem = my_lcd_mem_create_from_buffer(
+      p->allocator, (uint32_t)(w * p->output_scale),
+      (uint32_t)(h * p->output_scale), MY_PIXEL_FORMAT_BGRA8888, win->pixels,
+      (uint32_t)(w * p->output_scale) * 4u);
   xl->win = win;
   win->lcd = (my_lcd_t*)xl;
   if (xl->mem == NULL) {
@@ -1210,6 +1281,10 @@ static my_ret_t wl_clipboard_get(my_pal_t* pal, char* buf, size_t size) {
   return MY_RET_OK;
 }
 
+static float wl_get_scale(my_pal_t* pal) {
+  return (float)((wl_pal_t*)pal)->output_scale;
+}
+
 static void wl_pal_destroy(my_pal_t* pal) {
   wl_pal_t* p = (wl_pal_t*)pal;
   if (p == NULL) {
@@ -1228,6 +1303,9 @@ static void wl_pal_destroy(my_pal_t* pal) {
   }
   if (p->data_mgr != NULL) {
     wl_data_device_manager_destroy(p->data_mgr);
+  }
+  if (p->output != NULL) {
+    wl_output_destroy(p->output);
   }
   if (p->xkb_state != NULL) {
     xkb_state_unref(p->xkb_state);
@@ -1269,6 +1347,7 @@ static const my_pal_vtable_t s_wl_pal_vtable = {wl_window_create,
                                                 wl_set_event_handler,
                                                 wl_clipboard_set,
                                                 wl_clipboard_get,
+                                                wl_get_scale,
                                                 wl_pal_destroy};
 
 my_pal_t* my_pal_wayland_create(const my_allocator_t* allocator) {
@@ -1285,6 +1364,7 @@ my_pal_t* my_pal_wayland_create(const my_allocator_t* allocator) {
   p->base.vtable = &s_wl_pal_vtable;
   p->allocator = allocator;
   p->display = display;
+  p->output_scale = 1;
   p->windows = my_darray_create(allocator, 0);
   p->xkb_ctx = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
   if (p->windows == NULL || p->xkb_ctx == NULL) {

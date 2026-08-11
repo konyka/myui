@@ -205,7 +205,10 @@ static inline void my_pal_main_loop_destroy(my_pal_main_loop_t* loop) {
 
 /** @brief Platform vtable. */
 typedef struct my_pal_vtable_t {
-  /** @brief Create a hidden window of w x h (title may be NULL). */
+  /** @brief Create a hidden window of w x h (title may be NULL). Sizes
+   * are LOGICAL pixels (M12c): on HiDPI setups the port renders into a
+   * physical buffer of logical*scale and reports logical sizes/events
+   * back to the app. */
   my_pal_window_t* (*window_create)(my_pal_t* pal, int32_t w, int32_t h,
                                     const char* title);
   my_pal_main_loop_t* (*main_loop_create)(my_pal_t* pal);
@@ -221,6 +224,12 @@ typedef struct my_pal_vtable_t {
    */
   my_ret_t (*clipboard_set_text)(my_pal_t* pal, const char* text);
   my_ret_t (*clipboard_get_text)(my_pal_t* pal, char* buf, size_t size);
+  /**
+   * @brief Display scale factor (M12c; 1.0 = standard DPI). Physical
+   * render buffers are logical*scale; window sizes and event
+   * coordinates stay in logical pixels at the PAL boundary.
+   */
+  float (*get_scale_factor)(my_pal_t* pal);
   void (*destroy)(my_pal_t* pal);
 } my_pal_vtable_t;
 
@@ -257,6 +266,10 @@ static inline my_ret_t my_pal_clipboard_set_text(my_pal_t* pal,
 static inline my_ret_t my_pal_clipboard_get_text(my_pal_t* pal, char* buf,
                                                  size_t size) {
   return pal->vtable->clipboard_get_text(pal, buf, size);
+}
+
+static inline float my_pal_get_scale_factor(my_pal_t* pal) {
+  return pal->vtable->get_scale_factor(pal);
 }
 
 static inline void my_pal_destroy(my_pal_t* pal) {

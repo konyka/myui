@@ -65,6 +65,7 @@ typedef struct gles_state_t {
   my_line_join_t line_join;
   float tx;
   float ty;
+  float scale; /* device = (user + translate) * scale (M12c HiDPI; 1) */
   my_rect_t clip;
   my_font_t* font;   /**< borrowed; NULL = no text */
   int32_t font_size;
@@ -176,8 +177,8 @@ static void vbuf_push(vbuf_t* b, float x, float y) {
   my_vgcanvas_gles2_t* s = b->s;
   if (gles_grow(s->allocator, (void**)&s->verts, &s->vert_cap, b->count + 2,
                 sizeof(float)) == MY_RET_OK) {
-    s->verts[b->count++] = x + s->state.tx;
-    s->verts[b->count++] = y + s->state.ty;
+    s->verts[b->count++] = (x + s->state.tx) * s->state.scale;
+    s->verts[b->count++] = (y + s->state.ty) * s->state.scale;
   }
 }
 
@@ -255,12 +256,13 @@ static my_ret_t gles_clip_rect(my_vgcanvas_t* vg, const my_rectf_t* rect) {
   if (rect == NULL) {
     return MY_RET_INVALID_PARAMS;
   }
-  dev = my_rect_init((int32_t)floorf(rect->x + s->state.tx),
-                     (int32_t)floorf(rect->y + s->state.ty),
-                     (int32_t)ceilf(rect->x + s->state.tx + rect->w) -
-                         (int32_t)floorf(rect->x + s->state.tx),
-                     (int32_t)ceilf(rect->y + s->state.ty + rect->h) -
-                         (int32_t)floorf(rect->y + s->state.ty));
+  dev = my_rect_init(
+      (int32_t)floorf((rect->x + s->state.tx) * s->state.scale),
+      (int32_t)floorf((rect->y + s->state.ty) * s->state.scale),
+      (int32_t)ceilf((rect->x + s->state.tx + rect->w) * s->state.scale) -
+          (int32_t)floorf((rect->x + s->state.tx) * s->state.scale),
+      (int32_t)ceilf((rect->y + s->state.ty + rect->h) * s->state.scale) -
+          (int32_t)floorf((rect->y + s->state.ty) * s->state.scale));
   if (my_rect_intersect(&s->state.clip, &dev, &clipped)) {
     s->state.clip = clipped;
   } else {
@@ -577,29 +579,35 @@ static my_ret_t gles_set_line_join(my_vgcanvas_t* vg, my_line_join_t join) {
   return MY_RET_OK;
 }
 
+/** @brief Font size in device pixels (M12c: logical size * scale). */
+static int32_t gles_dev_font_size(const my_vgcanvas_gles2_t* s) {
+  int32_t d = (int32_t)((float)s->state.font_size * s->state.scale + 0.5f);
+  return d > 0 ? d : 1;
+}
+
 /** @brief Draw one codepoint at pen_x and advance it (gles text body). */
 static void gles_draw_cp(my_vgcanvas_gles2_t* s, uint32_t cp, float* pen_x,
                          float top, int32_t ascent) {
   my_glyph_t g;
   uint32_t slot;
   float gx, gy, quad[24];
-  if (my_font_get_glyph(s->state.font, cp, s->state.font_size, &g) !=
+  if (my_font_get_glyph(s->state.font, cp, gles_dev_font_size(s), &g) !=
           MY_RET_OK ||
       g.bitmap == NULL || g.w <= 0 || g.h <= 0) {
     *pen_x += g.advance > 0 ? (float)g.advance : 0.0f;
     return;
   }
   /* direct-mapped texture cache: evict on slot collision */
-  slot = (cp ^ (uint32_t)s->state.font_size) % GLES_TEX_CACHE_SIZE;
+  slot = (cp ^ (uint32_t)gles_dev_font_size(s)) % GLES_TEX_CACHE_SIZE;
   if (s->tex_cache[slot].texture == 0 || s->tex_cache[slot].codepoint != cp ||
-      s->tex_cache[slot].size != s->state.font_size) {
+      s->tex_cache[slot].size != gles_dev_font_size(s)) {
     if (s->tex_cache[slot].texture != 0) {
       s->gl.delete_texture(s->gl.ctx, s->tex_cache[slot].texture);
     }
     s->tex_cache[slot].texture =
         s->gl.create_texture(s->gl.ctx, g.bitmap, g.w, g.h);
     s->tex_cache[slot].codepoint = cp;
-    s->tex_cache[slot].size = s->state.font_size;
+    s->tex_cache[slot].size = gles_dev_font_size(s);
   }
   gx = *pen_x + (float)g.bearing_x;
   gy = top + (float)(ascent - g.bearing_y);
@@ -645,9 +653,9 @@ static my_ret_t gles_draw_text(my_vgcanvas_t* vg, const char* text, float x,
   s->gl.uniform2f(s->gl.ctx, s->text_program, "u_resolution", (float)s->fb_w,
                   (float)s->fb_h);
 
-  ascent = my_font_ascent(s->state.font, s->state.font_size);
-  pen_x = x + s->state.tx;
-  top = y + s->state.ty;
+  ascent = my_font_ascent(s->state.font, gles_dev_font_size(s));
+  pen_x = (x + s->state.tx) * s->state.scale;
+  top = (y + s->state.ty) * s->state.scale;
 
   if (!my_text_layout_may_need_bidi(text)) {
     /* fast path: plain LTR, no layout work at all */
@@ -762,23 +770,33 @@ static my_ret_t gles_draw_image(my_vgcanvas_t* vg, const uint8_t* rgba,
 static my_ret_t gles_measure_text(my_vgcanvas_t* vg, const char* text,
                                   int32_t* w, int32_t* h) {
   my_vgcanvas_gles2_t* s = (my_vgcanvas_gles2_t*)vg;
+  my_ret_t ret;
   if (s->state.font == NULL || s->state.font_size <= 0) {
     return MY_RET_NOT_SUPPORTED;
   }
+  /* measure at the device size, report LOGICAL units (M12c) */
   if (text != NULL && my_text_layout_may_need_bidi(text)) {
     /* shaping changes widths (order does not): measure the shaped and
      * reordered string (M11a) */
     my_text_layout_t* l = my_text_layout_process(s->allocator, text);
-    my_ret_t ret;
     if (l == NULL) {
       return MY_RET_OOM;
     }
-    ret = my_font_measure(s->state.font, l->visual_utf8, s->state.font_size,
-                          w, h);
+    ret = my_font_measure(s->state.font, l->visual_utf8,
+                          gles_dev_font_size(s), w, h);
     my_text_layout_destroy(l);
-    return ret;
+  } else {
+    ret = my_font_measure(s->state.font, text, gles_dev_font_size(s), w, h);
   }
-  return my_font_measure(s->state.font, text, s->state.font_size, w, h);
+  if (ret == MY_RET_OK && s->state.scale != 1.0f) {
+    if (w != NULL) {
+      *w = (int32_t)((float)*w / s->state.scale + 0.5f);
+    }
+    if (h != NULL) {
+      *h = (int32_t)((float)*h / s->state.scale + 0.5f);
+    }
+  }
+  return ret;
 }
 
 /* ---------------- lifecycle ---------------- */
@@ -853,6 +871,7 @@ my_vgcanvas_t* my_vgcanvas_gles2_create_with_gl(const my_allocator_t* allocator,
   s->state.line_width = 1.0f;
   s->state.line_cap = MY_LINE_CAP_BUTT;
   s->state.line_join = MY_LINE_JOIN_MITER;
+  s->state.scale = 1.0f; /* HiDPI: my_vgcanvas_gles2_set_scale (M12c) */
   s->state.font = NULL;
   s->state.font_size = 16;
   s->state.clip = my_rect_init(0, 0, width, height);
@@ -891,5 +910,14 @@ my_ret_t my_vgcanvas_gles2_set_antialias(my_vgcanvas_t* vg, bool enabled) {
   if (s->gl.set_multisample != NULL) {
     s->gl.set_multisample(s->gl.ctx, enabled);
   }
+  return MY_RET_OK;
+}
+
+my_ret_t my_vgcanvas_gles2_set_scale(my_vgcanvas_t* vg, float scale) {
+  my_vgcanvas_gles2_t* s = (my_vgcanvas_gles2_t*)vg;
+  if (s == NULL || scale <= 0.0f) {
+    return MY_RET_INVALID_PARAMS;
+  }
+  s->state.scale = scale;
   return MY_RET_OK;
 }

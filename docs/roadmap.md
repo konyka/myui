@@ -35,6 +35,7 @@
 - **M11 完成**。
 - **M12a 编辑控件 RTL** ✅ 已完成：text_layout 边界-视觉双向映射（单光标"前字符逻辑尾边"语义 + 规范边界往返一致、别名边界仅逻辑可达）；方向键/Home/End 按视觉方向（LTR 恒等零回归）；edit/text_area 光标 x/点击/选区跨 run 分段矩形接入；goal_col 统一为视觉边界索引；wrap+RTL 行级重排与跨行视觉连续性列 TODO；修 OFF 模式映射数组未初始化段错误；BIDI=OFF 构建 59/59 绿。
 - **M12b Lam-Alef + L4 镜像 + wayland 剪贴板** ✅ 已完成：lam-alef 强制合字（两遍制整形，按连接上下文选 isolated/final 形，UCD 生成数据；Naskh 目检合字字形）；UBA L4 镜像（本地 BidiMirroring.txt 全表 428 对生成，RTL 级内括号镜像断言）；wayland wl_data_device 剪贴板（source offer/send、selection receive+pipe 同步读、内存兜底）——**跨连接实测被合成器焦点策略阻断**（set/get 握手依赖键盘焦点，协议无错误但拿不到 enter serial/焦点 selection 事件，如实记录于 architecture.md）。
+- **M12c 双线性整数化 + HiDPI 基础** ✅ 已完成：sample_bilinear 定点化（16.16 坐标 + 1/256 权重 ±1 容差 + LE 打包乘法 + 退化权重短路；纯双线性腿 4.8→1.8ms/帧 2.7x，盒式+双线性 12.9→11.0ms，上采样 15.85→12.9ms）；PAL `get_scale_factor` 全链路（x11 Xft.dpi/物理 DPI、wayland wl_output.scale、dummy 注入、fb 环境变量）；坐标模型=PAL 边界全逻辑像素、port 内部物理化（x11 窗口缓冲×scale+事件 ÷scale、wayland shm×scale+set_buffer_scale）；soft/gles2 vgcanvas set_scale（设备坐标/字号缩放、measure 回报逻辑值）；my_window 缓存注入；dummy scale=2 全链路测试；真实高分屏无设备未验证。
 
 ## 性能基线汇总（M10d 刷新，GCC 16，-O0 Debug，本机）
 
@@ -43,12 +44,12 @@
 | 50 按钮全帧 | 2.47 ms/帧 |
 | 100 半透明矩形 | 2.05 ms/帧 |
 | 路径 AA level0/1/2 | 0.71 / 1.70 / 2.39 ms/帧 |
-| 480x270→800x600 图片 nearest/bilinear | 2.44 / 16.26 ms/帧 |
-| 2000x1500→400x300 图片 nearest/纯双线性/盒式+双线性 | 0.69 / 4.80 / 11.96 ms/帧（M11c 优化前 0.71 / 5.09 / 28.93） |
+| 480x270→800x600 图片 nearest/bilinear | 2.44 / 12.9 ms/帧（M12c 整数化，原 16.26） |
+| 2000x1500→400x300 图片 nearest/纯双线性/盒式+双线性 | 0.72 / 1.82 / 11.06 ms/帧（M12c 整数化；M11c 时 0.69 / 4.80 / 11.96） |
 | GLES 8 描边路径 no-AA/MSAA4x | 0.025 / 0.026 ms/帧 |
 | text_area 万行：载入/2000 移动/100 插入 | 0.13 / 0.09 / 0.09 ms |
 | text_area wrap 万行长行：载入+构建/1000 视觉移动/滚动帧 | 1.57 / 0.10 / 0.30 ms |
 | list_view 万行滚动（固定/变高） | 0.002 ms/次（~22 行控件） |
 | 1051 控件构建 / relayout / 10 万 hit_test | 0.30 / 0.05 / 29.0 ms |
 
-- **M12+ 候选**：IME、wayland 剪贴板跨连接焦点握手验证（需可聚焦会话）、UAX#14 断行、wrap+RTL 混排视觉行级重排、跨行视觉连续性、wrap 下撤销的视觉位置、JUSTIFY 的选区/光标位置跟随、竖排、双线性采样器整数化（盒式尾部）、INCR 并发多传输、HiDPI。**SDK 顺延**：iOS/HarmonyOS/Android/Web/win32/sdl2 port、Metal backend、FreeBSD/linux_fb 实机复核。
+- **M12+ 候选**：IME、wayland 剪贴板跨连接焦点握手验证（需可聚焦会话）、UAX#14 断行、wrap+RTL 混排视觉行级重排、跨行视觉连续性、wrap 下撤销的视觉位置、JUSTIFY 的选区/光标位置跟随、竖排、盒式 pass 行缓冲滑动窗、INCR 并发多传输、fractional-scale/跨屏/RandR 多屏、真高分屏实测。**SDK 顺延**：iOS/HarmonyOS/Android/Web/win32/sdl2 port、Metal backend、FreeBSD/linux_fb 实机复核。
