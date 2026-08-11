@@ -64,7 +64,7 @@ typedef struct x11_pal_t {
     size_t offset;   /**< bytes already appended */
     size_t len;      /**< strlen at transfer start */
     size_t chunk;    /**< per-segment payload */
-  } incr_tx;
+  } incr_tx[4];      /**< concurrent INCR transfers (M12d) */
 #if defined(MYUI_PAL_GL_EGL)
   EGLDisplay egl_dpy; /**< shared EGL display (lazy, EGL_NO_DISPLAY off) */
   EGLConfig egl_cfg;
@@ -483,46 +483,56 @@ static void x11_dispatch(x11_pal_t* p, const XEvent* xev);
 #define X11_INCR_THRESHOLD 65536u
 /** @brief Receiver-side total cap (anti-hang). */
 #define X11_INCR_RX_MAX (16u * 1024u * 1024u)
+#define X11_INCR_TX_MAX 4u
 
-static void x11_incr_tx_cancel(x11_pal_t* p) {
-  if (p->incr_tx.active) {
-    /* close politely: a zero-length segment ends the requestor's loop */
-    XChangeProperty(p->display, p->incr_tx.requestor, p->incr_tx.property,
-                    p->incr_tx.target, 8, PropModeAppend, NULL, 0);
-    XSelectInput(p->display, p->incr_tx.requestor, 0);
-    XFlush(p->display);
-    p->incr_tx.active = false;
-  }
+static void x11_incr_slot_cancel(x11_pal_t* p, size_t i) {
+  /* close politely: a zero-length segment ends the requestor's loop */
+  XChangeProperty(p->display, p->incr_tx[i].requestor,
+                  p->incr_tx[i].property, p->incr_tx[i].target, 8,
+                  PropModeAppend, NULL, 0);
+  XSelectInput(p->display, p->incr_tx[i].requestor, 0);
+  p->incr_tx[i].active = false;
 }
 
-/** @brief PropertyDelete on the transfer property: append the next
- * segment (zero-length once everything was sent). */
-static void x11_incr_tx_advance(x11_pal_t* p) {
+/** @brief Cancel ALL active transfers (clipboard replaced mid-flight). */
+static void x11_incr_tx_cancel_all(x11_pal_t* p) {
+  size_t i;
+  for (i = 0; i < X11_INCR_TX_MAX; i++) {
+    if (p->incr_tx[i].active) {
+      x11_incr_slot_cancel(p, i);
+    }
+  }
+  XFlush(p->display);
+}
+
+/** @brief PropertyDelete routed here: append the slot's next segment
+ * (zero-length once everything was sent). */
+static void x11_incr_slot_advance(x11_pal_t* p, size_t i) {
   size_t remain;
-  if (!p->incr_tx.active) {
+  if (!p->incr_tx[i].active) {
     return;
   }
   if (p->clipboard == NULL) {
-    x11_incr_tx_cancel(p); /* document replaced mid-transfer */
+    x11_incr_slot_cancel(p, i); /* document replaced mid-transfer */
+    XFlush(p->display);
     return;
   }
-  remain = p->incr_tx.len - p->incr_tx.offset;
+  remain = p->incr_tx[i].len - p->incr_tx[i].offset;
   if (remain > 0) {
-    size_t n = remain < p->incr_tx.chunk ? remain : p->incr_tx.chunk;
-    XChangeProperty(p->display, p->incr_tx.requestor, p->incr_tx.property,
-                    p->incr_tx.target, 8, PropModeAppend,
-                    (const unsigned char*)(p->clipboard + p->incr_tx.offset),
+    size_t n =
+        remain < p->incr_tx[i].chunk ? remain : p->incr_tx[i].chunk;
+    XChangeProperty(p->display, p->incr_tx[i].requestor,
+                    p->incr_tx[i].property, p->incr_tx[i].target, 8,
+                    PropModeAppend,
+                    (const unsigned char*)(p->clipboard + p->incr_tx[i].offset),
                     (int)n);
-    p->incr_tx.offset += n;
+    p->incr_tx[i].offset += n;
     XFlush(p->display);
     return;
   }
   /* the requestor deleted the last data segment: zero-length ends it */
-  XChangeProperty(p->display, p->incr_tx.requestor, p->incr_tx.property,
-                  p->incr_tx.target, 8, PropModeAppend, NULL, 0);
-  XSelectInput(p->display, p->incr_tx.requestor, 0);
+  x11_incr_slot_cancel(p, i);
   XFlush(p->display);
-  p->incr_tx.active = false;
 }
 
 /** @brief INCR receive loop: delete -> wait for the next segment -> read
@@ -657,27 +667,35 @@ static void x11_serve_selection_request(x11_pal_t* p,
                       PropModeReplace, (unsigned char*)p->clipboard,
                       (int)clen);
       notify.property = prop;
-    } else if (!p->incr_tx.active) {
-      /* large payload: answer INCR, then serve segments as the
-       * requestor deletes the property (ICCCM 2.7.2) */
-      uint32_t lower_bound = (uint32_t)clen;
-      long maxb = XMaxRequestSize(p->display) * 4 - 64;
-      p->incr_tx.active = true;
-      p->incr_tx.requestor = req->requestor;
-      p->incr_tx.property = prop;
-      p->incr_tx.target = target;
-      p->incr_tx.offset = 0;
-      p->incr_tx.len = clen;
-      p->incr_tx.chunk = maxb > 1024 ? (size_t)maxb : 1024;
-      if (p->incr_tx.chunk > X11_INCR_THRESHOLD) {
-        p->incr_tx.chunk = X11_INCR_THRESHOLD;
+    } else {
+      /* large payload: answer INCR from a free slot, then serve segments
+       * as the requestor deletes the property (ICCCM 2.7.2, M12d:
+       * concurrent transfers) */
+      size_t i;
+      for (i = 0; i < X11_INCR_TX_MAX; i++) {
+        if (!p->incr_tx[i].active) {
+          uint32_t lower_bound = (uint32_t)clen;
+          long maxb = XMaxRequestSize(p->display) * 4 - 64;
+          p->incr_tx[i].active = true;
+          p->incr_tx[i].requestor = req->requestor;
+          p->incr_tx[i].property = prop;
+          p->incr_tx[i].target = target;
+          p->incr_tx[i].offset = 0;
+          p->incr_tx[i].len = clen;
+          p->incr_tx[i].chunk = maxb > 1024 ? (size_t)maxb : 1024;
+          if (p->incr_tx[i].chunk > X11_INCR_THRESHOLD) {
+            p->incr_tx[i].chunk = X11_INCR_THRESHOLD;
+          }
+          XChangeProperty(p->display, req->requestor, prop, p->atom_incr,
+                          32, PropModeReplace, (unsigned char*)&lower_bound,
+                          1);
+          XSelectInput(p->display, req->requestor, PropertyChangeMask);
+          notify.property = prop;
+          break;
+        }
       }
-      XChangeProperty(p->display, req->requestor, prop, p->atom_incr, 32,
-                      PropModeReplace, (unsigned char*)&lower_bound, 1);
-      XSelectInput(p->display, req->requestor, PropertyChangeMask);
-      notify.property = prop;
+      /* all slots busy: refuse (notify.property stays None) */
     }
-    /* else: one transfer at a time; refuse (property stays None) */
   }
   XSendEvent(p->display, req->requestor, False, 0, (XEvent*)&notify);
 }
@@ -686,12 +704,17 @@ static void x11_dispatch(x11_pal_t* p, const XEvent* xev) {
   my_event_t e;
   x11_window_t* w;
   /* clipboard serving + INCR sender progress are handler-independent */
-  if (xev->type == PropertyNotify && p->incr_tx.active &&
-      xev->xproperty.window == p->incr_tx.requestor &&
-      xev->xproperty.atom == p->incr_tx.property &&
+  if (xev->type == PropertyNotify &&
       xev->xproperty.state == PropertyDelete) {
-    x11_incr_tx_advance(p);
-    return;
+    size_t i;
+    for (i = 0; i < X11_INCR_TX_MAX; i++) {
+      if (p->incr_tx[i].active &&
+          xev->xproperty.window == p->incr_tx[i].requestor &&
+          xev->xproperty.atom == p->incr_tx[i].property) {
+        x11_incr_slot_advance(p, i);
+        return;
+      }
+    }
   }
   if (xev->type == SelectionRequest) {
     x11_serve_selection_request(p, (const XSelectionRequestEvent*)&xev->xselectionrequest);
@@ -1001,7 +1024,7 @@ static my_ret_t x11_clipboard_set(my_pal_t* pal, const char* text) {
   if (text != NULL && copy == NULL) {
     return MY_RET_OOM;
   }
-  x11_incr_tx_cancel(p); /* replacing the document mid-transfer (M11b) */
+  x11_incr_tx_cancel_all(p); /* replacing the document mid-transfer */
   my_mem_free(p->allocator, p->clipboard);
   p->clipboard = copy;
   /* own the selection via the first window (in-app roundtrip; serving

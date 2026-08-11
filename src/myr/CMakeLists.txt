@@ -11,6 +11,7 @@ add_library(myr STATIC
   my_stb_truetype.c
   my_arabic_shape.c
   my_text_layout.c
+  my_line_break.c
 )
 
 target_include_directories(myr PUBLIC ${CMAKE_SOURCE_DIR}/src)

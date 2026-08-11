@@ -9,6 +9,8 @@
 #include <string.h>
 
 #include "myc/my_str.h"
+#include "myr/my_font.h"
+#include "myr/my_line_break.h"
 #include "myr/my_text_layout.h"
 #include "myui/my_undo_manager.h"
 #include "myui/my_undo_stack.h"
@@ -169,6 +171,37 @@ static my_ret_t ta_vline_push(my_text_area_t* ta, size_t phys, size_t start,
   return my_darray_push(ta->vlines, v);
 }
 
+/** @brief Legality of a break BEFORE index i (between prev and cur),
+ * simplified UAX#14 classes (M12d): */
+static bool ta_break_ok_before(uint32_t prev_cp, uint32_t cur_cp) {
+  my_line_break_class_t p = my_line_break_class(prev_cp);
+  my_line_break_class_t c = my_line_break_class(cur_cp);
+  if (c == MY_LB_SP) {
+    return true; /* the space is consumed at the break */
+  }
+  if (c == MY_LB_NS) {
+    return false; /* no visual line starts with closing punctuation --
+                   * checked before "after space" (a space followed by NS
+                   * must not push NS to a line start) */
+  }
+  if (p == MY_LB_SP) {
+    return true; /* the space was already consumed by the previous line */
+  }
+  if (p == MY_LB_HY) {
+    return true; /* hyphen: break after */
+  }
+  if (c == MY_LB_HY) {
+    return false; /* hyphen joins the next char */
+  }
+  if (p == MY_LB_OP) {
+    return false; /* no visual line ends with an open bracket */
+  }
+  if (p == MY_LB_AL && c == MY_LB_AL) {
+    return false; /* word run continues */
+  }
+  return true;
+}
+
 /** @brief Rebuild visual lines for physical rows [from, end). */
 static void ta_vlines_rebuild_from(my_text_area_t* ta, size_t from) {
   size_t pi, n;
@@ -184,10 +217,11 @@ static void ta_vlines_rebuild_from(my_text_area_t* ta, size_t from) {
   for (pi = from; pi < n; pi++) {
     size_t line_len = ta_line_cp_len(ta, pi);
     size_t vstart = 0, col = 0;
-    size_t last_space = (size_t)-1;
+    size_t last_break = (size_t)-1;
     float w = 0.0f, inner = ta_inner_width(ta);
     size_t start_off = ta_line_start(ta, pi);
     size_t off = start_off;
+    uint32_t prev_cp = 0;
 
     if (line_len == 0) {
       ta_vline_push(ta, pi, 0, 0); /* empty physical line: one empty vline */
@@ -196,19 +230,34 @@ static void ta_vlines_rebuild_from(my_text_area_t* ta, size_t from) {
     while (col < line_len) {
       size_t cp_len = my_str_utf8_char_len(ta->text + off);
       float cpw = ta_cp_width(ta, ta->text + off);
+      uint32_t cp_cur;
+      {
+        const char* q = ta->text + off;
+        cp_cur = my_utf8_next(&q);
+      }
+      /* M12d: remember the latest LEGAL break boundary (UAX#14 subset) */
+      if (col > vstart && ta_break_ok_before(prev_cp, cp_cur)) {
+        last_break = col;
+      }
       if (w + cpw > inner && col > vstart) {
         size_t vlen;
         if (ta->text[off] == ' ') {
           /* the overflowing char is itself a space: break before it --
            * everything so far fits, and the space is consumed below */
           vlen = col - vstart;
-        } else if (last_space != (size_t)-1 && last_space > vstart) {
-          vlen = last_space + 1 - vstart; /* break after the space */
+        } else if (last_break != (size_t)-1 && last_break > vstart) {
+          vlen = last_break - vstart; /* legal break boundary */
         } else {
           vlen = col - vstart; /* hard break between any codepoints */
         }
         ta_vline_push(ta, pi, vstart, vlen);
         vstart += vlen;
+        /* consume spaces sitting exactly ON the break boundary (M12d):
+         * they belong to no visual line and carry no width */
+        while (vstart < line_len &&
+               ta->text[ta_offset_of(ta, pi, vstart)] == ' ') {
+          vstart++;
+        }
         /* recompute width of [vstart, col): nothing wider needed later */
         {
           size_t bo = start_off, bc = 0;
@@ -222,22 +271,21 @@ static void ta_vlines_rebuild_from(my_text_area_t* ta, size_t from) {
             bc++;
           }
         }
-        last_space = (size_t)-1;
+        last_break = (size_t)-1;
         if (ta->text[off] == ' ') {
           /* the overflowing char is a space: consume it entirely (no
            * visual line ever starts with whitespace) -- skip its width
            * and do not record it as a future break point */
           off += cp_len;
           col++;
+          prev_cp = cp_cur;
           continue;
         }
-      }
-      if (ta->text[off] == ' ') {
-        last_space = col;
       }
       w += cpw;
       off += cp_len;
       col++;
+      prev_cp = cp_cur;
     }
     if (vstart < line_len) {
       ta_vline_push(ta, pi, vstart, line_len - vstart);

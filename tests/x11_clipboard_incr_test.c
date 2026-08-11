@@ -125,7 +125,10 @@ static int run_incr_owner(void) {
 
 /** @brief Child: fetch CLIPBOARD (expecting INCR), verify integrity and
  * segment count; write "OK <segments>" or "BAD ..." into TX_FILE. */
-static int run_incr_requestor(const char* expected) {
+static int run_incr_requestor_at(const char* expected,
+                                 const char* outfile) {
+
+
   Display* dpy = XOpenDisplay(NULL);
   Window w;
   Atom clip, utf8, incr, prop;
@@ -160,7 +163,13 @@ static int run_incr_requestor(const char* expected) {
       unsigned long nitems, remaining;
       unsigned char* data = NULL;
       if (ev.xselection.property == None) {
-        break; /* refused */
+        FILE* f = fopen(outfile, "w");
+        if (f != NULL) {
+          fprintf(f, "REFUSED");
+          fclose(f);
+        }
+        XCloseDisplay(dpy);
+        return 0;
       }
       if (XGetWindowProperty(dpy, w, prop, 0, 1, False, AnyPropertyType,
                              &actual, &format, &nitems, &remaining,
@@ -168,7 +177,7 @@ static int run_incr_requestor(const char* expected) {
         break;
       }
       if (actual != incr) { /* direct transfer (unexpected here) */
-        FILE* f = fopen(TX_FILE, "w");
+        FILE* f = fopen(outfile, "w");
         if (f != NULL) {
           fprintf(f, "BAD direct %lu", nitems);
           fclose(f);
@@ -216,7 +225,7 @@ static int run_incr_requestor(const char* expected) {
         }
         segments++;
         if (memcmp(data, expected + total, nitems) != 0) {
-          FILE* f = fopen(TX_FILE, "w");
+          FILE* f = fopen(outfile, "w");
           if (f != NULL) {
             fprintf(f, "BAD content at %zu", total);
             fclose(f);
@@ -232,7 +241,7 @@ static int run_incr_requestor(const char* expected) {
     }
   }
   {
-    FILE* f = fopen(TX_FILE, "w");
+    FILE* f = fopen(outfile, "w");
     if (f != NULL) {
       if (ok && total == strlen(expected)) {
         fprintf(f, "OK %d", segments);
@@ -244,6 +253,11 @@ static int run_incr_requestor(const char* expected) {
   }
   XCloseDisplay(dpy);
   return 0;
+}
+
+
+static int run_incr_requestor(const char* expected) {
+  return run_incr_requestor_at(expected, TX_FILE);
 }
 
 static int read_file_int(const char* path, char* buf, size_t size) {
@@ -351,7 +365,70 @@ static void test_incr_serve_to_external(void) {
   my_pal_destroy(pal);
 }
 
+/** @brief M12d: 5 concurrent requestors, 4 slots: four complete INCR
+ * transfers run concurrently, the 5th is refused. */
+static void test_incr_concurrent_transfers(void) {
+  static const char* names[5] = {"/tmp/myui_incr_c0", "/tmp/myui_incr_c1",
+                                 "/tmp/myui_incr_c2", "/tmp/myui_incr_c3",
+                                 "/tmp/myui_incr_c4"};
+  my_pal_t* pal;
+  my_pal_window_t* win;
+  char* big;
+  pid_t pids[5];
+  int i, ok_count = 0, refused_count = 0;
+  if (getenv("DISPLAY") == NULL) {
+    fprintf(stdout, "SKIP: DISPLAY not set\n");
+    return;
+  }
+  for (i = 0; i < 5; i++) {
+    unlink(names[i]);
+  }
+  pal = my_pal_x11_create(NULL);
+  TEST_ASSERT_NOT_NULL(pal);
+  win = my_pal_window_create(pal, 32, 32, "incr_conc");
+  g_loop = my_pal_main_loop_create(pal);
+  TEST_ASSERT_NOT_NULL(win);
+  TEST_ASSERT_NOT_NULL(g_loop);
+  big = make_big_text();
+  my_pal_window_show(win);
+  TEST_ASSERT_EQ_INT(my_pal_clipboard_set_text(pal, big), MY_RET_OK);
+
+  for (i = 0; i < 5; i++) {
+    pids[i] = fork();
+    if (pids[i] == 0) {
+      _exit(run_incr_requestor_at(big, names[i]));
+    }
+    TEST_ASSERT(pids[i] > 0);
+  }
+
+  my_pal_main_loop_add_timer(g_loop, quit_timer, NULL, 6000);
+  my_pal_main_loop_run(g_loop);
+  for (i = 0; i < 5; i++) {
+    waitpid(pids[i], NULL, 0);
+  }
+
+  for (i = 0; i < 5; i++) {
+    char result[64];
+    TEST_ASSERT_EQ_INT(read_file_int(names[i], result, sizeof(result)), 0);
+    if (result[0] == 'O' && result[1] == 'K' && atoi(result + 3) > 1) {
+      ok_count++;
+    } else if (strcmp(result, "REFUSED") == 0) {
+      refused_count++;
+    } else {
+      fprintf(stdout, "child %d: %s\n", i, result);
+    }
+  }
+  TEST_ASSERT_EQ_INT(ok_count, 4);     /* slots serve 4 concurrently */
+  TEST_ASSERT_EQ_INT(refused_count, 1); /* the 5th is refused */
+
+  free(big);
+  my_pal_main_loop_destroy(g_loop);
+  my_pal_window_destroy(win);
+  my_pal_destroy(pal);
+}
+
 MYTEST_MAIN_BEGIN()
   MYTEST_RUN(test_incr_receive_from_external);
   MYTEST_RUN(test_incr_serve_to_external);
+  MYTEST_RUN(test_incr_concurrent_transfers);
 MYTEST_MAIN_END()
