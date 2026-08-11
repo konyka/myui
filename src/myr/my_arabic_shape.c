@@ -14,6 +14,10 @@ static int join_cmp(uint32_t cp, const my_arabic_join_entry_t* e) {
 
 my_arabic_join_t my_arabic_join_class(uint32_t cp) {
   size_t lo = 0, hi = sizeof(MY_ARABIC_JOINS) / sizeof(MY_ARABIC_JOINS[0]);
+  if (cp >= 0xFEF5u && cp <= 0xFEFCu) {
+    /* lam-alef ligatures (M12b): right-joining, like alef */
+    return MY_ARABIC_JOIN_RIGHT;
+  }
   while (lo < hi) {
     size_t mid = lo + (hi - lo) / 2;
     int c = join_cmp(cp, &MY_ARABIC_JOINS[mid]);
@@ -56,6 +60,23 @@ static bool joins_backward(my_arabic_join_t j) {
          j == MY_ARABIC_JOIN_CAUSING;
 }
 
+static const my_arabic_ligature_t* lam_alef_find(uint32_t alef) {
+  size_t lo = 0, hi = sizeof(MY_ARABIC_LAM_ALEF) / sizeof(MY_ARABIC_LAM_ALEF[0]);
+  while (lo < hi) {
+    size_t mid = lo + (hi - lo) / 2;
+    const my_arabic_ligature_t* e = &MY_ARABIC_LAM_ALEF[mid];
+    if (alef == e->alef) {
+      return e;
+    }
+    if (alef < e->alef) {
+      hi = mid;
+    } else {
+      lo = mid + 1;
+    }
+  }
+  return NULL;
+}
+
 uint32_t my_arabic_form_for(uint32_t base, bool join_prev, bool join_next) {
   const my_arabic_form_t* e = form_find(base);
   uint32_t form = 0;
@@ -77,7 +98,7 @@ uint32_t my_arabic_form_for(uint32_t base, bool join_prev, bool join_next) {
 
 size_t my_arabic_shape(uint32_t* cps, size_t len) {
   uint32_t* orig;
-  size_t i;
+  size_t i, n = 0;
   if (cps == NULL) {
     return 0;
   }
@@ -88,7 +109,39 @@ size_t my_arabic_shape(uint32_t* cps, size_t len) {
     return len; /* OOM: leave the text unshaped rather than mis-shaped */
   }
   memcpy(orig, cps, len * sizeof(uint32_t));
+
+  /* pass 1 (M12b): mandatory lam+alef ligature merge -- lam (U+0644)
+   * followed by an alef variant becomes the lam-alef ligature, final
+   * form when the lam joins the previous char, isolated otherwise.
+   * Compacts the array (returns the new, shorter length). */
   for (i = 0; i < len; i++) {
+    if (orig[i] == 0x0644u && i + 1 < len) {
+      const my_arabic_ligature_t* lig = lam_alef_find(orig[i + 1]);
+      if (lig != NULL) {
+        bool prev_ok = false;
+        size_t j;
+        for (j = i; j-- > 0;) {
+          my_arabic_join_t jc = my_arabic_join_class(orig[j]);
+          if (jc == MY_ARABIC_JOIN_TRANSPARENT) {
+            continue;
+          }
+          prev_ok = joins_forward(jc); /* lam (D) always joins backward */
+          break;
+        }
+        cps[n++] =
+            prev_ok && lig->final_ != 0 ? lig->final_ : lig->isolated;
+        i++; /* consume the alef */
+        continue;
+      }
+    }
+    cps[n++] = orig[i];
+  }
+
+  /* pass 2: joining forms over the merged array (neighbour context is
+   * the merged sequence: the ligature is right-joining like alef and
+   * has no FORMS entry, so it passes through unchanged) */
+  memcpy(orig, cps, n * sizeof(uint32_t));
+  for (i = 0; i < n; i++) {
     const my_arabic_form_t* e = form_find(orig[i]);
     my_arabic_join_t cur;
     bool prev_ok = false, next_ok = false;
@@ -106,7 +159,7 @@ size_t my_arabic_shape(uint32_t* cps, size_t len) {
       prev_ok = joins_forward(jc) && joins_backward(cur);
       break;
     }
-    for (j = i + 1; j < len; j++) {
+    for (j = i + 1; j < n; j++) {
       my_arabic_join_t jc = my_arabic_join_class(orig[j]);
       if (jc == MY_ARABIC_JOIN_TRANSPARENT) {
         continue;
@@ -117,5 +170,5 @@ size_t my_arabic_shape(uint32_t* cps, size_t len) {
     cps[i] = my_arabic_form_for(orig[i], prev_ok, next_ok);
   }
   my_mem_free(NULL, orig);
-  return len;
+  return n;
 }

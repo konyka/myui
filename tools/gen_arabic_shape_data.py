@@ -32,6 +32,7 @@ with open(ARABIC_SHAPING, encoding="utf-8") as f:
 
 # base cp -> {form: cp}
 FORMS = {}
+LAM_ALEF = {}  # alef cp -> {form: ligature cp} (M12b)
 with open(UNICODE_DATA, encoding="utf-8") as f:
     for line in f:
         parts = line.strip().split(";")
@@ -48,7 +49,15 @@ with open(UNICODE_DATA, encoding="utf-8") as f:
             continue
         cps = rest.split()
         if len(cps) != 1:
-            continue  # skip ligatures (e.g. LAM+ALEF): not a 1:1 form
+            # LamAlef ligatures (M12b): <isolated|final> 0644 062X --
+            # only the 4 mandatory Alef variants, not the other
+            # "LAM WITH X" ligatures (context-dependent, not mandatory)
+            if len(cps) == 2 and int(cps[0], 16) == 0x0644 and \
+               name.startswith("ARABIC LIGATURE LAM") and \
+               int(cps[1], 16) in (0x0622, 0x0623, 0x0625, 0x0627):
+                alef = int(cps[1], 16)
+                LAM_ALEF.setdefault(alef, {})[form] = cp
+            continue
         base = int(cps[0], 16)
         FORMS.setdefault(base, {})[form] = cp
 
@@ -110,9 +119,27 @@ static const my_arabic_form_t MY_ARABIC_FORMS[] = {
     out.write("};\n\nstatic const my_arabic_join_entry_t MY_ARABIC_JOINS[] = {\n")
     for cp, t in jrows:
         out.write("    {0x%04Xu, %s},\n" % (cp, JT_ENUM[t]))
+    out.write("""};
+
+typedef struct my_arabic_ligature_t {
+  uint32_t alef;     /**< U+0622/0623/0625/0627 */
+  uint32_t isolated; /**< lam-alef ligature, isolated form */
+  uint32_t final_;   /**< lam-alef ligature, final form (joins previous) */
+} my_arabic_ligature_t;
+
+/** @brief Lam+Alef mandatory ligatures (M12b). The ligature behaves as a
+ * right-joining char (like ALEF): final_ when it joins the previous
+ * char, isolated otherwise. */
+static const my_arabic_ligature_t MY_ARABIC_LAM_ALEF[] = {
+""")
+    for alef in sorted(LAM_ALEF):
+        lig = LAM_ALEF[alef]
+        out.write("    {0x%04Xu, 0x%04Xu, 0x%04Xu},\n"
+                  % (alef, lig.get("isolated", 0), lig.get("final", 0)))
     out.write("};\n\n#endif /* MY_ARABIC_SHAPE_DATA_H */\n")
 
-print("forms: %d, joins: %d -> %s" % (len(rows), len(jrows), OUT))
+print("forms: %d, joins: %d, lam-alef: %d -> %s"
+      % (len(rows), len(jrows), len(LAM_ALEF), OUT))
 
 # print the forms of a few known words for test baking
 for word in ("محمد", "سلام"):

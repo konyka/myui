@@ -60,7 +60,13 @@ typedef struct wl_pal_t {
   my_darray_t* windows; /**< wl_window_t* registry */
   my_pal_event_handler_t handler;
   void* handler_ctx;
-  char* clipboard; /* in-memory; wl_data_device integration is a TODO */
+  char* clipboard; /* payload cache (memory roundtrip + data_source) */
+  /** @brief wl_data_device clipboard (M12b). */
+  struct wl_data_device_manager* data_mgr;
+  struct wl_data_device* data_device;
+  struct wl_data_source* data_source;    /**< our offer (owned, NULL ok) */
+  struct wl_data_offer* selection_offer; /**< current selection (owned) */
+  uint32_t kb_enter_serial;              /**< last keyboard enter serial */
 #if defined(MYUI_PAL_GL_EGL)
   EGLDisplay egl_dpy; /**< shared EGL display (lazy, EGL_NO_DISPLAY off) */
   EGLConfig egl_cfg;
@@ -384,6 +390,23 @@ static const struct wl_pointer_listener POINTER_LISTENER = {
     .motion = on_pointer_motion, .button = on_pointer_button,
     .axis = on_pointer_axis};
 
+static void on_kb_enter(void* data, struct wl_keyboard* kb, uint32_t serial,
+                        struct wl_surface* surface, struct wl_array* keys) {
+  wl_pal_t* p = (wl_pal_t*)data;
+  (void)kb;
+  (void)surface;
+  (void)keys;
+  p->kb_enter_serial = serial; /* needed by set_selection (M12b) */
+}
+
+static void on_kb_leave(void* data, struct wl_keyboard* kb, uint32_t serial,
+                        struct wl_surface* surface) {
+  (void)data;
+  (void)kb;
+  (void)serial;
+  (void)surface;
+}
+
 static void on_kb_keymap(void* data, struct wl_keyboard* kb, uint32_t format,
                          int32_t fd, uint32_t size) {
   wl_pal_t* p = (wl_pal_t*)data;
@@ -458,8 +481,146 @@ static void on_kb_repeat_info(void* data, struct wl_keyboard* kb, int32_t rate,
 }
 
 static const struct wl_keyboard_listener KEYBOARD_LISTENER = {
-    .keymap = on_kb_keymap, .key = on_kb_key,
-    .modifiers = on_kb_modifiers, .repeat_info = on_kb_repeat_info};
+    .keymap = on_kb_keymap, .enter = on_kb_enter, .leave = on_kb_leave,
+    .key = on_kb_key, .modifiers = on_kb_modifiers,
+    .repeat_info = on_kb_repeat_info};
+
+/* ---------------- wl_data_device clipboard (M12b) ---------------- */
+
+static void on_ds_target(void* data, struct wl_data_source* src,
+                         const char* mime) {
+  (void)data;
+  (void)src;
+  (void)mime;
+}
+
+static void on_ds_send(void* data, struct wl_data_source* src,
+                       const char* mime, int32_t fd) {
+  wl_pal_t* p = (wl_pal_t*)data;
+  const char* text = p->clipboard;
+  size_t left;
+  (void)src;
+  (void)mime;
+  if (text == NULL) {
+    close(fd);
+    return;
+  }
+  left = strlen(text);
+  while (left > 0) {
+    ssize_t n = write(fd, text, left);
+    if (n <= 0) {
+      break;
+    }
+    text += n;
+    left -= (size_t)n;
+  }
+  close(fd);
+}
+
+static void on_ds_cancelled(void* data, struct wl_data_source* src) {
+  wl_pal_t* p = (wl_pal_t*)data;
+  wl_data_source_destroy(src);
+  if (p->data_source == src) {
+    p->data_source = NULL;
+  }
+}
+
+static void on_ds_dnd_performed(void* data, struct wl_data_source* src) {
+  (void)data;
+  (void)src;
+}
+static void on_ds_dnd_finished(void* data, struct wl_data_source* src) {
+  (void)data;
+  (void)src;
+}
+static void on_ds_action(void* data, struct wl_data_source* src,
+                         uint32_t action) {
+  (void)data;
+  (void)src;
+  (void)action;
+}
+
+static const struct wl_data_source_listener DS_LISTENER = {
+    .target = on_ds_target,
+    .send = on_ds_send,
+    .cancelled = on_ds_cancelled,
+    .dnd_drop_performed = on_ds_dnd_performed,
+    .dnd_finished = on_ds_dnd_finished,
+    .action = on_ds_action,
+};
+
+static void on_dd_data_offer(void* data, struct wl_data_device* dd,
+                             struct wl_data_offer* offer) {
+  (void)data;
+  (void)dd;
+  if (offer != NULL) {
+    wl_data_offer_destroy(offer); /* no drag-and-drop (clipboard only) */
+  }
+}
+
+static void on_dd_selection(void* data, struct wl_data_device* dd,
+                            struct wl_data_offer* offer) {
+  wl_pal_t* p = (wl_pal_t*)data;
+  (void)dd;
+  if (p->selection_offer != NULL) {
+    wl_data_offer_destroy(p->selection_offer);
+  }
+  p->selection_offer = offer; /* NULL when the selection is cleared */
+}
+
+static void on_dd_enter(void* data, struct wl_data_device* dd,
+                        uint32_t serial, struct wl_surface* surface,
+                        wl_fixed_t x, wl_fixed_t y,
+                        struct wl_data_offer* offer) {
+  (void)data;
+  (void)dd;
+  (void)serial;
+  (void)surface;
+  (void)x;
+  (void)y;
+  (void)offer;
+}
+static void on_dd_leave(void* data, struct wl_data_device* dd) {
+  (void)data;
+  (void)dd;
+}
+static void on_dd_motion(void* data, struct wl_data_device* dd,
+                         uint32_t time, wl_fixed_t x, wl_fixed_t y) {
+  (void)data;
+  (void)dd;
+  (void)time;
+  (void)x;
+  (void)y;
+}
+static void on_dd_drop(void* data, struct wl_data_device* dd) {
+  (void)data;
+  (void)dd;
+}
+
+static const struct wl_data_device_listener DD_LISTENER = {
+    .data_offer = on_dd_data_offer,
+    .enter = on_dd_enter,
+    .leave = on_dd_leave,
+    .motion = on_dd_motion,
+    .drop = on_dd_drop,
+    .selection = on_dd_selection,
+};
+
+/** @brief Lazily create the seat's data device. */
+static bool wl_data_device_ready(wl_pal_t* p) {
+  if (p->data_device != NULL) {
+    return true;
+  }
+  if (p->data_mgr == NULL || p->seat == NULL) {
+    return false;
+  }
+  p->data_device = wl_data_device_manager_get_data_device(p->data_mgr,
+                                                          p->seat);
+  if (p->data_device != NULL) {
+    wl_data_device_add_listener(p->data_device, &DD_LISTENER, p);
+  }
+  return p->data_device != NULL;
+}
 
 static void on_seat_capabilities(void* data, struct wl_seat* seat,
                                  uint32_t caps) {
@@ -499,6 +660,9 @@ static void on_registry_global(void* data, struct wl_registry* registry,
   } else if (strcmp(interface, wl_seat_interface.name) == 0) {
     p->seat = (struct wl_seat*)wl_registry_bind(registry, name, &wl_seat_interface, 5);
     wl_seat_add_listener(p->seat, &SEAT_LISTENER, p);
+  } else if (strcmp(interface, wl_data_device_manager_interface.name) == 0) {
+    p->data_mgr = (struct wl_data_device_manager*)wl_registry_bind(
+        registry, name, &wl_data_device_manager_interface, 3);
   }
 }
 
@@ -960,13 +1124,84 @@ static my_ret_t wl_clipboard_set(my_pal_t* pal, const char* text) {
   memcpy(copy, text != NULL ? text : "", len + 1);
   my_mem_free(p->allocator, p->clipboard);
   p->clipboard = copy;
+  /* wl_data_device (M12b): offer the new clipboard as a data source.
+   * set_selection needs a recent keyboard-enter serial (compositor
+   * focus policy); without one the source is prepared but likely does
+   * not become the active selection -- the in-memory cache still
+   * covers the in-app roundtrip either way. */
+  if (text != NULL && wl_data_device_ready(p)) {
+    struct wl_data_source* src =
+        wl_data_device_manager_create_data_source(p->data_mgr);
+    if (src != NULL) {
+      if (p->data_source != NULL) {
+        wl_data_source_destroy(p->data_source);
+      }
+      p->data_source = src;
+      wl_data_source_offer(src, "text/plain;charset=utf-8");
+      wl_data_source_offer(src, "text/plain");
+      wl_data_source_add_listener(src, &DS_LISTENER, p);
+      wl_data_device_set_selection(p->data_device, src,
+                                   p->kb_enter_serial);
+      wl_display_flush(p->display);
+    }
+  }
   return MY_RET_OK;
+}
+
+/** @brief Receive the current selection offer into buf (sync pump on
+ * the display fd + the transfer pipe, ~2s timeout). */
+static my_ret_t wl_clipboard_receive(wl_pal_t* p, char* buf, size_t size) {
+  int fds[2] = {-1, -1};
+  uint64_t deadline = wl_now_ms() + 2000;
+  size_t total = 0;
+  bool eof = false;
+  if (p->selection_offer == NULL || pipe(fds) != 0) {
+    return MY_RET_NOT_FOUND;
+  }
+  wl_data_offer_receive(p->selection_offer, "text/plain;charset=utf-8",
+                        fds[1]);
+  close(fds[1]);
+  wl_display_flush(p->display);
+  while (!eof && total < size - 1 && wl_now_ms() < deadline) {
+    struct pollfd pf[2];
+    pf[0].fd = wl_display_get_fd(p->display);
+    pf[0].events = POLLIN;
+    pf[0].revents = 0;
+    pf[1].fd = fds[0];
+    pf[1].events = POLLIN;
+    pf[1].revents = 0;
+    wl_display_dispatch_pending(p->display);
+    if (poll(pf, 2, 50) <= 0) {
+      continue;
+    }
+    if (pf[0].revents != 0) {
+      wl_display_dispatch(p->display);
+    }
+    if ((pf[1].revents & (POLLIN | POLLHUP)) != 0) {
+      ssize_t n = read(fds[0], buf + total, size - 1 - total);
+      if (n > 0) {
+        total += (size_t)n;
+      } else {
+        eof = true;
+      }
+    }
+  }
+  close(fds[0]);
+  buf[total] = '\0';
+  return total > 0 ? MY_RET_OK : MY_RET_NOT_FOUND;
 }
 
 static my_ret_t wl_clipboard_get(my_pal_t* pal, char* buf, size_t size) {
   wl_pal_t* p = (wl_pal_t*)pal;
   if (buf == NULL || size == 0) {
     return MY_RET_INVALID_PARAMS;
+  }
+  /* external selection first (M12b), then the in-app memory cache */
+  if (wl_data_device_ready(p)) {
+    wl_display_roundtrip(p->display); /* pick up the latest selection */
+    if (wl_clipboard_receive(p, buf, size) == MY_RET_OK) {
+      return MY_RET_OK;
+    }
   }
   if (p->clipboard == NULL) {
     return MY_RET_NOT_FOUND;
@@ -982,6 +1217,18 @@ static void wl_pal_destroy(my_pal_t* pal) {
   }
   my_mem_free(p->allocator, p->clipboard);
   my_darray_destroy(p->windows);
+  if (p->selection_offer != NULL) {
+    wl_data_offer_destroy(p->selection_offer);
+  }
+  if (p->data_source != NULL) {
+    wl_data_source_destroy(p->data_source);
+  }
+  if (p->data_device != NULL) {
+    wl_data_device_destroy(p->data_device);
+  }
+  if (p->data_mgr != NULL) {
+    wl_data_device_manager_destroy(p->data_mgr);
+  }
   if (p->xkb_state != NULL) {
     xkb_state_unref(p->xkb_state);
   }

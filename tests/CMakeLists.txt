@@ -20,6 +20,7 @@ set(MYUI_GL_WINDOW_TESTS
 set(MYUI_WAYLAND_TESTS
   "${CMAKE_CURRENT_SOURCE_DIR}/my_pal_wayland_keymap_test.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/wayland_smoke_test.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/wayland_clipboard_test.c"
 )
 # linux_fb test needs POSIX (my_osal)
 set(MYUI_LINUX_FB_TESTS

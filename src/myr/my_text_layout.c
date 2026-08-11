@@ -18,6 +18,25 @@
 #include <SheenBidi/SBRun.h>
 
 #include "myr/my_arabic_shape.h"
+#include "myr/my_bidi_mirror_data.h"
+
+/** @brief Mirror glyph of a codepoint (UBA L4, M12b), or cp itself. */
+static uint32_t tl_mirror_cp(uint32_t cp) {
+  size_t lo = 0, hi = sizeof(MY_BIDI_MIRRORS) / sizeof(MY_BIDI_MIRRORS[0]);
+  while (lo < hi) {
+    size_t mid = lo + (hi - lo) / 2;
+    const my_bidi_mirror_t* e = &MY_BIDI_MIRRORS[mid];
+    if (cp == e->cp) {
+      return e->mirror;
+    }
+    if (cp < e->cp) {
+      hi = mid;
+    } else {
+      lo = mid + 1;
+    }
+  }
+  return cp;
+}
 #endif
 
 /* ---------------- utf-8 helpers ---------------- */
@@ -148,8 +167,10 @@ static bool tl_master_compute(tl_master_t* m, const char* text) {
   }
 #if defined(MYUI_BIDI)
   if (may && len > 0) {
-    /* Arabic joining first (context = logical neighbours), then UBA */
-    my_arabic_shape(m->cps, len);
+    /* Arabic joining first (context = logical neighbours), then UBA;
+     * lam-alef ligatures compact the sequence (M12b) */
+    len = my_arabic_shape(m->cps, len);
+    m->len = len;
     {
       SBCodepointSequence seq = {SBStringEncodingUTF32, m->cps, len};
       SBAlgorithmRef alg = SBAlgorithmCreate(&seq);
@@ -195,6 +216,12 @@ static bool tl_master_compute(tl_master_t* m, const char* text) {
           my_mem_free(NULL, tmp);
         }
         SBLineRelease(line);
+        /* UBA L4 (M12b): mirror glyphs at RTL embedding levels */
+        for (i = 0; i < len; i++) {
+          if (m->vrtl[i] != 0) {
+            m->cps[i] = tl_mirror_cp(m->cps[i]);
+          }
+        }
       }
       if (para != NULL) {
         SBParagraphRelease(para);

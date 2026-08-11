@@ -47,15 +47,33 @@ static void test_arabic_shaping_unit(void) {
   TEST_ASSERT_EQ_INT(cps[2], 0xFEE4u); /* meem medial */
   TEST_ASSERT_EQ_INT(cps[3], 0xFEAAu); /* dal final (right-joining) */
 
-  /* سلام: seen initial, lam medial, alef final, meem isolated (alef
-   * cannot join forward) */
+  /* سلام with the MANDATORY lam-alef ligature (M12b): lam joins the
+   * previous seen -> final ligature FEFC; meem stays isolated (the
+   * ligature, like alef, cannot join forward) */
   {
     uint32_t s[4] = {0x0633u, 0x0644u, 0x0627u, 0x0645u};
-    my_arabic_shape(s, 4);
-    TEST_ASSERT_EQ_INT(s[0], 0xFEB3u);
-    TEST_ASSERT_EQ_INT(s[1], 0xFEE0u);
-    TEST_ASSERT_EQ_INT(s[2], 0xFE8Eu);
-    TEST_ASSERT_EQ_INT(s[3], 0xFEE1u);
+    size_t n = my_arabic_shape(s, 4);
+    TEST_ASSERT_EQ_INT(n, 3);
+    TEST_ASSERT_EQ_INT(s[0], 0xFEB3u); /* seen initial */
+    TEST_ASSERT_EQ_INT(s[1], 0xFEFCu); /* lam-alef final */
+    TEST_ASSERT_EQ_INT(s[2], 0xFEE1u); /* meem isolated */
+  }
+
+  /* lam-alef: all four alef variants, isolated at word start */
+  {
+    static const struct {
+      uint32_t alef, iso, fin;
+    } cases[4] = {{0x0622u, 0xFEF5u, 0xFEF6u},
+                  {0x0623u, 0xFEF7u, 0xFEF8u},
+                  {0x0625u, 0xFEF9u, 0xFEFAu},
+                  {0x0627u, 0xFEFBu, 0xFEFCu}};
+    int k;
+    for (k = 0; k < 4; k++) {
+      uint32_t s[2] = {0x0644u, cases[k].alef};
+      size_t n = my_arabic_shape(s, 2);
+      TEST_ASSERT_EQ_INT(n, 1);
+      TEST_ASSERT_EQ_INT(s[0], cases[k].iso); /* no previous: isolated */
+    }
   }
 
   /* join classes */
@@ -189,6 +207,28 @@ static void test_logical_at_x_clicks(void) {
   my_text_layout_destroy(l);
 }
 
+static void test_mirror_l4_rtl_parens(void) {
+  /* UBA L4 (M12b): "(نص)" in an RTL paragraph -- the parens resolve to
+   * the RTL level and are mirrored, so the OPEN paren glyph sits left
+   * of the text and the CLOSE paren glyph right of it */
+  my_text_layout_t* l =
+      my_text_layout_process(NULL, "(\xD9\x86\xD8\xB5)");
+  TEST_ASSERT_NOT_NULL(l);
+  TEST_ASSERT_EQ_INT(l->len, 4);
+  TEST_ASSERT(l->has_rtl);
+  TEST_ASSERT_EQ_INT(l->visual_cps[0], 0x0028u); /* ')' -> '(' (mirrored) */
+  TEST_ASSERT_EQ_INT(l->visual_cps[3], 0x0029u); /* '(' -> ')' (mirrored) */
+  my_text_layout_destroy(l);
+}
+
+static void test_mirror_l4_ltr_untouched(void) {
+  my_text_layout_t* l = my_text_layout_process(NULL, "(ab)");
+  TEST_ASSERT_NOT_NULL(l);
+  TEST_ASSERT_EQ_INT(l->visual_cps[0], 0x0028u); /* no mirroring in LTR */
+  TEST_ASSERT_EQ_INT(l->visual_cps[3], 0x0029u);
+  my_text_layout_destroy(l);
+}
+
 static void test_selection_visual_rects(void) {
   my_text_layout_t* l = my_text_layout_process(NULL, MIXED);
   my_rectf_t r[4];
@@ -275,6 +315,8 @@ MYTEST_MAIN_BEGIN()
   MYTEST_RUN(test_boundary_left_walk);
   MYTEST_RUN(test_boundary_home_end_pure_rtl);
   MYTEST_RUN(test_logical_at_x_clicks);
+  MYTEST_RUN(test_mirror_l4_rtl_parens);
+  MYTEST_RUN(test_mirror_l4_ltr_untouched);
   MYTEST_RUN(test_selection_visual_rects);
 #endif
   MYTEST_RUN(test_cache_hit_and_eviction);

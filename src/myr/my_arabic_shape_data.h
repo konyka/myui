@@ -485,4 +485,20 @@ static const my_arabic_join_entry_t MY_ARABIC_JOINS[] = {
     {0x08C8u, MY_ARABIC_JOIN_DUAL},
 };
 
+typedef struct my_arabic_ligature_t {
+  uint32_t alef;     /**< U+0622/0623/0625/0627 */
+  uint32_t isolated; /**< lam-alef ligature, isolated form */
+  uint32_t final_;   /**< lam-alef ligature, final form (joins previous) */
+} my_arabic_ligature_t;
+
+/** @brief Lam+Alef mandatory ligatures (M12b). The ligature behaves as a
+ * right-joining char (like ALEF): final_ when it joins the previous
+ * char, isolated otherwise. */
+static const my_arabic_ligature_t MY_ARABIC_LAM_ALEF[] = {
+    {0x0622u, 0xFEF5u, 0xFEF6u},
+    {0x0623u, 0xFEF7u, 0xFEF8u},
+    {0x0625u, 0xFEF9u, 0xFEFAu},
+    {0x0627u, 0xFEFBu, 0xFEFCu},
+};
+
 #endif /* MY_ARABIC_SHAPE_DATA_H */

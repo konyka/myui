@@ -229,6 +229,12 @@ PAL port 矩阵：
 - **edit 接入**：光标 x/点击定位/选区高亮（跨 run 分段）/方向键/Home/End 全部经映射——**仅当文本 may_need_bidi 时**；纯 LTR 走原等宽/measure 路径（逐位零回归，现有测试未动）。text_area 接入按视觉行段同理：wrap 折行本身保持逻辑序（**wrap+RTL 混排的视觉行级重排留 TODO**）；上下移动 goal_col 语义统一为**视觉边界索引**（LTR 下恒等于 codepoint 列，零回归）；跨行左右移动回落逻辑行首/尾（跨行视觉连续性同 TODO）。
 - BIDI=OFF 下 RTL 分支整体裁掉（identity 布局 + 测试按宏跳过）；M12a 还修复了 OFF 模式 `may` 未归零导致映射数组未初始化的段错误（tl_master_compute 强制 identity）。
 
+## Lam-Alef 合字、UBA L4 镜像与 wayland 剪贴板（M12b）
+
+- **Lam-Alef 合字**（my_arabic_shape 两遍制）：pass 1 合并——Lam(U+0644) 后紧跟 Alef 系（0622/0623/0625/0627）→ 对应合字（FEF5..FEFC），**按 Lam 在原文的连接上下文选形**（前字符可前连 → final 形，否则 isolated 形；数组变短，返回值=新长度）；pass 2 原判型逻辑跑在合并后序列上（合字按右连接参与邻居判型：`my_arabic_join_class` 对 FEF5..FEFC 特判 R）。数据由 tools/gen_arabic_shape_data.py 扩展生成（UnicodeData 双码位分解，限 4 个强制 Alef 变体——"LAM WITH JEEM/HAH" 等非强制连字不收）。整形调用方（text_layout）用新长度喂 UBA（合字在重排中算一个字符）。Naskh 渲染目检：سلام 词中 لا 与独立 لا 均为合字字形。
+- **UBA L4 镜像**（my_text_layout）：重排后对 RTL run 内码点查表替换镜像码点；表由 tools/gen_bidi_mirror_data.py 从本地 BidiMirroring.txt 生成（全表 428 对——任务书说"约 20 对手表"，本地有完整 UCD 故全量生成）。"（نص)" 实测：RTL 级内左右括号镜像互换，LTR 不动。
+- **wayland 剪贴板（wl_data_device）**：seat 键盘 enter 时记录 serial；set = 建 wl_data_source（offer utf-8+plain 双 mime，send 事件写 fd）+ `wl_data_device_set_selection(serial)`；get = selection 事件存 offer → `wl_data_offer_receive` 到 pipe → 显示 fd+pipe 双 poll 同步收（2s 超时，与 x11 同模式）；外部无 selection 回落内存缓存。**实跑卡点（如实）**：set/get 的协议握手都依赖**键盘焦点**（set_selection 要近期 enter serial、selection 事件只发给焦点客户），自动化测试窗口拿不到合成器焦点——双连接互测中 B 的 get 返回 NOT_FOUND。协议对象/事件全程无错误（连接存活），内存往返照常；跨连接验证需要一个能授予焦点的合成器会话（或人工聚焦窗口）。
+
 ## INCR 增量剪贴板与窗口级 undo 管理器（M11b）
 
 - **INCR（x11，ICCCM 2.7.2）**：阈值 64KB——clipboard 文本超过即走增量协议。**发送端**（本应用为 owner）：SelectionRequest 应答改为写 INCR 类型属性（32 位下界值）+ 对 requestor 窗口 `XSelectInput(PropertyChangeMask)`；对方每次删除属性（PropertyNotify/PropertyDelete）追加下一片（片大小 = min(64KB, XMaxRequestSize×4−64)，本机实测 4 片/200KB），最后一片删除后补零长度片收尾；同时只允许一个传输（并发请求拒绝），clipboard_set 中途换文档会发零长度片礼貌收尾。**接收端**：SelectionNotify 读到 INCR 类型即进收片循环——删属性（=向对方要下一片）→ 等 PropertyNewValue（单片 2s 超时，事件泵与 M9d 同款，其他事件照常分发）→ 读片拼接，直到零长度片；buf 满后继续收片但丢弃（让对方正常结束），总长上限 16MB 防挂死。**结构性修复**：SelectionRequest 服务与 INCR 发送推进移到 x11_dispatch 顶部、先于 handler NULL 检查——剪贴板服务不再依赖应用注册事件处理器（M9d 时代隐藏依赖，本次 fork 测试暴露）。窗口创建加 PropertyChangeMask。dummy/wayland 内存往返无 INCR 概念，行为不变。

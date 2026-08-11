@@ -124,7 +124,7 @@ cmake -S . -B build -DMYUI_FONT_STB=OFF -DMYUI_PAL=linux_fb
 
 ## 剪贴板实现要点（M8c 新增 port 须知）
 
-pal vtable 的最后两项 `clipboard_set_text/get_text`：嵌入式/单窗口系统用内存字符串即可（照 dummy 10 行）；桌面系统注意 selection 是"惰性提供"协议（x11 参考实现含 SelectionRequest 应答样板；从外部获取需事件泵重入，建议照 x11 先实现本应用内往返）。
+pal vtable 的最后两项 `clipboard_set_text/get_text`：嵌入式/单窗口系统用内存字符串即可（照 dummy 10 行）；桌面系统注意 selection 是"惰性提供"协议（x11 参考实现含 SelectionRequest 应答样板 + M11b INCR 大数据分片；从外部获取需事件泵重入，建议照 x11 先实现本应用内往返）。**wayland（M12b）**：wl_data_device 已实现——set=wl_data_source+`set_selection(enter serial)`，get=selection offer+`wl_data_offer_receive` 到 pipe 同步读；注意握手依赖键盘焦点（enter serial / 焦点 selection 事件），无焦点环境下协议就绪但不生效，内存缓存兜底。
 
 ## 嵌入式零解析路径（M9d：XML→C 生成器）
 
