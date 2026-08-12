@@ -74,6 +74,9 @@ add_subdirectory(src/mymvvm_myui)
 add_executable(ui2c tools/ui2c.c)
 target_link_libraries(ui2c PRIVATE myui)
 
+# duanxianxia clone app (dxx_core static lib; tests link it)
+add_subdirectory(apps/duanxianxia)
+
 if(MYUI_BUILD_TESTS)
   enable_testing()
   add_subdirectory(tests)

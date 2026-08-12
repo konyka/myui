@@ -105,7 +105,7 @@ PAL port 矩阵：
 ## 字体子系统（M7a）
 
 - `my_font.h`：字体抽象 vtable（measure/get_glyph(8bpp alpha 位图+bearing+advance)/ascent/descent/line_height/destroy）；UTF-8 解码 `my_utf8_next`。
-- 两实现：`my_font_bitmap`（内置 8x8 等宽位图字体，ASCII 32..126，零依赖兜底，数据由 `tools/gen_bitmap_font.c` 从 Liberation Sans(OFL) 生成并提交，可用该脚本重新生成）；`my_font_stb`（stb_truetype 后端，编译选项 `MYUI_FONT_STB` 默认 ON，OFF 时嵌入式裁剪；LRU 字形缓存默认 256 项，容量可配，命中/淘汰有诊断计数器）。
+- 两实现：`my_font_bitmap`（内置 8x8 等宽位图字体，ASCII 32..126，零依赖兜底，数据由 `tools/gen_bitmap_font.c` 从 Liberation Sans(OFL) 生成并提交，可用该脚本重新生成）；`my_font_stb`（stb_truetype 后端，编译选项 `MYUI_FONT_STB` 默认 ON，OFF 时嵌入式裁剪；LRU 字形缓存默认 256 项，容量可配，命中/淘汰有诊断计数器；M14b 起支持 .ttc 首 face——"ttcf" 头检测 + `stbtt_GetFontOffsetForIndex`，注意 CFF2 可变字体如 NotoSansCJK-VF 仍不可解析；并提供 `my_font_stb_create_chain` **逐码点 fallback 链**：每个 codepoint 路由到链上第一个含该字形的 face，CJK 无 Latin / Latin 无 CJK 的字体组合透明工作，dxx 即 [DroidSansFallback, LiberationSans]）。
 - 渲染落地：vgcanvas vtable 增加 `set_font(font, size)`（font 可 NULL 仅改字号）与 `measure_text`；soft backend 的 draw_text 把字形 alpha 经 `my_lcd_blend_span`（lcd vtable 新增的 src-over span 混合，各格式特化）写入；gles2 backend 把字形上传为 alpha 纹理（64 项直接映射缓存），第二套纹理着色器 + quad 绘制（纹理图集批提交为 TODO）。
 - 控件：button/label 用 measure 居中真实文本，主题键 `font_size`/`fg_color` 生效；无字体时回退旧占位条（兼容老测试）。窗口 `my_window_set_font` 设默认字体。
 - 第三方说明：`3rd/stb/stb_truetype.h`（public domain），其实现宏单独成 TU 并仅对该文件放宽警告，项目自身标准不变。

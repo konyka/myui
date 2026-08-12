@@ -89,6 +89,16 @@ my_font_t* my_font_bitmap_create(const my_allocator_t* allocator);
 my_font_t* my_font_stb_create(const my_allocator_t* allocator, const char* path,
                               size_t cache_capacity);
 
+/**
+ * @brief Fallback chain (M14b): load several faces; each codepoint is
+ * routed to the first face containing it (CJK fonts without Latin +
+ * Latin fonts without CJK combine transparently). Faces that fail to
+ * load are skipped; NULL when no face loads (or STB is trimmed).
+ */
+my_font_t* my_font_stb_create_chain(const my_allocator_t* allocator,
+                                    const char* const* paths,
+                                    size_t path_count, size_t cache_capacity);
+
 /** @brief Test/diagnostics: glyph cache hit counter (0 without STB). */
 size_t my_font_stb_cache_hits(my_font_t* font);
 

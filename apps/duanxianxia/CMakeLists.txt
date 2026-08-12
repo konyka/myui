@@ -1,0 +1,16 @@
+add_library(dxx_core STATIC
+  dxx_data.c
+  dxx_theme.c
+  views/nav_item.c
+  views/topbar.c
+  views/index_strip.c
+  views/footer.c
+)
+target_include_directories(dxx_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(dxx_core PUBLIC myui mypal myr myc)
+
+if(MYUI_BUILD_DEMOS)
+  add_executable(dxx main.c)
+  target_link_libraries(dxx PRIVATE dxx_core myui mymvvm mymvvm_myui)
+  target_include_directories(dxx PRIVATE ${CMAKE_SOURCE_DIR}/3rd)
+endif()
