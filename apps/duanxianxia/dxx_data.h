@@ -12,6 +12,8 @@
 #ifndef DXX_DATA_H
 #define DXX_DATA_H
 
+#include <stdint.h>
+
 /** @brief One index quote row (name + last + change%). */
 typedef struct dxx_index_quote_t {
   const char* name;    /**< static string */
@@ -99,5 +101,39 @@ typedef struct dxx_pool_row_t {
 #define DXX_POOL_ROW_COUNT 6
 /** @brief The six ladder rows: 6进7/4进5/3进4/2进3/1进2/首板. */
 extern const dxx_pool_row_t DXX_POOL_ROWS[DXX_POOL_ROW_COUNT];
+
+/* ---------------- M15: 情绪直播 stats + charts (SIMULATED) ------------ */
+
+/** @brief One stat button of the qxlive panel (values are a SIMULATED
+ * snapshot, see dxx_data.c). series = index into DXX_SERIES or -1. */
+typedef struct dxx_stat_t {
+  const char* label;     /**< e.g. "情绪指标" */
+  const char* value;     /**< e.g. "62"; NULL = no value (量能) */
+  uint32_t bg;           /**< button background */
+  uint32_t fg;           /**< label text color */
+  uint32_t value_color;  /**< value text color (white buttons: red/green) */
+  int series;            /**< DXX_SERIES index, -1 = no curve */
+} dxx_stat_t;
+
+#define DXX_STAT_COUNT 12
+extern const dxx_stat_t DXX_STATS[DXX_STAT_COUNT];
+
+/** @brief One intraday curve (SIMULATED): 5-minute samples 09:30-15:00. */
+typedef struct dxx_series_t {
+  const char* name;
+  const float* points;
+  int count;
+  float ymin;
+  float ymax;
+} dxx_series_t;
+
+#define DXX_SERIES_COUNT 3
+/** @brief 0=情绪指标 1=涨停家数 2=跌停家数 (SIMULATED curves). */
+extern const dxx_series_t DXX_SERIES[DXX_SERIES_COUNT];
+
+#define DXX_DIST_COUNT 10
+/** @brief 涨幅分布 buckets (SIMULATED): positive = 上涨档 (red bars),
+ * negative = 下跌档 (green bars below the axis). */
+extern const float DXX_DIST[DXX_DIST_COUNT];
 
 #endif /* DXX_DATA_H */

@@ -10,6 +10,8 @@ add_library(dxx_core STATIC
   views/live_panels.c
   views/placeholder.c
   views/auth.c
+  views/qx_chart.c
+  views/qx_stats.c
 )
 target_include_directories(dxx_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_include_directories(dxx_core PRIVATE ${CMAKE_SOURCE_DIR}/3rd)

@@ -5,8 +5,10 @@
 #ifndef DXX_VIEWS_H
 #define DXX_VIEWS_H
 
+#include "../dxx_data.h"
 #include "myui/my_window_manager.h"
 #include "myui/widgets/my_menu.h"
+#include "myui/widgets/my_scroll_view.h"
 
 #define DXX_MENU_COUNT 4
 #define DXX_TOPBAR_H 50
@@ -66,5 +68,15 @@ my_widget_t* dxx_build_ztpool(my_window_manager_t* wm, my_widget_t* parent,
 
 /** @brief Override the share-image PNG path (default ztpool_share.png). */
 void dxx_ztpool_set_share_path(my_widget_t* table, const char* path);
+
+/** @brief Feed list (time + keyword-colored rows) in a scroll_view
+ * (M15; shared by the live cards and the emotion card). */
+my_scroll_view_t* dxx_feed_list_create(const dxx_live_item_t* items,
+                                       int count, int32_t w);
+
+/** @brief Emotion-live card with stats grid + charts above the feed
+ * (M15). */
+my_widget_t* dxx_build_emotion_card(my_widget_t* parent, int32_t x, int32_t y,
+                                    int32_t w, int32_t h);
 
 #endif /* DXX_VIEWS_H */

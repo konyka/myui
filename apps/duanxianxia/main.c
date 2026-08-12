@@ -202,6 +202,24 @@ int main(void) {
       my_window_paint(win);
       dump_ppm(win->pal_window, "/tmp/dxx_menu.ppm");
       my_menu_dismiss(app.topbar.menus[2]);
+      /* M15: switch the emotion chart to 涨停家数 */
+      {
+        my_widget_t* qx = my_widget_get_child(page, 2); /* emotion card */
+        my_widget_t* zt = my_widget_get_child(qx, 1);  /* 涨停家数 btn */
+        int32_t bx = zt->rect.w / 2, by = zt->rect.h / 2;
+        my_event_t e;
+        my_widget_local_to_global(zt, &bx, &by);
+        e = my_event_init(MY_EVENT_POINTER_DOWN);
+        e.u.pointer.x = bx;
+        e.u.pointer.y = by;
+        my_window_on_pal_event(win, &e);
+        e = my_event_init(MY_EVENT_POINTER_UP);
+        e.u.pointer.x = bx;
+        e.u.pointer.y = by;
+        my_window_on_pal_event(win, &e);
+        my_window_paint(win);
+        dump_ppm(win->pal_window, "/tmp/dxx_chart_zt.ppm");
+      }
       /* navigation: placeholder subpage */
       app_on_nav(&app, "每日复盘");
       my_window_paint(win);
@@ -241,6 +259,8 @@ int main(void) {
         e.u.pointer.y = sy;
         my_window_on_pal_event(win, &e);
         e = my_event_init(MY_EVENT_POINTER_UP);
+        e.u.pointer.x = sx;
+        e.u.pointer.y = sy;
         my_window_on_pal_event(win, &e);
         if (my_window_manager_top(wm) != win) {
           my_window_t* top = my_window_manager_top(wm);
@@ -253,6 +273,8 @@ int main(void) {
           e.u.pointer.y = top->base.rect.h - 20;
           my_window_on_pal_event(top, &e);
           e = my_event_init(MY_EVENT_POINTER_UP);
+          e.u.pointer.x = 10;
+          e.u.pointer.y = top->base.rect.h - 20;
           my_window_on_pal_event(top, &e);
         }
       }
@@ -295,6 +317,8 @@ int main(void) {
           e.u.pointer.y = top->base.rect.h - 20;
           my_window_on_pal_event(top, &e);
           e = my_event_init(MY_EVENT_POINTER_UP);
+          e.u.pointer.x = 10;
+          e.u.pointer.y = top->base.rect.h - 20;
           my_window_on_pal_event(top, &e);
         }
       }

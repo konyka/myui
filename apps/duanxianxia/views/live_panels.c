@@ -127,20 +127,14 @@ static void feed_add_text(my_widget_t* rl, const char* text) {
   }
 }
 
-/** @brief Build a scrolling feed card; returns the card widget. */
-static my_widget_t* feed_card(my_widget_t* parent, int32_t x, int32_t y,
-                              int32_t w, int32_t h, const char* title,
-                              const dxx_live_item_t* items, int count) {
-  my_widget_t* card = my_widget_create(NULL, "dxx_card");
+/** @brief Feed list (time + keyword-colored text rows) inside a
+ * scroll_view; w = list width. Shared by the plain feed cards and the
+ * emotion card (M15). */
+my_scroll_view_t* dxx_feed_list_create(const dxx_live_item_t* items,
+                                          int count, int32_t w) {
   my_scroll_view_t* sv = my_scroll_view_create(NULL);
   my_widget_t* content = my_widget_create(NULL, "feed_content");
   int i;
-  card->vtable = &s_card_vtable;
-  my_widget_set_user_data(card, (void*)title);
-  my_widget_set_rect(card, &(my_rect_t){x, y, w, h});
-  my_widget_set_rect((my_widget_t*)sv,
-                     &(my_rect_t){8, CARD_TITLE_H + 4, w - 16,
-                                  h - CARD_TITLE_H - 12});
   for (i = 0; i < count; i++) {
     feed_row_t* row =
         (feed_row_t*)my_mem_calloc(NULL, 1, sizeof(feed_row_t));
@@ -155,9 +149,9 @@ static my_widget_t* feed_card(my_widget_t* parent, int32_t x, int32_t y,
     }
     row->time = items[i].time;
     my_widget_set_rect((my_widget_t*)row,
-                       &(my_rect_t){0, i * FEED_ROW_H, w - 16, FEED_ROW_H});
+                       &(my_rect_t){0, i * FEED_ROW_H, w, FEED_ROW_H});
     rl = my_rich_label_create(NULL);
-    my_widget_set_rect(rl, &(my_rect_t){52, 0, w - 16 - 52, FEED_ROW_H});
+    my_widget_set_rect(rl, &(my_rect_t){52, 0, w - 52, FEED_ROW_H});
     feed_add_text(rl, items[i].text);
     my_widget_add_child((my_widget_t*)row, rl);
     my_widget_unref(rl);
@@ -167,6 +161,21 @@ static my_widget_t* feed_card(my_widget_t* parent, int32_t x, int32_t y,
   my_scroll_view_set_content(sv, content);
   my_scroll_view_set_content_height(sv, count * FEED_ROW_H);
   my_widget_unref(content);
+  return sv;
+}
+
+/** @brief Build a scrolling feed card; returns the card widget. */
+static my_widget_t* feed_card(my_widget_t* parent, int32_t x, int32_t y,
+                              int32_t w, int32_t h, const char* title,
+                              const dxx_live_item_t* items, int count) {
+  my_widget_t* card = my_widget_create(NULL, "dxx_card");
+  my_scroll_view_t* sv = dxx_feed_list_create(items, count, w - 16);
+  card->vtable = &s_card_vtable;
+  my_widget_set_user_data(card, (void*)title);
+  my_widget_set_rect(card, &(my_rect_t){x, y, w, h});
+  my_widget_set_rect((my_widget_t*)sv,
+                     &(my_rect_t){8, CARD_TITLE_H + 4, w - 16,
+                                  h - CARD_TITLE_H - 12});
   my_widget_add_child(card, (my_widget_t*)sv);
   my_widget_unref((my_widget_t*)sv);
   my_widget_add_child(parent, card);
@@ -310,9 +319,11 @@ int32_t dxx_build_live_area(my_widget_t* parent, int32_t x, int32_t y,
   int32_t left_w = 750;
   int32_t right_x = x + left_w + 20;
   int32_t right_w = w - left_w - 20; /* 530 */
+  int32_t right_h = 400 + 12 + 160 + 12 + 430 + 12 + 250; /* 1276 */
   int32_t ry = y;
-  feed_card(parent, x, y, left_w, 800, "情绪直播", DXX_LIVE_EMOTION,
-            DXX_LIVE_EMOTION_COUNT);
+  /* M15: emotion card = stats grid + charts + feed; stretched to match
+   * the right column height */
+  dxx_build_emotion_card(parent, x, y, left_w, right_h);
   feed_card(parent, right_x, ry, right_w, 400, "涨停直播", DXX_LIVE_ZT,
             DXX_LIVE_ZT_COUNT);
   ry += 400 + 12;
@@ -323,5 +334,5 @@ int32_t dxx_build_live_area(my_widget_t* parent, int32_t x, int32_t y,
   ry += 430 + 12;
   amount_card(parent, right_x, ry, right_w, 250);
   ry += 250;
-  return 800 > ry - y ? 800 : ry - y; /* max(left, right column) */
+  return ry - y; /* = right column height (1276) */
 }

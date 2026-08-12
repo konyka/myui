@@ -64,4 +64,5 @@
 
 - **M14d 交互收尾 + 视觉比对（复刻收官）** ✅ 已完成：导航切换（顶栏全部可点项→占位面板，logo/涨停表现回首页，当前项 #E64C62 高亮模拟 bootstrap active）；登录/注册 dialog（edit hint/password + MVVM 全链路：TwoWay + not_empty validator + submit 命令 + 红字错误提示，注册带确认密码一致性）；分享图片真实导出（晋级表离屏 lcd_mem 渲染 + BGRA→RGBA + stb_image_write，路径可注入，dialog 报真实文件名）；视觉逐项比对表入 docs/apps/duanxianxia.md（一致/近似逐项标注）；dummy dump 10 场景 PNG 全目检。
 - **M14 完成**。
+- **M15 情绪统计区 + 走势图 + Wayland 演示** ✅ 已完成：情绪直播面板顶部接 qxlive 实测结构（/tmp/dxx/qxlive.html）——居中副标题 + 3×4 统计按钮（bootstrap 配色：橙 #F0AD4E/红 #D9534F/绿 #5CB85C/白底 #ccc 边，涨跌数字分红绿）+ 涨幅分布柱状图（红绿竖条）+ 主折线图（`dxx_chart` 自绘控件：5 网格线/y 三档刻度/x 时间刻度/#E64C62 2px AA 折线，`set_series` 数据接口）；情绪/涨停/跌停三按钮切换曲线 + active 加深（×0.85），量能日志占位；数据全为模拟快照（dxx_data 注明）；情绪卡拉高对齐右列 1276px；Wayland 实跑（wayland-0 活合成器 3 秒无协议错误）+ x11 冒烟通过；dump 增曲线切换场景目检。
 - **M15+ 候选**：wayland text-input-v3、候选窗内嵌、IM 重启（XRegisterIMInstantiateCallback）、IME 真实打字自动化；盒式降采样积分图（SAT）路线、fractional-scale/跨屏/RandR 多屏、真高分屏实测；竖排、自由合字（Lam-Alef 之外）、UAX#14 全规则、wrap+RTL 混排视觉行级重排；INCR 接收端并发、wayland 剪贴板焦点握手实测；菜单悬停开级联/级联深度>3/ESC 焦点回退父层、dialog 拖拽移动（PAL `move` 槽已备）。**SDK 顺延**：iOS/HarmonyOS/Android/Web/win32/sdl2 port、Metal backend、FreeBSD/linux_fb 实机复核。

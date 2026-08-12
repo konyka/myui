@@ -7,7 +7,14 @@
 
 - **M14b**：应用骨架——顶栏（logo + 4 组下拉菜单 + 6 个平铺项 + 注册/登录）、指数条（12 列）、页脚（免责声明 + ICP）；站点配色 theme；快照数据表；字体 fallback 链。
 - **M14c**：双列直播区（情绪直播 750x800 + 涨停直播/异动/股票池/成交额四卡，feed 关键词红绿高亮、内嵌 scroll_view 滚动）；涨停股票池晋级表（表头 + 分享图片按钮 + 6 行 130 项完整快照，股票项 = 市场徽标 + 状态色名称 + [涨幅] + 题材，flow 流式换行 + 行高自适应）；整页 scroll_view 滚动（右侧 scroll_bar）；股票项 hover 高亮 + tooltip + 点击弹个股卡片 dialog；分享图片弹模拟 dialog。**框架修复**：`my_window_on_pal_event` 此前漏路由 `MY_EVENT_POINTER_WHEEL`（真实事件路径滚轮从不生效，M14c 测试暴露，已修）。
-- **M14d（本期，收官）**：导航切换（顶栏全部可点项 → 占位面板：16px 标题 + 灰副文本 + 返回首页按钮；logo/涨停表现回首页；当前项 #E64C62 变色模拟 bootstrap active）；登录/注册 dialog（edit hint/password + MVVM 全链路：TwoWay + not_empty validator + submit 命令 + 红字错误提示，注册多确认密码一致性检查）；分享图片**真实导出**（晋级表离屏渲染 lcd_mem → BGRA→RGBA → stb_image_write PNG，默认 ztpool_share.png，路径可注入，dialog 报真实文件名）。
+- **M14d**：导航切换（顶栏全部可点项 → 占位面板：16px 标题 + 灰副文本 + 返回首页按钮；logo/涨停表现回首页；当前项 #E64C62 变色模拟 bootstrap active）；登录/注册 dialog（edit hint/password + MVVM 全链路：TwoWay + not_empty validator + submit 命令 + 红字错误提示，注册多确认密码一致性检查）；分享图片**真实导出**（晋级表离屏渲染 lcd_mem → BGRA→RGBA → stb_image_write PNG，默认 ztpool_share.png，路径可注入，dialog 报真实文件名）。
+- **M15（本期）**：情绪直播面板统计区 + 走势图——副标题（居中 16px bold）、3 行 × 4 统计按钮（btn-sm 风格：橙/红/绿彩底白字 + 白底 #ccc 边框，上涨家数数字红/下跌家数数字绿）、涨幅分布柱状图（左 1/4 宽，红绿竖条）+ 主折线图（白底卡片、5 条浅灰网格、y 轴三档刻度、x 轴 09:30-15:00 时间刻度、#E64C62 2px 折线 AA）；点击 情绪指标/涨停家数/跌停家数 切换主图曲线 + 当前按钮加深底色（×0.85）；量能按钮仅日志占位。**数值与曲线全部为模拟快照**（dxx_data.c 注明；原站走 echarts + 动态接口）。Wayland/x11 双 port 实跑冒烟通过（各 3 秒无协议错误）。
+
+### M15 追加差异
+
+13. **走势图实现**：原站用 echarts（canvas 富交互），复刻为 vgcanvas 自绘折线/柱状——网格/刻度/样式近似，无 echarts 的悬浮十字线/缩放交互。
+14. **统计数值**：原站动态接口实时计算，复刻为模拟快照（情绪指标 62 / 涨停 72 / 跌停 3 / 亏钱效应 0.31 / 主力流入 -182亿 / 连板高度 7 / 上涨 3102 / 下跌 1856 / 封板率 71% / 昨涨停 +2.34% / 昨连板 +3.12%）。
+15. **按钮配色**：bootstrap btn-warning/danger/success/default 标准色（#F0AD4E/#D9534F/#5CB85C/白+#ccc），与原站一致；active 加深为 ×0.85 近似 bootstrap active 态。
 
 ## 视觉逐项比对（M14d 定稿）
 
@@ -35,8 +42,9 @@
 cmake -S . -B build-dummy -DMYUI_PAL=dummy && cmake --build build-dummy -j
 MYUI_DEMO_DUMP_PPM=/tmp/dxx_home.ppm ./build-dummy/apps/duanxianxia/dxx
 # 产出：dxx_home(首屏) dxx_menu(复盘菜单) dxx_subpage(占位页) dxx_login(登录)
-#       dxx_pool(晋级表) dxx_first_board(首板行) dxx_tooltip dxx_dialog(个股卡)
-#       dxx_share(分享提示) + 当前目录 ztpool_share.png(真实导出 1300x~900)
+#       dxx_chart_zt(切换涨停家数曲线) dxx_pool(晋级表) dxx_first_board(首板行)
+#       dxx_tooltip dxx_dialog(个股卡) dxx_share(分享提示)
+#       + 当前目录 ztpool_share.png(真实导出 1300x~900)
 ```
 
 目检结论（M14d 全 10 场景 PNG 过 ReadMediaFile）：顶栏布局/菜单展开/指数红绿/直播区双色关键词/晋级表六行徽标配色/tooltip 文本/个股卡数据/登录表单/占位页/分享导出均与预期一致。
