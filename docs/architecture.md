@@ -263,6 +263,11 @@ PAL port 矩阵：
 - **控件接入**：IME_PREEDIT 只进显示态（光标处绘制 + 下划线，**不入文档、不入撤销、不发 changed**、blur 清除）；IME_COMMIT 清预编辑后走 `user_insert`（入撤销栈单步、发 changed、驱动 MVVM TwoWay）。dummy port 记录 spot（测试钩子）。
 - **验证层级（如实）**：① 单测 fake 事件全逻辑（preedit 替换/清除/不污染文档、commit 撤销单步、MVVM 回写、spot 上报、泄漏）；② x11 冒烟实跑：ibus 下 XOpenIM 连接成功、IC 创建/销毁干净、合成 KeyPress 经 XFilterEvent+Xutf8LookupString 路径到达（ASCII 'a'）；③ **真实 ibus 打字未自动化**（合成事件驱动 ibus 组合不可靠，且需抢占用户桌面焦点——手动验证步骤见 porting.md）。wayland text-input 协议为 TODO。
 
+## 盒式滑动窗实验与 wrap+RTL 行级语义（M13b）
+
+- **盒式行缓冲滑动窗（已实现-实测-回退）**：行缓冲版把每目标行的 k 个源行先累加进打包列缓冲（O(src_w) 行缓冲），x 向块求和——但盒式块**不重叠**，源像素本来就只读一次，行缓冲反而增加整块 read-modify-write 流量；实测 -O0 13.9ms vs 逐块寄存器累加 11.0ms、-O2 5.2 vs 4.8——**回退保留 M11c 逐块 SWAR 版本**，结论与数据留在代码注释与此处（行缓冲/滑动窗只在重叠窗口或积分图场景才有意义，与不重叠盒式降采样不匹配）。
+- **wrap+RTL 行级语义定案**：wrap 折行保持逻辑序（断点本就逻辑序，行序=阅读顺序自上而下——RTL 段落亦如此，无需行级重排）；text_layout 新增**段落基方向 rtl_base**（区别于"含 RTL run"的 has_rtl），text_area 绘制/光标的**默认对齐跟随段落方向**：未显式设 align 时 RTL 段落视觉行右对齐（LTR 与混排 LTR 段保持 LEFT；显式 CENTER/RIGHT/JUSTIFY 优先）；上下移动进入 RTL 视觉行落在其**视觉起点**（=逻辑末边界，M12a goal 视觉边界语义的自然延伸，测试固化）。混排段落跨行视觉连续性仍为 TODO。
+
 ## 文本对齐与描边关节合并（M11d）
 
 - **水平对齐**（`my_text_align_t`：LEFT/CENTER/RIGHT/JUSTIFY，src/myui/my_text_align.h 含 parse/str 辅助）：label `my_label_set_align`（默认 **LEFT**——M11d 前视觉上是居中，要旧观感显式设 CENTER；单行 label 的 JUSTIFY=LEFT）；text_area `my_text_area_set_align`（默认 LEFT 零回归）。语义（M11a "x 恒左缘"之下）：CENTER/RIGHT 按行测量宽（font measure 或 8px 格子兜底）整体偏移基线 x，选区高亮与光标同行偏移（JUSTIFY 的词距拉伸不反映在高亮/光标位置，TODO 注明）；RTL 段落同此设置（整个视觉块右贴）。**JUSTIFY 仅 wrap 模式**：物理行的**非末段视觉行**把 (内宽-行宽) 均摊给每个分隔空格（有后随字符的空格），逐词 draw_text；末段与无分隔空格的行渲染为 LEFT；无 wrap 时无效（注释）。接入：XML `align` 属性（label/text_area）、MVVM `align` string 属性（get 回枚举名）。

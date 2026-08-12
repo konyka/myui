@@ -126,6 +126,7 @@ typedef struct tl_master_t {
   char* utf8;
   size_t len;
   bool has_rtl;
+  bool rtl_base; /**< paragraph base direction is RTL (M13b) */
   uint64_t tick;
 } tl_master_t;
 
@@ -179,10 +180,12 @@ static bool tl_master_compute(tl_master_t* m, const char* text) {
       const SBRun* runs = NULL;
       size_t run_count = 0, vi = 0, ri;
       bool has_rtl = false;
+      bool base_rtl = false;
       if (alg != NULL) {
         para = SBAlgorithmCreateParagraph(alg, 0, len, SBLevelDefaultLTR);
       }
       if (para != NULL) {
+        base_rtl = SBParagraphGetBaseLevel(para) != 0;
         line = SBParagraphCreateLine(para, 0, SBParagraphGetLength(para));
       }
       if (line != NULL) {
@@ -233,6 +236,7 @@ static bool tl_master_compute(tl_master_t* m, const char* text) {
         may = false;
       } else {
         m->has_rtl = has_rtl;
+        m->rtl_base = base_rtl;
       }
     }
   }
@@ -274,6 +278,7 @@ static my_text_layout_t* tl_copy(const my_allocator_t* alloc,
   l->allocator = alloc;
   l->len = m->len;
   l->has_rtl = m->has_rtl;
+  l->rtl_base = m->rtl_base;
   if (m->len > 0) {
     l->visual_cps = (uint32_t*)my_mem_alloc(alloc, m->len * sizeof(uint32_t));
     l->visual_to_logical =

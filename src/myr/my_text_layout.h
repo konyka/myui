@@ -37,7 +37,8 @@ typedef struct my_text_layout_t {
   uint8_t* visual_rtl;         /**< len items: visual cp's run is RTL */
   char* visual_utf8;           /**< visual_cps re-encoded as UTF-8 */
   size_t len;
-  bool has_rtl;                /**< any RTL-level run (or RTL base) */
+  bool has_rtl;   /**< any RTL-level run (or RTL base) */
+  bool rtl_base;  /**< paragraph base direction is RTL (M13b) */
 } my_text_layout_t;
 
 /**

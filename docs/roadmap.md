@@ -39,6 +39,7 @@
 - **M12d UAX#14 子集 + INCR 并发 + 收尾** ✅ 已完成：断行类查表（1017 区间，libunibreak/UCD 生成；AL/SP/HY/ID/NS/OP/BK 七类，行首禁则优先于空格规则）驱动 wrap 折行（CJK 可断、英文不断、连字符后断、NS 不落行首、OP 不留行尾、边界空格消费；中/日/英/混排测试向量 + ASCII 零回归）；INCR 发送端 4 槽并发（满槽拒绝，按 requestor+property 路由推进；fork 实测 5 并发拉取 4 OK + 1 REFUSED）。
 - **M12 完成**。
 - **M13a IME（X11 XIM）** ✅ 已完成：IME_PREEDIT/IME_COMMIT 事件 + 焦点投递；x11 XIM 独立 TU（XOpenIM、每窗 XIC、PreeditCallbacks 优先回落 Nothing、XFilterEvent+Xutf8LookupString 键路径、spot location 跟随光标）；edit/text_area 预编辑显示（下划线、不入文档/撤销/changed）+ 提交插入（撤销单步 + MVVM 回写）；fake 事件单测全覆盖；实机 ibus：XOpenIM 连接 + IC 生命周期 + 合成键过 IM 路径冒烟通过；真实打字自动化不可靠已文档化手动步骤（porting.md）。
+- **M13b 盒式滑动窗实验 + wrap RTL 行级** ✅ 已完成：行缓冲滑动窗实现后实测更慢（-O0 13.9 vs 11.0ms），**回退保留逐块 SWAR**（数据与结论入档）；wrap+RTL：rtl_base 段落基方向接入，默认对齐跟随段落方向（RTL 段落视觉行右对齐、显式 align 优先、混排 LTR 段不动）、上下移动进入 RTL 视觉行落视觉起点，测试固化。
 
 ## 性能基线汇总（M10d 刷新，GCC 16，-O0 Debug，本机）
 

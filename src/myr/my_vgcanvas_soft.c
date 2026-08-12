@@ -1232,7 +1232,24 @@ static int32_t box_factor(int32_t src, int32_t dst) {
  * Blocks are at most 8x8 = 64 px, so a lane peaks at 255*64 = 16320 and
  * never carries into its neighbour lane. Identical sums to the scalar
  * path -> pixel-exact output, ~2-3x faster at -O0. */
-static void box_average(const uint8_t* src, int32_t w, int32_t h, int32_t fx,
+/** @brief Box-average src into tmp (nw x nh): output pixel (tx,ty) is the
+ * mean of the fx x fy source block at (tx*fx, ty*fy); edge blocks may be
+ * partial (only valid pixels are averaged). Straight-alpha channels are
+ * averaged independently -- semi-transparent edges deviate slightly from
+ * premultiplied filtering (accepted, keeps it simple).
+ *
+ * M11c SWAR fast path (little-endian): the 4 channels of a pixel are
+ * summed as TWO packed 16-bit lanes per uint32 (r|b in one, g|a in the
+ * other). Blocks are at most 8x8 = 64 px, so a lane peaks at 255*64 =
+ * 16320 and never carries into its neighbour lane. Identical sums to the
+ * scalar path -> pixel-exact output. M13b experiment: a row-buffer
+ * sliding-window variant was tried and REVERTED -- it was SLOWER at both
+ * -O0 (13.9ms vs 11.0) and -O2 (5.2 vs 4.8): blocks do not overlap, so
+ * every source pixel is read exactly once either way, and the row buffer
+ * only adds read-modify-write traffic; the per-block register
+ * accumulators win. Kept: per-block SWAR. Big-endian keeps the scalar
+ * path. */
+static bool box_average(const uint8_t* src, int32_t w, int32_t h, int32_t fx,
                         int32_t fy, uint8_t* tmp, int32_t nw, int32_t nh) {
   int32_t tx, ty;
 #if defined(__BYTE_ORDER__) && defined(__ORDER_LITTLE_ENDIAN__) && \
@@ -1263,6 +1280,7 @@ static void box_average(const uint8_t* src, int32_t w, int32_t h, int32_t fx,
       out[3] = (uint8_t)((acc_ga >> 16) / cnt);
     }
   }
+  return true;
 #else  /* portable scalar path (big-endian) */
   for (ty = 0; ty < nh; ty++) {
     int32_t y0 = ty * fy;
@@ -1288,6 +1306,7 @@ static void box_average(const uint8_t* src, int32_t w, int32_t h, int32_t fx,
       }
     }
   }
+  return true;
 #endif
 }
 
@@ -1334,8 +1353,8 @@ static my_ret_t soft_draw_image(my_vgcanvas_t* vg, const uint8_t* rgba,
       int32_t nh = (h + fy - 1) / fy;
       pre = (uint8_t*)my_mem_alloc(s->allocator,
                                    (size_t)nw * (size_t)nh * 4u);
-      if (pre != NULL) {
-        box_average(rgba, w, h, fx, fy, pre, nw, nh);
+      if (pre != NULL &&
+          box_average(rgba, w, h, fx, fy, pre, nw, nh)) {
         src = pre;
         sw = nw;
         sh = nh;

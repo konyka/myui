@@ -1167,6 +1167,17 @@ static void ta_on_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
             bool phys_continues =
                 vi + 1 < vcount && ta_vline_at(ta, vi + 1)->phys == vl->phys;
             justify = phys_continues && nseps > 0;
+          } else if (my_text_layout_may_need_bidi(line)) {
+            /* M13b: the default (LEFT) follows the paragraph direction:
+             * an RTL line is right-aligned unless align was set to
+             * CENTER/RIGHT/JUSTIFY explicitly */
+            my_text_layout_t* rl = my_text_layout_process(ta->allocator, line);
+            if (rl != NULL) {
+              if (rl->rtl_base) {
+                base_x += inner_w - lw;
+              }
+              my_text_layout_destroy(rl);
+            }
           }
           /* selection/cursor shift with the line for CENTER/RIGHT
            * (delta); JUSTIFY word stretching is not reflected in the
@@ -1291,6 +1302,15 @@ static void ta_on_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
         cx += (inner_w - lw) / 2;
       } else if (ta->align == MY_TEXT_ALIGN_RIGHT) {
         cx += inner_w - lw;
+      } else if (my_text_layout_may_need_bidi(ctext)) {
+        /* M13b: default follows paragraph direction (RTL -> right) */
+        my_text_layout_t* rl = my_text_layout_process(ta->allocator, ctext);
+        if (rl != NULL) {
+          if (rl->rtl_base) {
+            cx += inner_w - lw;
+          }
+          my_text_layout_destroy(rl);
+        }
       }
       if (my_text_layout_may_need_bidi(ctext)) {
         my_text_layout_t* cl = my_text_layout_process(ta->allocator, ctext);
