@@ -31,6 +31,8 @@ typedef struct my_edit_t {
   bool applying_history;          /**< suppresses recording during undo/redo */
   struct my_undo_manager_t* undo_shared; /**< borrowed shared stack (M11b;
                                               NULL = private mode) */
+  char* ime_preedit;      /**< owned: composing text (M13a, NULL=none) */
+  int32_t ime_caret;      /**< composing caret in codepoints */
   bool readonly;
   bool password;
   bool focused;

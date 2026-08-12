@@ -13,7 +13,8 @@ if(UNIX)
 endif()
 
 if(MYUI_PAL_RESOLVED STREQUAL "x11")
-  list(APPEND MYPAL_SOURCES x11/my_pal_x11.c x11/my_pal_x11_keymap.c)
+  list(APPEND MYPAL_SOURCES x11/my_pal_x11.c x11/my_pal_x11_keymap.c
+    x11/my_pal_x11_ime.c)
 elseif(MYUI_PAL_RESOLVED STREQUAL "wayland")
   # generate xdg-shell protocol code (wayland-scanner + system protocols)
   pkg_check_modules(WAYLAND_PROTOCOLS QUIET wayland-protocols)

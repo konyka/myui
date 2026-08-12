@@ -146,6 +146,8 @@ static bool has_selection(my_edit_t* e) {
   return e->cursor != e->anchor;
 }
 
+static void edit_after_edit(my_edit_t* e); /* fwd: IME section (M13a) */
+
 static void delete_selection(my_edit_t* e) {
   size_t a = e->cursor < e->anchor ? e->cursor : e->anchor;
   size_t b = e->cursor < e->anchor ? e->anchor : e->cursor;
@@ -166,6 +168,7 @@ static void user_delete_range(my_edit_t* e, size_t start, size_t end) {
   }
   edit_delete_range(e, start, end);
   emit_changed(e);
+  edit_after_edit(e);
   my_widget_invalidate((my_widget_t*)e, NULL);
 }
 
@@ -185,9 +188,9 @@ static void user_insert(my_edit_t* e, const char* bytes, size_t n) {
   }
   edit_insert(e, bytes, n);
   emit_changed(e);
+  edit_after_edit(e);
   my_widget_invalidate((my_widget_t*)e, NULL);
 }
-
 /** @brief Apply one undo/redo op (shared-mode apply callback, M11b). */
 static void edit_apply_undo_op(void* widget, const my_undo_op_t* op) {
   my_edit_t* e = (my_edit_t*)widget;
@@ -317,6 +320,69 @@ static void ensure_cursor_visible(my_edit_t* e) {
   }
 }
 
+/** @brief Push the cursor's window coordinates to the PAL as the IME
+ * candidate anchor (M13a; no-op without a window/IM). */
+static void edit_update_ime_spot(my_edit_t* e) {
+  my_widget_t* root = (my_widget_t*)e;
+  my_window_t* win;
+  const char* shown;
+  int32_t x, y;
+  while (root->parent != NULL) {
+    root = root->parent;
+  }
+  if (!my_str_eq(root->widget_type, "window")) {
+    return;
+  }
+  win = (my_window_t*)root;
+  if (win->pal_window == NULL) {
+    return;
+  }
+  shown = e->password ? e->masked : e->text;
+  x = EDIT_PAD_X + (shown != NULL ? edit_cursor_px(e, shown, e->cursor) : 0) -
+      e->scroll_x;
+  y = ((my_widget_t*)e)->rect.h; /* bottom of the line */
+  my_widget_local_to_global((my_widget_t*)e, &x, &y);
+  my_pal_window_ime_set_spot(win->pal_window, x, y);
+}
+
+/* ---------------- IME events (M13a) ---------------- */
+
+/** @brief Forward declaration-free spot refresh after cursor-affecting
+ * operations. */
+static void edit_after_edit(my_edit_t* e) {
+  ensure_cursor_visible(e);
+  edit_update_ime_spot(e);
+}
+
+static my_ret_t edit_on_ime_preedit(my_edit_t* e, const my_event_t* ev) {
+  char* copy = my_strdup(e->allocator, ev->u.ime.text != NULL
+                                             ? ev->u.ime.text
+                                             : "");
+  if (copy == NULL) {
+    return MY_RET_OOM;
+  }
+  my_mem_free(e->allocator, e->ime_preedit);
+  e->ime_preedit = *copy != '\0' ? copy : NULL;
+  if (e->ime_preedit == NULL) {
+    my_mem_free(e->allocator, copy);
+  }
+  e->ime_caret = ev->u.ime.cursor;
+  my_widget_invalidate((my_widget_t*)e, NULL);
+  return MY_RET_OK;
+}
+
+static my_ret_t edit_on_ime_commit(my_edit_t* e, const my_event_t* ev) {
+  const char* text = ev->u.ime.text;
+  my_mem_free(e->allocator, e->ime_preedit);
+  e->ime_preedit = NULL;
+  if (!e->readonly && text != NULL && *text != '\0') {
+    /* a real edit: undo stack + "changed" + MVVM, like typed text */
+    user_insert(e, text, strlen(text));
+  }
+  my_widget_invalidate((my_widget_t*)e, NULL);
+  return MY_RET_OK;
+}
+
 /* ---------------- events ---------------- */
 
 static my_ret_t edit_on_key(my_edit_t* e, const my_event_t* event) {
@@ -432,7 +498,7 @@ static my_ret_t edit_on_key(my_edit_t* e, const my_event_t* event) {
       if (!shift) {
         e->anchor = next;
       }
-      ensure_cursor_visible(e);
+      edit_after_edit(e);
       my_widget_invalidate((my_widget_t*)e, NULL);
       return MY_RET_OK;
     }
@@ -460,7 +526,7 @@ static my_ret_t edit_on_key(my_edit_t* e, const my_event_t* event) {
       if (!shift) {
         e->anchor = e->cursor;
       }
-      ensure_cursor_visible(e);
+      edit_after_edit(e);
       my_widget_invalidate((my_widget_t*)e, NULL);
       return MY_RET_OK;
     }
@@ -507,6 +573,7 @@ static my_ret_t edit_on_event(my_widget_t* widget, const my_event_t* event) {
       e->cursor = locate_cursor(e, lx);
       e->anchor = e->cursor;
       ensure_cursor_visible(e);
+      edit_update_ime_spot(e);
       my_widget_invalidate(widget, NULL);
       return MY_RET_OK;
     case MY_EVENT_KEY_DOWN:
@@ -514,6 +581,10 @@ static my_ret_t edit_on_event(my_widget_t* widget, const my_event_t* event) {
         return MY_RET_FAIL;
       }
       return edit_on_key(e, event);
+    case MY_EVENT_IME_PREEDIT:
+      return edit_on_ime_preedit(e, event);
+    case MY_EVENT_IME_COMMIT:
+      return edit_on_ime_commit(e, event);
     default:
       return MY_RET_FAIL;
   }
@@ -533,6 +604,7 @@ static void edit_on_focus(void* ctx, const char* event, void* data) {
   (void)data;
   e->focused = true;
   e->cursor_visible = true;
+  edit_update_ime_spot(e);
   loop = my_window_loop_of_widget((my_widget_t*)e);
   if (loop != NULL && e->blink_timer_id == 0) {
     e->blink_timer_id = my_pal_main_loop_add_timer(loop, edit_blink_tick, e,
@@ -552,6 +624,10 @@ static void edit_on_blur(void* ctx, const char* event, void* data) {
     my_undo_stack_break_batch(e->undo);
   }
   e->focused = false;
+  if (e->ime_preedit != NULL) {
+    my_mem_free(e->allocator, e->ime_preedit);
+    e->ime_preedit = NULL;
+  }
   e->cursor_visible = true; /* hidden anyway when unfocused */
   if (e->blink_timer_id > 0 && e->blink_loop != NULL) {
     my_pal_main_loop_remove_timer(e->blink_loop, e->blink_timer_id);
@@ -630,6 +706,23 @@ static void edit_on_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
     my_vgcanvas_set_fill_color(vg, my_color_from_rgba32(fg));
     my_vgcanvas_draw_text(vg, shown, (float)(EDIT_PAD_X - e->scroll_x),
                           (float)text_y);
+    /* IME composing text (M13a): underlined at the cursor, NOT part of
+     * the document (no undo, no "changed") */
+    if (e->ime_preedit != NULL) {
+      int32_t cx = edit_cursor_px(e, shown, e->cursor);
+      int32_t pw = 0;
+      my_vgcanvas_draw_text(vg, e->ime_preedit,
+                            (float)(EDIT_PAD_X + cx - e->scroll_x),
+                            (float)text_y);
+      if (my_vgcanvas_measure_text(vg, e->ime_preedit, &pw, NULL) ==
+              MY_RET_OK &&
+          pw > 0) {
+        my_vgcanvas_fill_rect(
+            vg, &(my_rectf_t){(float)(EDIT_PAD_X + cx - e->scroll_x),
+                              (float)(text_y + e->font_size + 1), (float)pw,
+                              1.0f});
+      }
+    }
   }
 
   /* cursor (blinks at 500ms when focused) */
@@ -655,6 +748,7 @@ static void edit_destroy_chain(my_object_t* obj) {
     my_undo_manager_unregister(e->undo_shared, e);
   }
   my_undo_stack_destroy(e->undo);
+  my_mem_free(e->allocator, e->ime_preedit);
   my_mem_free(e->allocator, e->text);
   my_mem_free(e->allocator, e->masked);
   my_mem_free(e->allocator, e->hint);

@@ -256,6 +256,13 @@ PAL port 矩阵：
 - **折行算法**（ta_vlines_rebuild_from 升级）：扫描时维护**最近合法断点**（`ta_break_ok_before` 七条规则）；超宽时——溢出字符是空格 → 其前断开并消费；否则回退最近合法断点断开（**边界上的空格同时消费**：跨边界空格不属于任何视觉行不计宽）；再否则硬折。CJK 逐字可断、英文单词不断、连字符后断、NS 不落行首、OP 不留行尾，全部有测试向量钉住；M10b ASCII 行为逐条回归一致。
 - **INCR 并发传输**（x11）：发送端单传输 → **4 槽并发**（`incr_tx[4]`，SelectionRequest 找空槽启动，满槽拒绝；PropertyNotify 按 (requestor, property) 路由推进对应槽；clipboard_set 取消全部）。fork 实测：5 子进程同时拉 200KB——4 个完整收讫（各自分片 >1），第 5 个收到 REFUSED。
 
+## IME 输入法（X11 XIM，M13a）
+
+- **事件模型**：`MY_EVENT_IME_PREEDIT`（UTF-8 组合串 + 光标记位，借用指针仅分发期有效）与 `MY_EVENT_IME_COMMIT`（提交文本）；分发器把它们投递给焦点控件（与 KEY 同路）。
+- **x11 XIM**（独立 TU `my_pal_x11_ime.c`，内部结构共享经 `my_pal_x11_int.h`）：pal 级 `XOpenIM`（失败=纯键盘路径零差异）；窗口级 XIC（优先 `XIMPreeditCallbacks|XIMStatusNothing`——ibus 支持、控件自绘预编辑；不支持回落 `XIMPreeditNothing`，IM 自绘、只收提交）；KeyPress 先 `XFilterEvent`（IM 导航消费）再 `Xutf8LookupString`——多字节结果 → IME_COMMIT，单字节 ASCII 回退原 keysym 路径；FocusIn/Out → XSetICFocus/XUnsetICFocus（窗口加 FocusChangeMask）；spot location 经窗口 vtable 新槽 `ime_set_spot`（edit/text_area 在焦点/光标移动时上报，myui 层传逻辑坐标、port 转物理）；preedit draw 的 chg_first/chg_length 按**字符**偏移做 UTF-8 字节级替换。IM 重启（XRegisterIMInstantiateCallback）为 TODO。
+- **控件接入**：IME_PREEDIT 只进显示态（光标处绘制 + 下划线，**不入文档、不入撤销、不发 changed**、blur 清除）；IME_COMMIT 清预编辑后走 `user_insert`（入撤销栈单步、发 changed、驱动 MVVM TwoWay）。dummy port 记录 spot（测试钩子）。
+- **验证层级（如实）**：① 单测 fake 事件全逻辑（preedit 替换/清除/不污染文档、commit 撤销单步、MVVM 回写、spot 上报、泄漏）；② x11 冒烟实跑：ibus 下 XOpenIM 连接成功、IC 创建/销毁干净、合成 KeyPress 经 XFilterEvent+Xutf8LookupString 路径到达（ASCII 'a'）；③ **真实 ibus 打字未自动化**（合成事件驱动 ibus 组合不可靠，且需抢占用户桌面焦点——手动验证步骤见 porting.md）。wayland text-input 协议为 TODO。
+
 ## 文本对齐与描边关节合并（M11d）
 
 - **水平对齐**（`my_text_align_t`：LEFT/CENTER/RIGHT/JUSTIFY，src/myui/my_text_align.h 含 parse/str 辅助）：label `my_label_set_align`（默认 **LEFT**——M11d 前视觉上是居中，要旧观感显式设 CENTER；单行 label 的 JUSTIFY=LEFT）；text_area `my_text_area_set_align`（默认 LEFT 零回归）。语义（M11a "x 恒左缘"之下）：CENTER/RIGHT 按行测量宽（font measure 或 8px 格子兜底）整体偏移基线 x，选区高亮与光标同行偏移（JUSTIFY 的词距拉伸不反映在高亮/光标位置，TODO 注明）；RTL 段落同此设置（整个视觉块右贴）。**JUSTIFY 仅 wrap 模式**：物理行的**非末段视觉行**把 (内宽-行宽) 均摊给每个分隔空格（有后随字符的空格），逐词 draw_text；末段与无分隔空格的行渲染为 LEFT；无 wrap 时无效（注释）。接入：XML `align` 属性（label/text_area）、MVVM `align` string 属性（get 回枚举名）。

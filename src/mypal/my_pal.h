@@ -60,6 +60,12 @@ typedef struct my_pal_window_vtable_t {
    * forgets the handle). The software lcd path keeps working regardless.
    */
   my_pal_gl_t* (*gl_enable)(my_pal_window_t* win);
+  /**
+   * @brief Move the IME candidate window anchor (M13a): x/y are the text
+   * cursor's LOGICAL window coordinates (ports convert). No-op on ports
+   * without IME integration.
+   */
+  void (*ime_set_spot)(my_pal_window_t* win, int32_t x, int32_t y);
 } my_pal_window_vtable_t;
 
 /** @brief Window base "class". */
@@ -143,6 +149,13 @@ static inline void my_pal_gl_destroy(my_pal_gl_t* gl) {
 
 static inline my_pal_gl_t* my_pal_window_gl_enable(my_pal_window_t* win) {
   return win->vtable->gl_enable(win);
+}
+
+static inline void my_pal_window_ime_set_spot(my_pal_window_t* win, int32_t x,
+                                              int32_t y) {
+  if (win->vtable->ime_set_spot != NULL) {
+    win->vtable->ime_set_spot(win, x, y);
+  }
 }
 
 /* ---------------- main loop ---------------- */

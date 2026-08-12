@@ -21,6 +21,10 @@ void my_pal_dummy_set_now_ms(my_pal_t* pal, uint64_t now_ms);
  * Takes effect for windows created/resized afterwards. */
 void my_pal_dummy_set_scale_factor(my_pal_t* pal, float scale);
 
+/** @brief Test hook (M13a): last IME spot reported to this window. */
+void my_pal_dummy_get_ime_spot(my_pal_window_t* win, int32_t* x,
+                               int32_t* y);
+
 /**
  * @brief Test hook (dummy loops only): dispatch up to n queued events,
  * FIFO. @return number of events dispatched (0 when queue is empty or

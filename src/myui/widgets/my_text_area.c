@@ -598,6 +598,8 @@ static void ta_ensure_visible(my_text_area_t* ta) {
 
 /* ---------------- key handling ---------------- */
 
+static void ta_update_ime_spot(my_text_area_t* ta); /* fwd (M13a) */
+
 static void ta_move_to(my_text_area_t* ta, size_t row, size_t col,
                        bool select) {
   size_t lines = ta_line_count(ta);
@@ -619,7 +621,67 @@ static void ta_move_to(my_text_area_t* ta, size_t row, size_t col,
      * horizontal moves set it at the call site */
   }
   ta_ensure_visible(ta);
+  ta_update_ime_spot(ta); /* candidate anchor follows the cursor (M13a) */
   my_widget_invalidate((my_widget_t*)ta, NULL);
+}
+
+/** @brief Push the cursor's window coordinates to the PAL as the IME
+ * candidate anchor (M13a; no-op without a window/IM). */
+static void ta_update_ime_spot(my_text_area_t* ta) {
+  my_widget_t* root = (my_widget_t*)ta;
+  my_window_t* win;
+  int32_t line_h, x, y;
+  while (root->parent != NULL) {
+    root = root->parent;
+  }
+  if (!my_str_eq(root->widget_type, "window")) {
+    return;
+  }
+  win = (my_window_t*)root;
+  if (win->pal_window == NULL) {
+    return;
+  }
+  line_h = ta->font != NULL ? my_font_line_height(ta->font, ta->font_size)
+                            : ta->font_size;
+  if (line_h <= 0) {
+    line_h = 16;
+  }
+  x = TA_PAD_X + (int32_t)ta->cursor_col * TA_CELL_W - ta->scroll_x;
+  y = TA_PAD_Y + (int32_t)(ta->wrap ? 0 : ta->cursor_row) * line_h -
+      ta->scroll_y + line_h; /* bottom of the cursor line */
+  my_widget_local_to_global((my_widget_t*)ta, &x, &y);
+  my_pal_window_ime_set_spot(win->pal_window, x, y);
+}
+
+/* ---------------- IME events (M13a) ---------------- */
+
+static my_ret_t ta_on_ime_preedit(my_text_area_t* ta, const my_event_t* ev) {
+  char* copy = my_strdup(ta->allocator, ev->u.ime.text != NULL
+                                              ? ev->u.ime.text
+                                              : "");
+  if (copy == NULL) {
+    return MY_RET_OOM;
+  }
+  my_mem_free(ta->allocator, ta->ime_preedit);
+  ta->ime_preedit = *copy != '\0' ? copy : NULL;
+  if (ta->ime_preedit == NULL) {
+    my_mem_free(ta->allocator, copy);
+  }
+  ta->ime_caret = ev->u.ime.cursor;
+  my_widget_invalidate((my_widget_t*)ta, NULL);
+  return MY_RET_OK;
+}
+
+static my_ret_t ta_on_ime_commit(my_text_area_t* ta, const my_event_t* ev) {
+  const char* text = ev->u.ime.text;
+  my_mem_free(ta->allocator, ta->ime_preedit);
+  ta->ime_preedit = NULL;
+  if (!ta->readonly && text != NULL && *text != '\0') {
+    /* a real edit: undo stack + "changed" + MVVM, like typed text */
+    user_insert(ta, text, strlen(text), my_str_utf8_strlen(text));
+  }
+  my_widget_invalidate((my_widget_t*)ta, NULL);
+  return MY_RET_OK;
 }
 
 static void ta_apply_history(my_text_area_t* ta, const my_undo_op_t* op) {
@@ -649,8 +711,7 @@ static my_text_layout_t* ta_layout_rtl(my_text_area_t* ta,
                                        char** out_text);
 
 static my_ret_t ta_on_key(my_text_area_t* ta, const my_event_t* event) {
-  uint32_t key = event->u.key.key;
-  uint8_t mods = event->u.key.modifiers;
+  uint32_t key = event->u.key.key;  uint8_t mods = event->u.key.modifiers;
   bool shift = (mods & MY_KEYMOD_SHIFT) != 0;
   bool ctrl = (mods & MY_KEYMOD_CTRL) != 0;
 
@@ -1001,6 +1062,10 @@ static my_ret_t ta_on_event(my_widget_t* widget, const my_event_t* event) {
       ta->goal_col = ta->cursor_col;
       return MY_RET_OK;
     }
+    case MY_EVENT_IME_PREEDIT:
+      return ta_on_ime_preedit(ta, event);
+    case MY_EVENT_IME_COMMIT:
+      return ta_on_ime_commit(ta, event);
     case MY_EVENT_KEY_DOWN:
       if (!ta->focused) {
         return MY_RET_FAIL;
@@ -1199,8 +1264,8 @@ static void ta_on_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
     }
   }
 
-  /* cursor */
-  if (ta->focused && ta->cursor_visible) {
+  /* cursor + IME composing text (M13a) */
+  if (ta->focused && (ta->cursor_visible || ta->ime_preedit != NULL)) {
     size_t civ = 0, cvi = ta->wrap
                               ? ta_vline_of_pos(ta, ta->cursor_row,
                                                 ta->cursor_col, &civ)
@@ -1241,8 +1306,26 @@ static void ta_on_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
       cx += (int32_t)(ta->wrap ? civ : ta->cursor_col) * TA_CELL_W;
     }
     my_vgcanvas_set_fill_color(vg, my_color_from_rgba32(fg));
-    my_vgcanvas_fill_rect(vg, &(my_rectf_t){(float)cx, (float)cy, 1,
-                                            (float)line_h});
+    if (ta->cursor_visible) {
+      my_vgcanvas_fill_rect(vg, &(my_rectf_t){(float)cx, (float)cy, 1,
+                                              (float)line_h});
+    }
+    /* IME composing text: underlined at the cursor, NOT part of the
+     * document (no undo, no "changed"); does not blink with the caret */
+    if (ta->ime_preedit != NULL) {
+      int32_t pw = 0;
+      my_vgcanvas_draw_text(vg, ta->ime_preedit, (float)cx, (float)cy);
+      if (ta->font != NULL) {
+        my_vgcanvas_measure_text(vg, ta->ime_preedit, &pw, NULL);
+      } else {
+        pw = (int32_t)my_str_utf8_strlen(ta->ime_preedit) * TA_CELL_W;
+      }
+      if (pw > 0) {
+        my_vgcanvas_fill_rect(vg, &(my_rectf_t){(float)cx,
+                                                (float)(cy + line_h - 1),
+                                                (float)pw, 1.0f});
+      }
+    }
   }
   my_vgcanvas_restore(vg);
 }
@@ -1265,6 +1348,7 @@ static void ta_on_focus(void* ctx, const char* event, void* data) {
   (void)data;
   ta->focused = true;
   ta->cursor_visible = true;
+  ta_update_ime_spot(ta);
   loop = my_window_loop_of_widget((my_widget_t*)ta);
   if (loop != NULL && ta->blink_timer_id == 0) {
     ta->blink_timer_id =
@@ -1282,6 +1366,10 @@ static void ta_on_blur(void* ctx, const char* event, void* data) {
     my_undo_manager_break_batch(ta->undo_shared);
   } else {
     my_undo_stack_break_batch(ta->undo);
+  }
+  if (ta->ime_preedit != NULL) {
+    my_mem_free(ta->allocator, ta->ime_preedit);
+    ta->ime_preedit = NULL;
   }
   ta->focused = false;
   ta->cursor_visible = true;
@@ -1302,6 +1390,7 @@ static void ta_destroy_chain(my_object_t* obj) {
     my_undo_manager_unregister(ta->undo_shared, ta);
   }
   my_undo_stack_destroy(ta->undo);
+  my_mem_free(ta->allocator, ta->ime_preedit);
   my_darray_destroy(ta->line_offsets);
   my_mem_free(ta->allocator, ta->text);
   my_mem_free(ta->allocator, ta->hint);

@@ -977,10 +977,16 @@ static my_pal_gl_t* wl_win_gl_enable(my_pal_window_t* win) {
 
 #endif /* MYUI_PAL_GL_EGL */
 
+static void wl_win_ime_noop(my_pal_window_t* win, int32_t x, int32_t y) {
+  (void)win;
+  (void)x;
+  (void)y; /* wayland text-input protocol is a TODO (M13+) */
+}
+
 static const my_pal_window_vtable_t s_wl_window_vtable = {
     wl_win_set_title, wl_win_resize,  wl_win_show,
     wl_win_get_size,  wl_win_get_lcd, wl_win_destroy,
-    wl_win_gl_enable};
+    wl_win_gl_enable, wl_win_ime_noop};
 
 static my_pal_window_t* wl_window_create(my_pal_t* pal, int32_t w, int32_t h,
                                          const char* title) {

@@ -37,59 +37,12 @@
 #include "mypal/x11/my_pal_x11_keymap.h"
 #include "myr/my_lcd_mem.h"
 
-/* ---------------- platform ---------------- */
+/* ---------------- platform/window structs: my_pal_x11_int.h ------- */
 
-typedef struct x11_pal_t {
-  my_pal_t base;
-  const my_allocator_t* allocator;
-  Display* display;
-  int screen;
-  Atom wm_delete;
-  my_darray_t* windows; /**< x11_window_t* registry for event routing */
-  my_pal_event_handler_t handler;
-  void* handler_ctx;
-  float scale; /**< Xft.dpi/96 or physical DPI estimate (M12c) */
-  char* clipboard;        /**< cached text (we serve it when we own) */
-  Atom atom_clipboard;
-  Atom atom_utf8;
-  Atom atom_targets;
-  Atom atom_clip_prop;
-  Atom atom_incr;
-  /** @brief INCR sender state (M11b; one transfer at a time). */
-  struct {
-    bool active;
-    Window requestor;
-    Atom property;
-    Atom target;
-    size_t offset;   /**< bytes already appended */
-    size_t len;      /**< strlen at transfer start */
-    size_t chunk;    /**< per-segment payload */
-  } incr_tx[4];      /**< concurrent INCR transfers (M12d) */
-#if defined(MYUI_PAL_GL_EGL)
-  EGLDisplay egl_dpy; /**< shared EGL display (lazy, EGL_NO_DISPLAY off) */
-  EGLConfig egl_cfg;
-  int egl_state; /**< 0 = untried, 1 = ready, -1 = unavailable */
-  bool egl_msaa; /**< the shared config carries EGL_SAMPLES=4 (M11c) */
-#endif
-} x11_pal_t;
+#include "mypal/x11/my_pal_x11_int.h"
+#include "mypal/x11/my_pal_x11_ime.h"
 
-/* ---------------- window ---------------- */
 
-typedef struct x11_window_t {
-  my_pal_window_t base;
-  x11_pal_t* pal;
-  const my_allocator_t* allocator;
-  Window xwin;
-  GC gc;
-  int32_t w;          /**< LOGICAL size (M12c) */
-  int32_t h;
-  int32_t pw;         /**< physical buffer size = logical*scale */
-  int32_t ph;
-  my_lcd_t* mem_lcd;   /**< back buffer (owned) */
-  my_lcd_t* front_lcd; /**< wrapper lcd: end_frame presents (owned) */
-  XImage* ximage;      /**< wraps the back buffer (data borrowed) */
-  my_pal_gl_t* gl;     /**< GL mount after gl_enable (owned, M10c) */
-} x11_window_t;
 
 static uint64_t x11_now_ms(void) {
   struct timespec ts;
@@ -262,6 +215,7 @@ static void x11_win_destroy(my_pal_window_t* win) {
     my_pal_gl_destroy(w->gl); /* before XDestroyWindow */
     w->gl = NULL;
   }
+  x11_ime_window_detach(p, w); /* before XDestroyWindow (M13a) */
   x11_image_destroy(w->ximage);
   my_lcd_destroy(w->mem_lcd);
   my_mem_free(w->allocator, w->front_lcd);
@@ -412,10 +366,18 @@ static my_pal_gl_t* x11_win_gl_enable(my_pal_window_t* win) {
 
 #endif /* MYUI_PAL_GL_EGL */
 
+static void x11_win_ime_set_spot(my_pal_window_t* win, int32_t x,
+                                 int32_t y) {
+  x11_window_t* w = (x11_window_t*)win;
+  /* spot arrives in logical pixels; the X window is physical (M12c) */
+  x11_ime_set_spot(w->pal, w, (int32_t)(x * w->pal->scale + 0.5f),
+                   (int32_t)(y * w->pal->scale + 0.5f));
+}
+
 static const my_pal_window_vtable_t s_x11_window_vtable = {
     x11_win_set_title, x11_win_resize,  x11_win_show,
     x11_win_get_size,  x11_win_get_lcd, x11_win_destroy,
-    x11_win_gl_enable};
+    x11_win_gl_enable, x11_win_ime_set_spot};
 
 static my_pal_window_t* x11_window_create(my_pal_t* pal, int32_t w, int32_t h,
                                           const char* title) {
@@ -444,15 +406,15 @@ static my_pal_window_t* x11_window_create(my_pal_t* pal, int32_t w, int32_t h,
   XSelectInput(p->display, win->xwin,
                ExposureMask | StructureNotifyMask | ButtonPressMask |
                    ButtonReleaseMask | PointerMotionMask | KeyPressMask |
-                   KeyReleaseMask | PropertyChangeMask);
+                   KeyReleaseMask | PropertyChangeMask | FocusChangeMask);
   {
     Atom protocol = p->wm_delete;
     XSetWMProtocols(p->display, win->xwin, &protocol, 1);
   }
 
   win->front_lcd = (my_lcd_t*)my_mem_calloc(p->allocator, 1, sizeof(x11_lcd_t));
-  win->mem_lcd = my_lcd_mem_create(p->allocator, (uint32_t)w, (uint32_t)h,
-                                   MY_PIXEL_FORMAT_BGRA8888);
+  win->mem_lcd = my_lcd_mem_create(p->allocator, (uint32_t)win->pw,
+                                   (uint32_t)win->ph, MY_PIXEL_FORMAT_BGRA8888);
   if (win->front_lcd == NULL || win->mem_lcd == NULL) {
     x11_win_destroy((my_pal_window_t*)win);
     return NULL;
@@ -460,13 +422,14 @@ static my_pal_window_t* x11_window_create(my_pal_t* pal, int32_t w, int32_t h,
   win->front_lcd->vtable = &s_x11_lcd_vtable;
   ((x11_lcd_t*)win->front_lcd)->mem = win->mem_lcd;
   ((x11_lcd_t*)win->front_lcd)->win = win;
-  win->ximage = x11_image_create(p, win->mem_lcd, w, h);
+  win->ximage = x11_image_create(p, win->mem_lcd, win->pw, win->ph);
   if (win->ximage == NULL) {
     x11_win_destroy((my_pal_window_t*)win);
     return NULL;
   }
 
   my_darray_push(p->windows, win);
+  x11_ime_window_attach(p, win); /* M13a: create the XIC (no-op w/o IM) */
   if (title != NULL) {
     x11_win_set_title((my_pal_window_t*)win, title);
   }
@@ -783,11 +746,25 @@ static void x11_dispatch(x11_pal_t* p, const XEvent* xev) {
     case KeyPress:
     case KeyRelease:
       if (w != NULL) {
+        if (xev->type == KeyPress &&
+            x11_ime_key_press(p, w, (XKeyEvent*)&xev->xkey)) {
+          break; /* IM consumed it (or dispatched commit/preedit, M13a) */
+        }
         e.type = xev->type == KeyPress ? MY_EVENT_KEY_DOWN : MY_EVENT_KEY_UP;
         e.u.key.key =
             my_pal_x11_key_from_keysym(XLookupKeysym((XKeyEvent*)&xev->xkey, 0));
         e.u.key.modifiers = x11_modifiers(xev->xkey.state);
         p->handler(p->handler_ctx, (my_pal_window_t*)w, &e);
+      }
+      break;
+    case FocusIn:
+      if (w != NULL) {
+        x11_ime_focus(p, w, true);
+      }
+      break;
+    case FocusOut:
+      if (w != NULL) {
+        x11_ime_focus(p, w, false);
       }
       break;
     case SelectionRequest:
@@ -1200,6 +1177,7 @@ static void x11_pal_destroy(my_pal_t* pal) {
   }
   my_mem_free(p->allocator, p->clipboard);
   my_darray_destroy(p->windows);
+  x11_ime_shutdown(p); /* M13a */
   XCloseDisplay(p->display);
   my_mem_free(p->allocator, p);
 }
@@ -1231,6 +1209,7 @@ my_pal_t* my_pal_x11_create(const my_allocator_t* allocator) {
   p->atom_targets = XInternAtom(display, "TARGETS", False);
   p->atom_clip_prop = XInternAtom(display, "MYUI_CLIP_PROP", False);
   p->atom_incr = XInternAtom(display, "INCR", False);
+  x11_ime_init(p); /* M13a: XIM; failure = plain keyboard path */
   p->windows = my_darray_create(allocator, 0);
   if (p->windows == NULL) {
     XCloseDisplay(display);

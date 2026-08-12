@@ -60,6 +60,8 @@ typedef struct my_text_area_t {
   my_font_t* font;          /**< borrowed */
   int32_t font_size;
   my_text_align_t align;    /**< horizontal alignment (M11d, default LEFT) */
+  char* ime_preedit;        /**< owned: composing text (M13a, NULL=none) */
+  int32_t ime_caret;        /**< composing caret in codepoints */
 } my_text_area_t;
 
 my_widget_t* my_text_area_create(const my_allocator_t* allocator);

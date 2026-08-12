@@ -39,6 +39,14 @@
 - 有 GLES2+：GLES backend（M5），真窗口经 GL 挂载点（M10c，下节）。
 - Apple 平台：Metal shim（M6）。Web(Emscripten)：WebGL（M5）。
 
+## IME 移植要点（M13a）
+
+- 事件面只有两个：`MY_EVENT_IME_PREEDIT`（组合串+caret，借用指针仅分发期有效）与 `MY_EVENT_IME_COMMIT`（提交文本）；都投给焦点控件。控件侧 edit/text_area 已接入（preedit 不入文档/撤销/changed；commit 走 user_insert 正常编辑路径）。
+- 窗口 vtable `ime_set_spot(x, y)`（逻辑坐标）：控件在焦点/光标移动时上报，port 转换成物理坐标喂候选窗锚点；无 IME 的 port 打桩空函数。
+- x11 参考实现 `my_pal_x11_ime.c`（XIM）：XOpenIM → 每窗口 XIC（优先 PreeditCallbacks 自绘预编辑，回落 PreeditNothing 只收提交）→ KeyPress 先 XFilterEvent 再 Xutf8LookupString（多字节结果=提交）→ FocusIn/Out 对 IC 聚焦。IM 不在时一切照旧。
+- **手动验证步骤**（x11 + ibus）：`./build-c99/demos/demo_widgets/demo_widgets` → 点击文本框聚焦 → Ctrl+Space 激活 ibus → 打拼音选候选 → 提交：中文落进控件、可 Ctrl+Z 单步撤销；候选窗跟随光标（spot）。
+- wayland 对应物是 text-input-v3 协议（TODO；当前 wayland port 打桩）。
+
 ## GL 窗口集成（M10c，可选）
 
 新 port 要让 `my_window_enable_gl()` / `MYUI_DEMO_GLES=1` 工作，实现窗口 vtable 的 `gl_enable`：

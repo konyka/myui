@@ -38,6 +38,7 @@
 - **M12c 双线性整数化 + HiDPI 基础** ✅ 已完成：sample_bilinear 定点化（16.16 坐标 + 1/256 权重 ±1 容差 + LE 打包乘法 + 退化权重短路；纯双线性腿 4.8→1.8ms/帧 2.7x，盒式+双线性 12.9→11.0ms，上采样 15.85→12.9ms）；PAL `get_scale_factor` 全链路（x11 Xft.dpi/物理 DPI、wayland wl_output.scale、dummy 注入、fb 环境变量）；坐标模型=PAL 边界全逻辑像素、port 内部物理化（x11 窗口缓冲×scale+事件 ÷scale、wayland shm×scale+set_buffer_scale）；soft/gles2 vgcanvas set_scale（设备坐标/字号缩放、measure 回报逻辑值）；my_window 缓存注入；dummy scale=2 全链路测试；真实高分屏无设备未验证。
 - **M12d UAX#14 子集 + INCR 并发 + 收尾** ✅ 已完成：断行类查表（1017 区间，libunibreak/UCD 生成；AL/SP/HY/ID/NS/OP/BK 七类，行首禁则优先于空格规则）驱动 wrap 折行（CJK 可断、英文不断、连字符后断、NS 不落行首、OP 不留行尾、边界空格消费；中/日/英/混排测试向量 + ASCII 零回归）；INCR 发送端 4 槽并发（满槽拒绝，按 requestor+property 路由推进；fork 实测 5 并发拉取 4 OK + 1 REFUSED）。
 - **M12 完成**。
+- **M13a IME（X11 XIM）** ✅ 已完成：IME_PREEDIT/IME_COMMIT 事件 + 焦点投递；x11 XIM 独立 TU（XOpenIM、每窗 XIC、PreeditCallbacks 优先回落 Nothing、XFilterEvent+Xutf8LookupString 键路径、spot location 跟随光标）；edit/text_area 预编辑显示（下划线、不入文档/撤销/changed）+ 提交插入（撤销单步 + MVVM 回写）；fake 事件单测全覆盖；实机 ibus：XOpenIM 连接 + IC 生命周期 + 合成键过 IM 路径冒烟通过；真实打字自动化不可靠已文档化手动步骤（porting.md）。
 
 ## 性能基线汇总（M10d 刷新，GCC 16，-O0 Debug，本机）
 
@@ -54,4 +55,4 @@
 | list_view 万行滚动（固定/变高） | 0.002 ms/次（~22 行控件） |
 | 1051 控件构建 / relayout / 10 万 hit_test | 0.30 / 0.05 / 29.0 ms |
 
-- **M13+ 候选**：IME、fractional-scale/跨屏/RandR 多屏、wrap+RTL 混排视觉行级重排、竖排、自由合字（Lam-Alef 之外的上下文连字）、盒式 pass 行缓冲滑动窗、wayland 剪贴板焦点握手实测（需可聚焦会话）、真高分屏实测、UAX#14 全规则（数字粘合/SA 字典）、INCR 接收端并发、跨控件 undo 管理器 UI 暴露。**SDK 顺延**：iOS/HarmonyOS/Android/Web/win32/sdl2 port、Metal backend、FreeBSD/linux_fb 实机复核。
+- **M13+ 候选**：wayland text-input-v3、IM 重启（XRegisterIMInstantiateCallback）、候选窗内嵌、IME 真实打字自动化、fractional-scale/跨屏/RandR 多屏、wrap+RTL 混排视觉行级重排、竖排、自由合字（Lam-Alef 之外）、盒式 pass 行缓冲滑动窗、wayland 剪贴板焦点握手实测、真高分屏实测、UAX#14 全规则、INCR 接收端并发。**SDK 顺延**：iOS/HarmonyOS/Android/Web/win32/sdl2 port、Metal backend、FreeBSD/linux_fb 实机复核。

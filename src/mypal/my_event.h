@@ -21,6 +21,8 @@ typedef enum my_event_type_t {
   MY_EVENT_POINTER_WHEEL, /**< wheel/scroll: pointer.delta (rows, +up -down) */
   MY_EVENT_KEY_DOWN,
   MY_EVENT_KEY_UP,
+  MY_EVENT_IME_PREEDIT, /**< IME composing text update (M13a) */
+  MY_EVENT_IME_COMMIT,  /**< IME committed text (M13a) */
   MY_EVENT_RESIZE, /**< window size changed */
   MY_EVENT_PAINT,  /**< window needs redraw */
   MY_EVENT_USER    /**< app-defined, posted via main loop */
@@ -84,6 +86,10 @@ typedef struct my_event_t {
       uint32_t key;       /**< my_key_t or ASCII */
       uint8_t modifiers;  /**< my_keymod_t bitmask */
     } key;
+    struct {
+      const char* text; /**< UTF-8, borrowed: valid during dispatch */
+      int32_t cursor;   /**< PREEDIT: caret in codepoints (else unused) */
+    } ime;
     struct {
       int32_t w;
       int32_t h;

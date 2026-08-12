@@ -198,6 +198,10 @@ bool my_event_dispatch(my_event_dispatcher_t* dispatcher,
     case MY_EVENT_KEY_UP:
       return dispatcher->focused != NULL ? deliver(dispatcher->focused, event)
                                          : false;
+    case MY_EVENT_IME_PREEDIT: /* IME events go to the focus (M13a) */
+    case MY_EVENT_IME_COMMIT:
+      return dispatcher->focused != NULL ? deliver(dispatcher->focused, event)
+                                         : false;
     default:
       return false;
   }
