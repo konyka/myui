@@ -5,6 +5,9 @@ add_library(dxx_core STATIC
   views/topbar.c
   views/index_strip.c
   views/footer.c
+  views/stock_item.c
+  views/ztpool.c
+  views/live_panels.c
 )
 target_include_directories(dxx_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(dxx_core PUBLIC myui mypal myr myc)

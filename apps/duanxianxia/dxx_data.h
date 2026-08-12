@@ -29,4 +29,75 @@ extern const char* const DXX_FOOTER_DISCLAIMER;
 /** @brief Footer ICP/contact line (verbatim from the site). */
 extern const char* const DXX_FOOTER_ICP;
 
+/* ---------------- M14c: live feeds (SIMULATED) + zt pool snapshot ---- */
+
+/** @brief One live-feed line: "HH:MM" + text. */
+typedef struct dxx_live_item_t {
+  const char* time; /**< "HH:MM" static */
+  const char* text; /**< static */
+} dxx_live_item_t;
+
+#define DXX_LIVE_EMOTION_COUNT 20
+#define DXX_LIVE_ZT_COUNT 12
+#define DXX_LIVE_YIDONG_COUNT 8
+
+/** @brief 情绪直播 / 涨停直播 / 异动 lines (SIMULATED content). */
+extern const dxx_live_item_t DXX_LIVE_EMOTION[DXX_LIVE_EMOTION_COUNT];
+extern const dxx_live_item_t DXX_LIVE_ZT[DXX_LIVE_ZT_COUNT];
+extern const dxx_live_item_t DXX_LIVE_YIDONG[DXX_LIVE_YIDONG_COUNT];
+
+/** @brief 股票池 card row (SIMULATED): code/name/speed/turnover. */
+typedef struct dxx_watch_row_t {
+  const char* code;
+  const char* name;
+  double speed_pct;   /**< 涨速 %, signed */
+  double turnover_pct;/**< 换手 % */
+} dxx_watch_row_t;
+
+#define DXX_WATCH_COUNT 10
+extern const dxx_watch_row_t DXX_WATCH[DXX_WATCH_COUNT];
+
+/** @brief 成交额 card numbers (SIMULATED). */
+extern const char* const DXX_AMOUNT_MAIN;   /**< e.g. "1.85万亿" */
+extern const char* const DXX_AMOUNT_SUB;    /**< e.g. "较昨日 +12.3%" */
+
+/* ---------------- 涨停股票池（晋级天梯）snapshot 2026-08-04 ------------ */
+
+/** @brief Market tag of a stock (badge letter/color). */
+typedef enum dxx_market_t {
+  DXX_MKT_SH = 0, /**< 沪 */
+  DXX_MKT_SZ,     /**< 深 */
+  DXX_MKT_CY,     /**< 创 */
+  DXX_MKT_KC,     /**< 科 */
+  DXX_MKT_BJ      /**< 北 */
+} dxx_market_t;
+
+/** @brief Promotion outcome of a stock in the pool. */
+typedef enum dxx_stock_state_t {
+  DXX_ST_SUCCESS = 0, /**< 成 (promoted: red bold) */
+  DXX_ST_FAIL,        /**< 败 (green) */
+  DXX_ST_BROKEN       /**< 炸 (opened limit: orange) */
+} dxx_stock_state_t;
+
+/** @brief One stock entry (static snapshot row). */
+typedef struct dxx_stock_t {
+  dxx_market_t market;
+  const char* name;      /**< static */
+  dxx_stock_state_t state;
+  double change_pct;     /**< signed percent */
+  const char* theme;     /**< static; NULL = 无题材 */
+} dxx_stock_t;
+
+/** @brief One promotion-ladder row (e.g. 2进3). */
+typedef struct dxx_pool_row_t {
+  const char* progress; /**< "2进3" */
+  const char* rate;     /**< "7/12=58%" verbatim */
+  const dxx_stock_t* stocks;
+  int stock_count;
+} dxx_pool_row_t;
+
+#define DXX_POOL_ROW_COUNT 6
+/** @brief The six ladder rows: 6进7/4进5/3进4/2进3/1进2/首板. */
+extern const dxx_pool_row_t DXX_POOL_ROWS[DXX_POOL_ROW_COUNT];
+
 #endif /* DXX_DATA_H */

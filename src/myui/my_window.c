@@ -467,6 +467,7 @@ my_ret_t my_window_on_pal_event(my_window_t* win, const my_event_t* event) {
     case MY_EVENT_POINTER_DOWN:
     case MY_EVENT_POINTER_MOVE:
     case MY_EVENT_POINTER_UP:
+    case MY_EVENT_POINTER_WHEEL:
     case MY_EVENT_KEY_DOWN:
     case MY_EVENT_KEY_UP:
       tip_track(win, event); /* hover tooltip bookkeeping (M13c) */

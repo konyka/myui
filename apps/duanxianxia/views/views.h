@@ -5,7 +5,7 @@
 #ifndef DXX_VIEWS_H
 #define DXX_VIEWS_H
 
-#include "myui/my_window.h"
+#include "myui/my_window_manager.h"
 #include "myui/widgets/my_menu.h"
 
 #define DXX_MENU_COUNT 4
@@ -39,5 +39,15 @@ my_widget_t* dxx_build_index_strip(my_widget_t* parent);
 
 /** @brief Build the two-line footer into parent (rect by the caller). */
 my_widget_t* dxx_build_footer(my_widget_t* parent);
+
+/** @brief Build the two-column live area into parent at (x, y), total
+ * width w (750 left + 20 gap + 530 right). @return the area height. */
+int32_t dxx_build_live_area(my_widget_t* parent, int32_t x, int32_t y,
+                            int32_t w);
+
+/** @brief Build the 涨停股票池 table into parent with width w; the
+ * table's own rect height is set to the measured content height. */
+my_widget_t* dxx_build_ztpool(my_window_manager_t* wm, my_widget_t* parent,
+                              int32_t w);
 
 #endif /* DXX_VIEWS_H */
