@@ -39,6 +39,22 @@ jobs:
       - name: Test
         run: ctest --test-dir build --output-on-failure
 
+  # minimal trim build: all optional features OFF (catches #ifdef regressions
+  # like the M13d MYUI_UI_XML=OFF unused-function break)
+  linux-minimal:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure (dummy port, all trims OFF)
+        run: |
+          cmake -S . -B build -DMYUI_PAL=dummy -DMYUI_C_STANDARD=99 \
+            -DMYUI_FONT_STB=OFF -DMYUI_IMAGE_STB=OFF -DMYUI_UI_XML=OFF \
+            -DMYUI_BIDI=OFF
+      - name: Build
+        run: cmake --build build -j
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
   linux-wayland:
     runs-on: ubuntu-latest
     steps:

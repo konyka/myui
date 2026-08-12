@@ -41,20 +41,22 @@
 - **M13a IME（X11 XIM）** ✅ 已完成：IME_PREEDIT/IME_COMMIT 事件 + 焦点投递；x11 XIM 独立 TU（XOpenIM、每窗 XIC、PreeditCallbacks 优先回落 Nothing、XFilterEvent+Xutf8LookupString 键路径、spot location 跟随光标）；edit/text_area 预编辑显示（下划线、不入文档/撤销/changed）+ 提交插入（撤销单步 + MVVM 回写）；fake 事件单测全覆盖；实机 ibus：XOpenIM 连接 + IC 生命周期 + 合成键过 IM 路径冒烟通过；真实打字自动化不可靠已文档化手动步骤（porting.md）。
 - **M13b 盒式滑动窗实验 + wrap RTL 行级** ✅ 已完成：行缓冲滑动窗实现后实测更慢（-O0 13.9 vs 11.0ms），**回退保留逐块 SWAR**（数据与结论入档）；wrap+RTL：rtl_base 段落基方向接入，默认对齐跟随段落方向（RTL 段落视觉行右对齐、显式 align 优先、混排 LTR 段不动）、上下移动进入 RTL 视觉行落视觉起点，测试固化。
 - **M13c 复合控件（dialog/menu/tooltip）** ✅ 已完成：浮层基础设施（widget `floating` 布局跳过 + `user_data`、PAL 窗口 `move` 槽四 port、dummy `inject_event` 测试钩子）；wm 模态阻断（top modal 吞下层 POINTER/KEY/IME）+ 被遮窗 scrim 半透明幕；`my_dialog` 组合式模态对话框（真实子窗口、内容容器 ESC=CANCEL、按钮 result 回调）；`my_menu` 数据模型 + 窗口内 overlay 弹出（外部点关、边缘翻转钳位、级联上限 3、Up/Down/Enter/ESC 键盘导航）；tooltip（widget `tooltip` 字段 + XML 通用属性，窗口 500ms hover 定时器、光标旁钳位浮层、移除/销毁全路径清态无泄漏）；主题默认色四组；demo_widgets 演示 + dummy dump 四图目检。级联深度、悬停开级联、dialog 拖拽留 TODO。
+- **M13d XML=OFF 回归修复 + CI 裁剪 job + 收尾** ✅ 已完成：`my_ui_loader_test` 的 ui2c golden 死代码从 `#ifndef MYUI_UI_XML` 分支删除（OFF 分支的拷贝永远不会运行）+ tests/CMake 仅在 XML ON 时定义 `MY_UI2C_SAMPLE_C`/生成样例（修 `-Werror=unused-function`）；`my_text_align_test` 的 XML 用例加 `MYUI_UI_XML` guard（OFF 时 my_ui_load_str 返回 NULL 段错误）；`my_wrap_rtl_test` 补 `MYUI_BIDI` guard（M13b 遗漏，全 OFF 裁剪暴露）；CI 新增 linux-minimal job（dummy + FONT_STB/IMAGE_STB/UI_XML/BIDI 全 OFF）防裁剪回归；bench 汇总刷新；M14+ 清单整理。
+- **M13 完成**。
 
-## 性能基线汇总（M10d 刷新，GCC 16，-O0 Debug，本机）
+## 性能基线汇总（M13d 刷新，GCC 16，-O0 Debug，本机）
 
 | 场景 | 数值 |
 |------|------|
-| 50 按钮全帧 | 2.47 ms/帧 |
-| 100 半透明矩形 | 2.05 ms/帧 |
-| 路径 AA level0/1/2 | 0.71 / 1.70 / 2.39 ms/帧 |
-| 480x270→800x600 图片 nearest/bilinear | 2.44 / 12.9 ms/帧（M12c 整数化，原 16.26） |
+| 50 按钮全帧 | 2.45 ms/帧 |
+| 100 半透明矩形 | 2.00 ms/帧 |
+| 路径 AA level0/1/2 | 0.69 / 1.65 / 2.40 ms/帧 |
+| 480x270→800x600 图片 nearest/bilinear | 2.23 / 9.57 ms/帧 |
 | 2000x1500→400x300 图片 nearest/纯双线性/盒式+双线性 | 0.72 / 1.82 / 11.06 ms/帧（M12c 整数化；M11c 时 0.69 / 4.80 / 11.96） |
 | GLES 8 描边路径 no-AA/MSAA4x | 0.025 / 0.026 ms/帧 |
 | text_area 万行：载入/2000 移动/100 插入 | 0.13 / 0.09 / 0.09 ms |
 | text_area wrap 万行长行：载入+构建/1000 视觉移动/滚动帧 | 1.57 / 0.10 / 0.30 ms |
 | list_view 万行滚动（固定/变高） | 0.002 ms/次（~22 行控件） |
-| 1051 控件构建 / relayout / 10 万 hit_test | 0.30 / 0.05 / 29.0 ms |
+| 1051 控件构建 / relayout / 10 万 hit_test | 0.36 / 0.06 / 27.1 ms |
 
-- **M13+ 候选**：wayland text-input-v3、IM 重启（XRegisterIMInstantiateCallback）、候选窗内嵌、IME 真实打字自动化、fractional-scale/跨屏/RandR 多屏、wrap+RTL 混排视觉行级重排、竖排、自由合字（Lam-Alef 之外）、盒式 pass 行缓冲滑动窗、wayland 剪贴板焦点握手实测、真高分屏实测、UAX#14 全规则、INCR 接收端并发。**SDK 顺延**：iOS/HarmonyOS/Android/Web/win32/sdl2 port、Metal backend、FreeBSD/linux_fb 实机复核。
+- **M14+ 候选**：wayland text-input-v3、候选窗内嵌、IM 重启（XRegisterIMInstantiateCallback）、IME 真实打字自动化；盒式降采样积分图（SAT）路线、fractional-scale/跨屏/RandR 多屏、真高分屏实测；竖排、自由合字（Lam-Alef 之外）、UAX#14 全规则、wrap+RTL 混排视觉行级重排；INCR 接收端并发、wayland 剪贴板焦点握手实测；菜单悬停开级联/级联深度>3/ESC 焦点回退父层、dialog 拖拽移动（PAL `move` 槽已备）。**SDK 顺延**：iOS/HarmonyOS/Android/Web/win32/sdl2 port、Metal backend、FreeBSD/linux_fb 实机复核。

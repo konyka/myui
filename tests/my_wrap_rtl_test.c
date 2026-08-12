@@ -11,7 +11,11 @@
 #include <string.h>
 
 #include "mytest.h"
+#if defined(MYUI_BIDI)
 #include "rec_vgcanvas.h"
+#endif
+
+#if defined(MYUI_BIDI)
 
 /* 10 Hebrew cps (אבגדהוזחטיכ) */
 static const char HEB10[] =
@@ -109,8 +113,14 @@ static void test_rtl_wrap_explicit_align_wins(void) {
   my_widget_unref(ta);
 }
 
+#endif /* MYUI_BIDI */
+
 MYTEST_MAIN_BEGIN()
+#if defined(MYUI_BIDI)
   MYTEST_RUN(test_rtl_wrap_defaults_right_aligned);
   MYTEST_RUN(test_rtl_wrap_down_enters_visual_start);
   MYTEST_RUN(test_rtl_wrap_explicit_align_wins);
+#else
+  fprintf(stdout, "SKIP: built with MYUI_BIDI=OFF\n");
+#endif
 MYTEST_MAIN_END()

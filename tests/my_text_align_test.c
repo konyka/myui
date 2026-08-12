@@ -156,6 +156,7 @@ static void test_rtl_right_align(void) {
 }
 
 static void test_xml_and_mvvm_align(void) {
+#ifdef MYUI_UI_XML
   my_pal_t* pal = my_pal_dummy_create(NULL);
   my_widget_t* root = my_ui_load_str(
       NULL, pal,
@@ -172,6 +173,9 @@ static void test_xml_and_mvvm_align(void) {
   TEST_ASSERT(((my_text_area_t*)ta)->wrap);
   my_widget_unref(root);
   my_pal_destroy(pal);
+#else
+  fprintf(stdout, "SKIP: MYUI_UI_XML off\n");
+#endif
 }
 
 MYTEST_MAIN_BEGIN()

@@ -24,44 +24,6 @@
 
 #ifndef MYUI_UI_XML
 
-#ifdef MY_UI2C_SAMPLE_C
-/* the ui2c-generated builder (compiled from the sample XML at build time) */
-#include MY_UI2C_SAMPLE_C
-
-static void compare_trees(my_widget_t* a, my_widget_t* b) {
-  size_t i, ac, bc;
-  TEST_ASSERT_EQ_STR(a->widget_type, b->widget_type);
-  TEST_ASSERT(my_str_eq(((my_object_t*)a)->name, ((my_object_t*)b)->name));
-  TEST_ASSERT_EQ_INT(a->rect.x, b->rect.x);
-  TEST_ASSERT_EQ_INT(a->rect.y, b->rect.y);
-  TEST_ASSERT_EQ_INT(a->rect.w, b->rect.w);
-  TEST_ASSERT_EQ_INT(a->rect.h, b->rect.h);
-  TEST_ASSERT_EQ_INT(a->visible, b->visible);
-  TEST_ASSERT_EQ_INT(a->enable, b->enable);
-  TEST_ASSERT(my_str_eq(a->bind_rules, b->bind_rules));
-  ac = my_widget_child_count(a);
-  bc = my_widget_child_count(b);
-  TEST_ASSERT_EQ_INT(ac, bc);
-  for (i = 0; i < ac && i < bc; i++) {
-    compare_trees(my_widget_get_child(a, i), my_widget_get_child(b, i));
-  }
-}
-
-static void test_ui2c_golden_equivalence(void) {
-  my_pal_t* pal = my_pal_dummy_create(NULL);
-  my_widget_t* runtime = my_ui_load_file(NULL, pal, MY_UI2C_SAMPLE_XML, NULL);
-  my_widget_t* generated = ui2c_sample_create(NULL, pal);
-  TEST_ASSERT_NOT_NULL(runtime);
-  TEST_ASSERT_NOT_NULL(generated);
-  if (runtime != NULL && generated != NULL) {
-    compare_trees(runtime, generated);
-  }
-  my_widget_unref(runtime);
-  my_widget_unref(generated);
-  my_pal_destroy(pal);
-}
-#endif /* MY_UI2C_SAMPLE_C */
-
 MYTEST_MAIN_BEGIN()
   fprintf(stdout, "SKIP: MYUI_UI_XML off\n");
 MYTEST_MAIN_END()

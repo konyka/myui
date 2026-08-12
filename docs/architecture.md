@@ -148,7 +148,7 @@ PAL port 矩阵：
 | slider | value/min/max/step、拖动与轨道点击（grab）、value(float) 可绑、changed 事件 |
 | progress_bar | value [0,100]（展示型，OneWay 友好） |
 
-均可经 widget_target 绑定（text/visible/enable/x,y,w,h/value/hint）。
+均可经 widget_target 绑定（text/visible/enable/x,y,w,h/value/hint）。后续里程碑新增：list_view/scroll_bar/image（M8b/M9c）、text_area（M9a）、dialog/menu/tooltip 复合控件（M13c，见对应章节）。
 
 ## XML UI 加载器（M8a）
 

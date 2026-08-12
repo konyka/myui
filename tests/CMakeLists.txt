@@ -114,7 +114,8 @@ if(UNIX)
 endif()
 
 # ui2c golden equivalence: generate C from a sample XML at build time and
-# compile it into the test binary
+# compile it into the test binary (only meaningful with the XML loader on)
+if(MYUI_UI_XML)
 set(UI2C_SAMPLE_XML ${CMAKE_CURRENT_SOURCE_DIR}/ui2c_sample.xml)
 set(UI2C_SAMPLE_C ${CMAKE_CURRENT_BINARY_DIR}/ui2c_sample_page.c)
 add_custom_command(
@@ -127,6 +128,7 @@ add_dependencies(my_ui_loader_test ui2c_sample_gen)
 target_compile_definitions(my_ui_loader_test
   PRIVATE MY_UI2C_SAMPLE_C="${UI2C_SAMPLE_C}"
           MY_UI2C_SAMPLE_XML="${UI2C_SAMPLE_XML}")
+endif()
 
 # image test needs 3rd/ include for stb_image_write
 target_include_directories(my_image_test PRIVATE ${CMAKE_SOURCE_DIR}/3rd)
