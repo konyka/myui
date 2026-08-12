@@ -34,6 +34,12 @@ typedef struct my_window_t {
   my_dirty_rects_t dirty;            /**< frame dirty collector (sink) */
   my_event_dispatcher_t dispatcher;
   bool modal;
+  bool scrim; /**< paint a translucent veil (modal dialog above, M13c) */
+  my_widget_t* tip_target;  /**< weak: hovered widget owning a tooltip */
+  my_widget_t* tip_widget;  /**< ours while shown (floating tip, M13c) */
+  uint32_t tip_timer;       /**< pending hover timer id, 0 = none */
+  int32_t tip_x;            /**< cursor pos at hover start (window space) */
+  int32_t tip_y;
 } my_window_t;
 
 /** @brief Create a window (hidden) of w x h with the given title. */

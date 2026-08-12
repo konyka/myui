@@ -25,6 +25,11 @@ void my_pal_dummy_set_scale_factor(my_pal_t* pal, float scale);
 void my_pal_dummy_get_ime_spot(my_pal_window_t* win, int32_t* x,
                                int32_t* y);
 
+/** @brief Test hook (M13c): deliver an event through the pal's
+ * registered handler (exercises the window manager's routing). */
+void my_pal_dummy_inject_event(my_pal_t* pal, my_pal_window_t* win,
+                               const my_event_t* event);
+
 /**
  * @brief Test hook (dummy loops only): dispatch up to n queued events,
  * FIFO. @return number of events dispatched (0 when queue is empty or

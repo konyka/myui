@@ -17,7 +17,9 @@
 #include "myui/my_window_manager.h"
 #include "myui/widgets/my_button.h"
 #include "myui/widgets/my_checkbox.h"
+#include "myui/widgets/my_dialog.h"
 #include "myui/widgets/my_image.h"
+#include "myui/widgets/my_menu.h"
 
 #include "stb/stb_image_write.h"
 #include "myui/widgets/my_label.h"
@@ -93,6 +95,10 @@ typedef struct app_t {
   my_view_model_t* vm;
   my_mvvm_context_t* mc;
   my_window_t* win_ar; /**< i18n Arabic window (M11a, NULL when skipped) */
+  my_menu_t* menu;     /**< context menu model (M13c) */
+  my_widget_t* menu_btn;
+  my_widget_t* dialog_btn;
+  my_dialog_t* dlg;    /**< open dialog (M13c, NULL when closed) */
 } app_t;
 
 static my_theme_t* make_dark_theme(void) {
@@ -149,6 +155,52 @@ static void on_quit_click(void* ctx, const char* event, void* data) {
   my_window_manager_close(app->wm, app->win);
 }
 
+/* ---------------- M13c: dialog / menu / tooltip ---------------- */
+
+static void on_dialog_result(void* ctx, int32_t result) {
+  app_t* app = (app_t*)ctx;
+  printf("demo_widgets: dialog closed, result=%d\n", (int)result);
+  my_dialog_destroy(app->dlg);
+  app->dlg = NULL;
+}
+
+static void on_dialog_click(void* ctx, const char* event, void* data) {
+  app_t* app = (app_t*)ctx;
+  (void)event;
+  (void)data;
+  if (app->dlg != NULL) {
+    return; /* already open */
+  }
+  app->dlg = my_dialog_create(NULL, app->pal, "Delete file?", 280, 140);
+  my_window_set_font(app->dlg->win, app_font, 16);
+  {
+    my_widget_t* msg = my_label_create(NULL, "Really delete the file?");
+    my_widget_set_layout_params(msg, "w:1f h:32");
+    my_widget_add_child(my_dialog_content(app->dlg), msg);
+    my_widget_unref(msg);
+  }
+  my_dialog_add_button(app->dlg, "Delete", 1);
+  my_dialog_add_button(app->dlg, "Cancel", 0);
+  my_dialog_open(app->dlg, app->wm, on_dialog_result, app);
+}
+
+static void on_menu_select(void* ctx, int32_t id) {
+  (void)ctx;
+  printf("demo_widgets: menu item id=%d selected\n", (int)id);
+}
+
+static void on_menu_click(void* ctx, const char* event, void* data) {
+  app_t* app = (app_t*)ctx;
+  int32_t x = 0;
+  int32_t y = app->menu_btn != NULL ? app->menu_btn->rect.h : 0;
+  (void)event;
+  (void)data;
+  if (app->menu_btn != NULL) {
+    my_widget_local_to_global(app->menu_btn, &x, &y);
+  }
+  my_menu_popup(app->win, app->menu, x, y, on_menu_select, NULL);
+}
+
 static my_widget_t* add_button(app_t* app, my_widget_t* parent, const char* text,
                                const char* name, const char* params) {
   my_widget_t* b = my_button_create(NULL, text);
@@ -177,16 +229,28 @@ static void build_ui(app_t* app) {
   my_widget_add_child(root, row);
   my_widget_unref(row);
 
-  add_button(app, row, "OK", "ok", "w:120 h:48");
-  add_button(app, row, "Cancel", "cancel", "w:120 h:48");
+  my_widget_t* ok = add_button(app, row, "OK", "ok", "w:100 h:48");
+  my_widget_t* cancel = add_button(app, row, "Cancel", "cancel", "w:100 h:48");
+  my_widget_set_tooltip(ok, "Apply the changes");
+  my_widget_set_tooltip(cancel, "Discard the changes");
 
-  quit = add_button(app, row, "Toggle theme", "toggle", "w:160 h:48");
+  quit = add_button(app, row, "Toggle theme", "toggle", "w:150 h:48");
   my_widget_on(quit, "click", on_toggle_theme, app);
+  my_widget_set_tooltip(quit, "Switch light/dark theme");
 
-  quit = add_button(app, row, "Quit", "quit", "w:120 h:48");
+  app->dialog_btn = add_button(app, row, "Dialog", "dialog", "w:100 h:48");
+  my_widget_on(app->dialog_btn, "click", on_dialog_click, app);
+  my_widget_set_tooltip(app->dialog_btn, "Open a modal dialog");
+
+  app->menu_btn = add_button(app, row, "Menu", "menu", "w:100 h:48");
+  my_widget_on(app->menu_btn, "click", on_menu_click, app);
+  my_widget_set_tooltip(app->menu_btn, "Open the popup menu");
+
+  quit = add_button(app, row, "Quit", "quit", "w:90 h:48");
   my_widget_on(quit, "click", on_quit_click, app);
 
   app->anim_btn = my_button_create(NULL, "Click me: move");
+  my_widget_set_tooltip(app->anim_btn, "Animate this button");
   my_widget_set_rect(app->anim_btn, &(my_rect_t){20, 140, 160, 48});
   my_widget_set_layout_params(app->anim_btn, "w:160 h:48");
   my_widget_add_child(root, app->anim_btn);
@@ -266,6 +330,18 @@ static void build_ui(app_t* app) {
     my_widget_set_bind_rules(ta, "v:text={note, Mode=TwoWay}");
     my_widget_add_child(root, ta);
     my_widget_unref(ta);
+  }
+
+  /* M13c: popup menu model */
+  {
+    my_menu_t* sub;
+    app->menu = my_menu_create(NULL);
+    my_menu_add_item(app->menu, "New", 1);
+    my_menu_add_item(app->menu, "Open...", 2);
+    sub = my_menu_add_submenu(app->menu, "Recent");
+    my_menu_add_item(sub, "alpha.c", 10);
+    my_menu_add_item(sub, "beta.c", 11);
+    my_menu_add_item(app->menu, "Quit", 99);
   }
 }
 
@@ -462,12 +538,42 @@ int main(void) {
       }
       my_pal_dummy_set_now_ms(app.pal, 200);
       my_pal_main_loop_run(app.loop);
+      /* M13c: modal dialog (scrim on the main window) */
+      click_widget(app.win, app.dialog_btn);
+      if (app.dlg != NULL) {
+        my_widget_invalidate(my_window_widget(app.win), NULL);
+        my_window_paint(app.win);
+        dump_ppm(app.win->pal_window, "/tmp/myui_demo_scrim.ppm");
+        my_widget_invalidate(my_window_widget(app.dlg->win), NULL);
+        my_window_paint(app.dlg->win);
+        dump_ppm(app.dlg->win->pal_window, "/tmp/myui_demo_dialog.ppm");
+        my_dialog_close(app.dlg, 1); /* -> result cb destroys it */
+      }
+      /* M13c: popup menu under the Menu button */
+      click_widget(app.win, app.menu_btn);
+      dump_ppm(app.win->pal_window, "/tmp/myui_demo_menu.ppm");
+      e = my_event_init(MY_EVENT_KEY_DOWN); /* ESC dismisses */
+      e.u.key.key = MY_KEY_ESCAPE;
+      my_window_on_pal_event(app.win, &e);
+      /* M13c: tooltip after a 500ms hover over the OK button */
+      e = my_event_init(MY_EVENT_POINTER_MOVE);
+      e.u.pointer.x = 50;
+      e.u.pointer.y = 60; /* inside the OK button (row y 44..92) */
+      my_window_on_pal_event(app.win, &e);
+      my_pal_dummy_set_now_ms(app.pal, 900);
+      my_pal_main_loop_run(app.loop);
+      my_window_paint(app.win);
+      dump_ppm(app.win->pal_window, "/tmp/myui_demo_tooltip.ppm");
       dump_ppm(app.win->pal_window, dump);
       if (app.win_ar != NULL) {
         my_widget_invalidate(my_window_widget(app.win_ar), NULL);
         my_window_paint(app.win_ar);
         dump_ppm(app.win_ar->pal_window, "/tmp/myui_demo_arabic.ppm");
       }
+      if (app.dlg != NULL) {
+        my_dialog_close(app.dlg, 0); /* result cb destroys it */
+      }
+      my_menu_destroy(app.menu);
       my_mvvm_context_destroy(app.mc);
       my_view_model_unref(app.vm);
       my_theme_destroy(app.light);
@@ -482,6 +588,10 @@ int main(void) {
 
   my_pal_main_loop_run(app.loop);
 
+  if (app.dlg != NULL) {
+    my_dialog_close(app.dlg, 0); /* result cb destroys it */
+  }
+  my_menu_destroy(app.menu);
   my_mvvm_context_destroy(app.mc);
   my_view_model_unref(app.vm);
   my_theme_destroy(app.light);

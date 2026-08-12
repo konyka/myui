@@ -66,6 +66,12 @@ typedef struct my_pal_window_vtable_t {
    * without IME integration.
    */
   void (*ime_set_spot)(my_pal_window_t* win, int32_t x, int32_t y);
+  /**
+   * @brief Move the window to (x, y) in LOGICAL screen coords (M13c;
+   * used for dialog centering). No-op / NOT_SUPPORTED where the
+   * compositor owns placement (wayland).
+   */
+  my_ret_t (*move)(my_pal_window_t* win, int32_t x, int32_t y);
 } my_pal_window_vtable_t;
 
 /** @brief Window base "class". */
@@ -156,6 +162,11 @@ static inline void my_pal_window_ime_set_spot(my_pal_window_t* win, int32_t x,
   if (win->vtable->ime_set_spot != NULL) {
     win->vtable->ime_set_spot(win, x, y);
   }
+}
+
+static inline my_ret_t my_pal_window_move(my_pal_window_t* win, int32_t x,
+                                          int32_t y) {
+  return win->vtable->move(win, x, y);
 }
 
 /* ---------------- main loop ---------------- */

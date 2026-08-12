@@ -80,6 +80,8 @@ struct my_widget_t {
   bool focusable;
   bool dirty;                       /**< needs repaint */
   bool need_layout;                 /**< children need re-layout */
+  bool floating;  /**< overlay/popup child: layouters skip it, rect is
+                       * set absolutely by the owner (M13c) */
   const char* widget_type;          /**< static type name for theming */
   my_emitter_t* emitter;            /**< my_widget_on() convenience */
   my_layout_params_t layout_params; /**< parsed "w:.. h:.." spec */
@@ -87,6 +89,8 @@ struct my_widget_t {
   my_dirty_rects_t* dirty_sink;     /**< root only: frame dirty collector */
   my_style_t* local_style;          /**< owned local overrides (M3b) */
   my_theme_t* theme;                /**< weak; lookup climbs ancestors */
+  void* user_data;  /**< app/owner pointer, unused by the core (M13c) */
+  char* tooltip;    /**< owned hover hint text, NULL = none (M13c) */
   char* bind_rules;                 /**< owned: MVVM rules (M4b), ";" separated */
   void* anim_mgr;                   /**< root only, weak (my_animator) */
   my_widget_removed_hook_t removed_hook; /**< root only: subtree removed */
@@ -133,6 +137,19 @@ my_ret_t my_widget_set_visible(my_widget_t* widget, bool visible);
 
 /** @brief Rename a widget (name is used by theme [name] selectors). */
 my_ret_t my_widget_set_name(my_widget_t* widget, const char* name);
+
+/** @brief Store an app/owner pointer on the widget (not owned, unused by the core). */
+my_ret_t my_widget_set_user_data(my_widget_t* widget, void* user_data);
+
+/** @brief Read back the pointer stored with my_widget_set_user_data(). */
+void* my_widget_get_user_data(const my_widget_t* widget);
+
+/** @brief Set the hover hint text (copied; NULL clears). Shown by the
+ * window after a short hover delay (M13c). */
+my_ret_t my_widget_set_tooltip(my_widget_t* widget, const char* text);
+
+/** @brief The tooltip text (NULL when none). */
+const char* my_widget_get_tooltip(const my_widget_t* widget);
 
 /** @brief Attach MVVM binding rules (";"-separated, see docs/mvvm.md). */
 my_ret_t my_widget_set_bind_rules(my_widget_t* widget, const char* rules);

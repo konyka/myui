@@ -166,8 +166,8 @@ static void linear_layout(my_layouter_t* self, my_widget_t* parent) {
     const my_layout_params_t* p;
     my_layout_mode_t mode;
     float value;
-    if (!c->visible) {
-      continue;
+    if (!c->visible || c->floating) {
+      continue; /* floating children keep their absolute rect (M13c) */
     }
     p = &c->layout_params;
     mode = horz ? p->w_mode : p->h_mode;
@@ -196,7 +196,7 @@ static void linear_layout(my_layouter_t* self, my_widget_t* parent) {
     my_widget_t* c = my_widget_get_child(parent, i);
     const my_layout_params_t* p;
     int32_t main_size, cross_size;
-    if (!c->visible) {
+    if (!c->visible || c->floating) {
       continue;
     }
     p = &c->layout_params;

@@ -40,6 +40,7 @@
 - **M12 完成**。
 - **M13a IME（X11 XIM）** ✅ 已完成：IME_PREEDIT/IME_COMMIT 事件 + 焦点投递；x11 XIM 独立 TU（XOpenIM、每窗 XIC、PreeditCallbacks 优先回落 Nothing、XFilterEvent+Xutf8LookupString 键路径、spot location 跟随光标）；edit/text_area 预编辑显示（下划线、不入文档/撤销/changed）+ 提交插入（撤销单步 + MVVM 回写）；fake 事件单测全覆盖；实机 ibus：XOpenIM 连接 + IC 生命周期 + 合成键过 IM 路径冒烟通过；真实打字自动化不可靠已文档化手动步骤（porting.md）。
 - **M13b 盒式滑动窗实验 + wrap RTL 行级** ✅ 已完成：行缓冲滑动窗实现后实测更慢（-O0 13.9 vs 11.0ms），**回退保留逐块 SWAR**（数据与结论入档）；wrap+RTL：rtl_base 段落基方向接入，默认对齐跟随段落方向（RTL 段落视觉行右对齐、显式 align 优先、混排 LTR 段不动）、上下移动进入 RTL 视觉行落视觉起点，测试固化。
+- **M13c 复合控件（dialog/menu/tooltip）** ✅ 已完成：浮层基础设施（widget `floating` 布局跳过 + `user_data`、PAL 窗口 `move` 槽四 port、dummy `inject_event` 测试钩子）；wm 模态阻断（top modal 吞下层 POINTER/KEY/IME）+ 被遮窗 scrim 半透明幕；`my_dialog` 组合式模态对话框（真实子窗口、内容容器 ESC=CANCEL、按钮 result 回调）；`my_menu` 数据模型 + 窗口内 overlay 弹出（外部点关、边缘翻转钳位、级联上限 3、Up/Down/Enter/ESC 键盘导航）；tooltip（widget `tooltip` 字段 + XML 通用属性，窗口 500ms hover 定时器、光标旁钳位浮层、移除/销毁全路径清态无泄漏）；主题默认色四组；demo_widgets 演示 + dummy dump 四图目检。级联深度、悬停开级联、dialog 拖拽留 TODO。
 
 ## 性能基线汇总（M10d 刷新，GCC 16，-O0 Debug，本机）
 

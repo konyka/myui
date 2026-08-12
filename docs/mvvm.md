@@ -154,7 +154,7 @@ mc = my_mvvm_bind(wm, win, vm);   /* 之后一切自动 */
   <style>button[ok].normal.bg_color=#A5D6A7</style>
   <label name="count" lp="h:32" v:text="{count, Converter=int_to_str}"/>
   <edit hint="your name" v:text="{name, Mode=TwoWay, Validator=not_empty}"/>
-  <button text="submit" v:on_click="{submit}"/>
+  <button text="submit" tooltip="提交表单" v:on_click="{submit}"/>
   <widget name="list" v:items="{persons, ItemTemplate=person_row}"/>
 </window>
 ```

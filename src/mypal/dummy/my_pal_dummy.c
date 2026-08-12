@@ -37,6 +37,8 @@ typedef struct dummy_window_t {
   my_lcd_t* lcd;
   int32_t ime_spot_x; /**< last ime_set_spot (M13a, for tests) */
   int32_t ime_spot_y;
+  int32_t pos_x; /**< last move (M13c, for tests) */
+  int32_t pos_y;
 } dummy_window_t;
 
 static my_ret_t dummy_win_set_title(my_pal_window_t* win, const char* title) {
@@ -113,10 +115,18 @@ static void dummy_win_ime_set_spot(my_pal_window_t* win, int32_t x,
   w->ime_spot_y = y;
 }
 
+static my_ret_t dummy_win_move(my_pal_window_t* win, int32_t x, int32_t y) {
+  dummy_window_t* w = (dummy_window_t*)win;
+  w->pos_x = x; /* recorded for tests (M13c) */
+  w->pos_y = y;
+  return MY_RET_OK;
+}
+
 static const my_pal_window_vtable_t s_dummy_window_vtable = {
     dummy_win_set_title, dummy_win_resize,  dummy_win_show,
     dummy_win_get_size,  dummy_win_get_lcd, dummy_win_destroy,
-    dummy_win_gl_enable, dummy_win_ime_set_spot};
+    dummy_win_gl_enable, dummy_win_ime_set_spot,
+    dummy_win_move};
 
 static my_pal_window_t* dummy_window_create(my_pal_t* pal, int32_t w, int32_t h,
                                             const char* title) {
@@ -357,6 +367,14 @@ void my_pal_dummy_get_ime_spot(my_pal_window_t* win, int32_t* x,
   }
   if (y != NULL) {
     *y = w->ime_spot_y;
+  }
+}
+
+void my_pal_dummy_inject_event(my_pal_t* pal, my_pal_window_t* win,
+                               const my_event_t* event) {
+  dummy_pal_t* p = pal_from(pal);
+  if (p != NULL && p->handler != NULL) {
+    p->handler(p->handler_ctx, win, event);
   }
 }
 

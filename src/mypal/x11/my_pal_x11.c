@@ -374,10 +374,19 @@ static void x11_win_ime_set_spot(my_pal_window_t* win, int32_t x,
                    (int32_t)(y * w->pal->scale + 0.5f));
 }
 
+static my_ret_t x11_win_move(my_pal_window_t* win, int32_t x, int32_t y) {
+  x11_window_t* w = (x11_window_t*)win;
+  XMoveWindow(w->pal->display, w->xwin,
+              (int)(x * w->pal->scale + 0.5f),
+              (int)(y * w->pal->scale + 0.5f));
+  return MY_RET_OK;
+}
+
 static const my_pal_window_vtable_t s_x11_window_vtable = {
     x11_win_set_title, x11_win_resize,  x11_win_show,
     x11_win_get_size,  x11_win_get_lcd, x11_win_destroy,
-    x11_win_gl_enable, x11_win_ime_set_spot};
+    x11_win_gl_enable, x11_win_ime_set_spot,
+    x11_win_move};
 
 static my_pal_window_t* x11_window_create(my_pal_t* pal, int32_t w, int32_t h,
                                           const char* title) {

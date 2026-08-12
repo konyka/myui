@@ -24,6 +24,7 @@ static my_ret_t wm_on_pal_event(void* ctx, my_pal_window_t* pal_window,
                                 const my_event_t* event) {
   my_window_manager_t* wm = (my_window_manager_t*)ctx;
   my_window_t* win;
+  my_window_t* top;
   if (pal_window == NULL) {
     return MY_RET_OK; /* window-less event (posted USER events): ignore */
   }
@@ -33,6 +34,19 @@ static my_ret_t wm_on_pal_event(void* ctx, my_pal_window_t* pal_window,
   }
   if (event->type == MY_EVENT_QUIT) {
     my_window_manager_close(wm, win);
+    return MY_RET_OK;
+  }
+  /* modal enforcement (M13c): while a modal window is on top, input
+   * events go only to it; lower windows are veiled and blocked */
+  top = my_window_manager_top(wm);
+  if (top != NULL && top->modal && win != top &&
+      (event->type == MY_EVENT_POINTER_DOWN ||
+       event->type == MY_EVENT_POINTER_MOVE ||
+       event->type == MY_EVENT_POINTER_UP ||
+       event->type == MY_EVENT_POINTER_WHEEL ||
+       event->type == MY_EVENT_KEY_DOWN || event->type == MY_EVENT_KEY_UP ||
+       event->type == MY_EVENT_IME_PREEDIT ||
+       event->type == MY_EVENT_IME_COMMIT)) {
     return MY_RET_OK;
   }
   return my_window_on_pal_event(win, event);

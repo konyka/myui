@@ -8,7 +8,7 @@
 - **双渲染 backend**：软件光栅化（零依赖，5 种像素格式）+ GLES2（CPU 三角化，GL 调用经函数表隔离），同一冻结 vgcanvas 接口；全量 alpha 混合（src-over）+ 扫描线覆盖率抗锯齿（三级可开关：x4 / x4y2）；剪贴板（x11 selection + 内存实现）
 - **字体系统**：stb_truetype（TTF + LRU 字形缓存）+ 内置 8x8 位图字体兜底（`MYUI_FONT_STB=OFF` 嵌入式裁剪），soft/GLES2 双 backend 文本渲染
 - **国际化文本**：BiDi 重排（vendored SheenBidi，UBA 全算法）+ 阿拉伯字母整形（presentation forms，UCD 数据自研），纯 LTR 零开销快速路径，`MYUI_BIDI=OFF` 可裁剪；编辑控件 RTL 光标为 TODO
-- **控件系统**：引用计数控件树、linear 布局（px/%/flex）、事件分发（grab/焦点）、主题样式（文本加载）、属性动画、脏矩形局部重绘；内置 button/label/edit（单行输入）/text_area（多行编辑）/checkbox/slider/progress_bar/list_view（虚拟化）/scroll_bar/image
+- **控件系统**：引用计数控件树、linear 布局（px/%/flex）、事件分发（grab/焦点）、主题样式（文本加载）、属性动画、脏矩形局部重绘；内置 button/label/edit（单行输入）/text_area（多行编辑）/checkbox/slider/progress_bar/list_view（虚拟化）/scroll_bar/image，复合控件 dialog（模态）/menu（弹出+级联）/tooltip（悬停）
 - **编辑体验**：撤销/重做（批合并撤销栈 + 窗口级共享管理器）、Tab 焦点环、PageUp/Down、光标闪烁、剪贴板（x11 含 INCR 大数据并发传输）、水平对齐（left/center/right/justify）、word wrap（UAX#14 子集断行：CJK/禁则标点/连字符）、IME 输入法（x11 XIM 预编辑/提交/候选窗跟随）
 - **MVVM**：data/command/items/condition 绑定、converter/validator、navigator、声明式规则字符串，UI 适配经 binding_target 抽象（base 可独立单测）
 - **XML UI 加载器**：自研零依赖 parser + 控件工厂注册表，`v:*` 绑定/主题/布局内联，可裁剪（`MYUI_UI_XML=OFF`）
@@ -43,7 +43,7 @@ ctest --test-dir build --output-on-failure
 ## demos
 
 - `demo_hello`：最小窗口 + 软件渲染场景
-- `demo_widgets`：控件/布局/主题切换/动画
+- `demo_widgets`：控件/布局/主题切换/动画/复合控件（dialog/menu/tooltip）
 - `demo_mvvm`：MVVM 全绑定（计数器、items 列表、导航）
 
 headless 验证：`MYUI_PAL=dummy` 构建后 `MYUI_DEMO_DUMP_PPM=out.ppm ./build/demos/demo_mvvm/demo_mvvm` 可渲染并导出 PPM。

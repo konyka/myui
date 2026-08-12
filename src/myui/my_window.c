@@ -4,6 +4,8 @@
  */
 #include "myui/my_window.h"
 
+#include <string.h>
+
 #include "myc/my_str.h"
 #include "myr/my_vgcanvas_gles2.h"
 #include "myr/my_vgcanvas_soft.h"
@@ -11,6 +13,9 @@
 #include "myui/my_layout.h"
 
 /* ---------------- widget vtable ---------------- */
+
+static void tip_cancel_timer(my_window_t* win);
+static void tip_hide(my_window_t* win);
 
 static void window_on_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
   my_window_t* win = (my_window_t*)widget;
@@ -29,14 +34,29 @@ static const my_widget_vtable_t s_window_vtable = {window_on_paint, NULL, NULL};
  * and cancel its animations. */
 static void window_on_subtree_removed(my_widget_t* root, my_widget_t* removed) {
   my_window_t* win = (my_window_t*)root;
+  my_widget_t* w;
   my_event_dispatcher_forget(&win->dispatcher, removed);
   if (root->anim_mgr != NULL) {
     my_animator_stop_widget((my_animator_manager_t*)root->anim_mgr, removed);
+  }
+  /* tooltip (M13c): drop hover state pointing into the removed subtree */
+  for (w = win->tip_target; w != NULL; w = w->parent) {
+    if (w == removed) {
+      win->tip_target = NULL;
+      tip_cancel_timer(win);
+      if (win->tip_widget != NULL) {
+        tip_hide(win); /* safe: tip is never inside `removed` */
+      }
+      break;
+    }
   }
 }
 
 static void window_destroy_chain(my_object_t* obj) {
   my_window_t* win = (my_window_t*)obj;
+  tip_cancel_timer(win);
+  tip_hide(win); /* we hold one ref; the tree holds the other */
+  win->tip_target = NULL;
   if (((my_widget_t*)win)->anim_mgr != NULL) {
     my_animator_stop_widget((my_animator_manager_t*)((my_widget_t*)win)->anim_mgr,
                             (my_widget_t*)win);
@@ -221,6 +241,12 @@ void my_window_paint(my_window_t* win) {
     my_vgcanvas_clip_rect(vg, &(my_rectf_t){(float)r->x, (float)r->y, (float)r->w,
                                             (float)r->h});
     my_widget_paint(root, vg);
+    if (win->scrim) {
+      /* modal veil (M13c): darken the blocked window under a dialog */
+      my_vgcanvas_set_fill_color(vg, my_color_rgba(0, 0, 0, 96));
+      my_vgcanvas_fill_rect(vg, &(my_rectf_t){(float)r->x, (float)r->y,
+                                              (float)r->w, (float)r->h});
+    }
     my_vgcanvas_restore(vg);
   }
   my_vgcanvas_end_frame(vg);
@@ -228,6 +254,143 @@ void my_window_paint(my_window_t* win) {
     my_pal_gl_swap_buffers(win->gl);
   }
   my_dirty_rects_clear(&win->dirty);
+}
+
+/* ---------------- tooltip (M13c) ---------------- */
+
+#define TIP_DELAY_MS 500
+#define TIP_DX 12
+#define TIP_DY 16
+
+/** @brief Paint the floating tip (text stored in its own tooltip field). */
+static void tip_on_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
+  uint32_t bg = my_widget_style_get_color(widget, MY_STATE_NORMAL,
+                                          "bg_color", 0x323232F2u);
+  uint32_t fg = my_widget_style_get_color(widget, MY_STATE_NORMAL,
+                                          "fg_color", 0xF5F5F5FFu);
+  uint32_t border = my_widget_style_get_color(widget, MY_STATE_NORMAL,
+                                              "border_color", 0x616161FFu);
+  my_vgcanvas_set_fill_color(vg, my_color_from_rgba32(bg));
+  my_vgcanvas_fill_rect(vg, &(my_rectf_t){0, 0, (float)widget->rect.w,
+                                          (float)widget->rect.h});
+  my_vgcanvas_set_stroke_color(vg, my_color_from_rgba32(border));
+  my_vgcanvas_set_line_width(vg, 1);
+  my_vgcanvas_stroke_rect(vg, &(my_rectf_t){0, 0, (float)widget->rect.w,
+                                            (float)widget->rect.h});
+  if (widget->tooltip != NULL) {
+    my_vgcanvas_set_fill_color(vg, my_color_from_rgba32(fg));
+    my_vgcanvas_draw_text(vg, widget->tooltip, 6,
+                          ((float)widget->rect.h - 8) / 2.0f);
+  }
+}
+
+static const my_widget_vtable_t s_tip_vtable = {tip_on_paint, NULL, NULL};
+
+/** @brief Remove the visible tip (reentrancy-safe via early NULL). */
+static void tip_hide(my_window_t* win) {
+  my_widget_t* tip = win->tip_widget;
+  if (tip == NULL) {
+    return;
+  }
+  win->tip_widget = NULL;
+  my_widget_remove_child((my_widget_t*)win, tip);
+  my_widget_unref(tip);
+}
+
+static void tip_cancel_timer(my_window_t* win) {
+  if (win->tip_timer != 0 && win->loop != NULL) {
+    my_pal_main_loop_remove_timer(win->loop, win->tip_timer);
+  }
+  win->tip_timer = 0;
+}
+
+/** @brief One-shot hover timer fired: pop the tip near the cursor. */
+static my_ret_t tip_on_timer(void* ctx) {
+  my_window_t* win = (my_window_t*)ctx;
+  my_widget_t* root = (my_widget_t*)win;
+  my_widget_t* tip;
+  const char* text;
+  int32_t w, h, x, y;
+  win->tip_timer = 0;
+  if (win->tip_target == NULL) {
+    return MY_RET_FAIL;
+  }
+  text = win->tip_target->tooltip;
+  if (text == NULL || text[0] == '\0') {
+    return MY_RET_FAIL;
+  }
+  w = (int32_t)strlen(text) * 8 + 12;
+  h = 22;
+  x = win->tip_x + TIP_DX;
+  y = win->tip_y + TIP_DY;
+  if (x + w > root->rect.w) {
+    x = root->rect.w - w;
+  }
+  if (y + h > root->rect.h) {
+    y = win->tip_y - TIP_DY - h; /* flip above the cursor */
+  }
+  if (x < 0) {
+    x = 0;
+  }
+  if (y < 0) {
+    y = 0;
+  }
+  tip = my_widget_create(win->allocator, "tooltip");
+  if (tip == NULL) {
+    return MY_RET_FAIL;
+  }
+  tip->vtable = &s_tip_vtable;
+  tip->floating = true;
+  my_widget_set_tooltip(tip, text);
+  my_widget_set_rect(tip, &(my_rect_t){x, y, w, h});
+  tip_hide(win); /* paranoia: never two tips */
+  if (my_widget_add_child(root, tip) != MY_RET_OK) {
+    my_widget_unref(tip);
+    return MY_RET_FAIL;
+  }
+  win->tip_widget = tip; /* tree + we hold one ref each */
+  my_widget_invalidate(root, NULL);
+  return MY_RET_FAIL; /* one-shot */
+}
+
+/** @brief Nearest ancestor-or-self with a tooltip (excluding the tip). */
+static my_widget_t* tip_hover_target(my_window_t* win, my_widget_t* hit) {
+  while (hit != NULL) {
+    if (hit != win->tip_widget && hit->tooltip != NULL &&
+        hit->tooltip[0] != '\0') {
+      return hit;
+    }
+    hit = hit->parent;
+  }
+  return NULL;
+}
+
+/** @brief Track hover state before the event is dispatched. */
+static void tip_track(my_window_t* win, const my_event_t* event) {
+  if (event->type == MY_EVENT_POINTER_MOVE) {
+    my_widget_t* hit = my_widget_hit_test((my_widget_t*)win, event->u.pointer.x,
+                                          event->u.pointer.y);
+    my_widget_t* target = tip_hover_target(win, hit);
+    if (target == win->tip_target) {
+      return; /* still hovering the same widget */
+    }
+    tip_cancel_timer(win);
+    tip_hide(win);
+    win->tip_target = target;
+    if (target != NULL && win->loop != NULL) {
+      win->tip_x = event->u.pointer.x;
+      win->tip_y = event->u.pointer.y;
+      win->tip_timer =
+          my_pal_main_loop_add_timer(win->loop, tip_on_timer, win, TIP_DELAY_MS);
+    }
+    return;
+  }
+  if (event->type == MY_EVENT_POINTER_DOWN ||
+      event->type == MY_EVENT_KEY_DOWN) {
+    tip_cancel_timer(win);
+    tip_hide(win);
+    win->tip_target = NULL;
+  }
 }
 
 /* ---------------- event routing ---------------- */
@@ -306,6 +469,7 @@ my_ret_t my_window_on_pal_event(my_window_t* win, const my_event_t* event) {
     case MY_EVENT_POINTER_UP:
     case MY_EVENT_KEY_DOWN:
     case MY_EVENT_KEY_UP:
+      tip_track(win, event); /* hover tooltip bookkeeping (M13c) */
       my_event_dispatch(&win->dispatcher, event);
       break;
     default:
