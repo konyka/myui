@@ -303,6 +303,17 @@ static void on_toplevel_close(void* data, struct xdg_toplevel* tl) {
 static const struct xdg_toplevel_listener TOPLEVEL_LISTENER = {
     .configure = on_toplevel_configure, .close = on_toplevel_close};
 
+/* xdg_wm_base.ping must be answered with pong, otherwise the compositor
+ * (GNOME/mutter) marks the window unresponsive ("Force Quit/Wait" dialog)
+ * and SIGKILLs us on force quit. */
+static void on_wm_base_ping(void* data, struct xdg_wm_base* base,
+                            uint32_t serial) {
+  (void)data;
+  xdg_wm_base_pong(base, serial);
+}
+static const struct xdg_wm_base_listener WM_BASE_LISTENER = {
+    .ping = on_wm_base_ping};
+
 static wl_window_t* find_by_surface(wl_pal_t* p, struct wl_surface* surface) {
   size_t i, n = my_darray_size(p->windows);
   for (i = 0; i < n; i++) {
@@ -749,6 +760,7 @@ static void on_registry_global(void* data, struct wl_registry* registry,
   } else if (strcmp(interface, xdg_wm_base_interface.name) == 0) {
     p->wm_base =
         (struct xdg_wm_base*)wl_registry_bind(registry, name, &xdg_wm_base_interface, 1);
+    xdg_wm_base_add_listener(p->wm_base, &WM_BASE_LISTENER, p);
   } else if (strcmp(interface, wl_seat_interface.name) == 0) {
     p->seat = (struct wl_seat*)wl_registry_bind(registry, name, &wl_seat_interface, 5);
     wl_seat_add_listener(p->seat, &SEAT_LISTENER, p);
@@ -1441,5 +1453,6 @@ bool my_pal_wayland_listeners_complete(void) {
          KEYBOARD_LISTENER.leave != NULL && KEYBOARD_LISTENER.key != NULL &&
          KEYBOARD_LISTENER.modifiers != NULL &&
          KEYBOARD_LISTENER.repeat_info != NULL &&
-         SEAT_LISTENER.capabilities != NULL && SEAT_LISTENER.name != NULL;
+         SEAT_LISTENER.capabilities != NULL && SEAT_LISTENER.name != NULL &&
+         WM_BASE_LISTENER.ping != NULL;
 }
