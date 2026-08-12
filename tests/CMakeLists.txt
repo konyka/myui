@@ -19,6 +19,7 @@ set(MYUI_GL_WINDOW_TESTS
 # wayland tests need the wayland port built
 set(MYUI_WAYLAND_TESTS
   "${CMAKE_CURRENT_SOURCE_DIR}/my_pal_wayland_keymap_test.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/my_pal_wayland_listener_test.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/wayland_smoke_test.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/wayland_clipboard_test.c"
 )

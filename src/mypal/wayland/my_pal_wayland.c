@@ -396,10 +396,40 @@ static void on_pointer_axis(void* data, struct wl_pointer* ptr, uint32_t time,
   dispatch_event(p, (my_pal_window_t*)w, &e);
 }
 
+/* wl_pointer v5 (seat is bound at v5) additionally sends frame / axis_source /
+ * axis_stop / axis_discrete. libwayland aborts on a NULL listener slot, so all
+ * of them must be set even when we have nothing to do with the event. */
+static void on_pointer_frame(void* data, struct wl_pointer* ptr) {
+  (void)data;
+  (void)ptr;
+}
+static void on_pointer_axis_source(void* data, struct wl_pointer* ptr,
+                                   uint32_t source) {
+  (void)data;
+  (void)ptr;
+  (void)source;
+}
+static void on_pointer_axis_stop(void* data, struct wl_pointer* ptr,
+                                 uint32_t time, uint32_t axis) {
+  (void)data;
+  (void)ptr;
+  (void)time;
+  (void)axis;
+}
+static void on_pointer_axis_discrete(void* data, struct wl_pointer* ptr,
+                                     uint32_t axis, int32_t discrete) {
+  (void)data;
+  (void)ptr;
+  (void)axis;
+  (void)discrete;
+}
+
 static const struct wl_pointer_listener POINTER_LISTENER = {
     .enter = on_pointer_enter, .leave = on_pointer_leave,
     .motion = on_pointer_motion, .button = on_pointer_button,
-    .axis = on_pointer_axis};
+    .axis = on_pointer_axis, .frame = on_pointer_frame,
+    .axis_source = on_pointer_axis_source, .axis_stop = on_pointer_axis_stop,
+    .axis_discrete = on_pointer_axis_discrete};
 
 static void on_kb_enter(void* data, struct wl_keyboard* kb, uint32_t serial,
                         struct wl_surface* surface, struct wl_array* keys) {
@@ -1398,4 +1428,18 @@ my_pal_t* my_pal_wayland_create(const my_allocator_t* allocator) {
     return NULL;
   }
   return (my_pal_t*)p;
+}
+
+bool my_pal_wayland_listeners_complete(void) {
+  return POINTER_LISTENER.enter != NULL && POINTER_LISTENER.leave != NULL &&
+         POINTER_LISTENER.motion != NULL && POINTER_LISTENER.button != NULL &&
+         POINTER_LISTENER.axis != NULL && POINTER_LISTENER.frame != NULL &&
+         POINTER_LISTENER.axis_source != NULL &&
+         POINTER_LISTENER.axis_stop != NULL &&
+         POINTER_LISTENER.axis_discrete != NULL &&
+         KEYBOARD_LISTENER.keymap != NULL && KEYBOARD_LISTENER.enter != NULL &&
+         KEYBOARD_LISTENER.leave != NULL && KEYBOARD_LISTENER.key != NULL &&
+         KEYBOARD_LISTENER.modifiers != NULL &&
+         KEYBOARD_LISTENER.repeat_info != NULL &&
+         SEAT_LISTENER.capabilities != NULL && SEAT_LISTENER.name != NULL;
 }
