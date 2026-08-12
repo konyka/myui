@@ -15,9 +15,12 @@
 
 #include "../dxx_data.h"
 #include "../dxx_theme.h"
+#include "myr/my_lcd_mem.h"
+#include "myr/my_vgcanvas_soft.h"
 #include "myui/my_layout.h"
 #include "myui/widgets/my_dialog.h"
 #include "myui/widgets/my_label.h"
+#include "stb/stb_image_write.h"
 #include "stock_item.h"
 #include "views.h"
 
@@ -25,6 +28,13 @@
 #define ZTP_COL1_W 60
 #define ZTP_COL2_W 85
 #define ZTP_CELL_PAD 6
+
+/** @brief The table widget: adds share-export state to a plain widget. */
+typedef struct ztp_table_t {
+  my_widget_t base;
+  my_window_manager_t* wm; /**< weak */
+  char share_path[160];    /**< PNG output path (M14d) */
+} ztp_table_t;
 
 typedef struct ztp_cell_t {
   my_widget_t base;
@@ -112,35 +122,111 @@ static void share_dialog_result(void* ctx, int32_t result) {
   my_dialog_destroy((my_dialog_t*)ctx);
 }
 
+/** @brief Render the table offscreen and write it as a PNG (M14d).
+ * Returns the output path on success, NULL on failure. */
+static const char* ztp_export_png(ztp_table_t* t, my_font_t* font,
+                                  int32_t font_size) {
+  my_widget_t* w = (my_widget_t*)t;
+  int32_t W = w->rect.w, H = w->rect.h;
+  my_lcd_t* lcd;
+  my_vgcanvas_t* vg;
+  uint8_t* buf;
+  uint32_t stride, x, y;
+  uint8_t* rgba;
+  int ok;
+  if (W <= 0 || H <= 0) {
+    return NULL;
+  }
+  lcd = my_lcd_mem_create(NULL, (uint32_t)W, (uint32_t)H,
+                          MY_PIXEL_FORMAT_BGRA8888);
+  if (lcd == NULL) {
+    return NULL;
+  }
+  vg = my_vgcanvas_soft_create(NULL, lcd);
+  if (vg == NULL) {
+    my_lcd_destroy(lcd);
+    return NULL;
+  }
+  if (font != NULL) {
+    my_vgcanvas_set_font(vg, font, font_size);
+  }
+  my_vgcanvas_begin_frame(vg, NULL);
+  /* white backing: the table's own cells are transparent (on the page
+   * the window bg shows through; offscreen we must paint it) */
+  my_vgcanvas_set_fill_color(vg, my_color_from_rgba32(DXX_COLOR_WHITE));
+  my_vgcanvas_fill_rect(vg, &(my_rectf_t){0, 0, (float)W, (float)H});
+  my_vgcanvas_save(vg);
+  /* paint the table as if it sat at the origin */
+  my_vgcanvas_translate(vg, -(float)w->rect.x, -(float)w->rect.y);
+  my_widget_paint(w, vg);
+  my_vgcanvas_restore(vg);
+  my_vgcanvas_end_frame(vg);
+  buf = my_lcd_mem_get_buffer(lcd);
+  stride = my_lcd_mem_get_stride(lcd);
+  rgba = (uint8_t*)my_mem_alloc(NULL, (size_t)W * (size_t)H * 4);
+  ok = 0;
+  if (buf != NULL && rgba != NULL) {
+    for (y = 0; y < (uint32_t)H; y++) {
+      for (x = 0; x < (uint32_t)W; x++) {
+        const uint8_t* p = buf + (size_t)y * stride + (size_t)x * 4;
+        uint8_t* q = rgba + ((size_t)y * (size_t)W + (size_t)x) * 4;
+        q[0] = p[2]; /* BGRA -> RGBA */
+        q[1] = p[1];
+        q[2] = p[0];
+        q[3] = 255;
+      }
+    }
+    ok = stbi_write_png(t->share_path, W, H, 4, rgba, W * 4);
+  }
+  my_mem_free(NULL, rgba);
+  my_vgcanvas_destroy(vg);
+  my_lcd_destroy(lcd);
+  return ok != 0 ? t->share_path : NULL;
+}
+
 static my_ret_t share_btn_event(my_widget_t* widget, const my_event_t* event) {
   if (event->type == MY_EVENT_POINTER_DOWN) {
     return MY_RET_OK;
   }
   if (event->type == MY_EVENT_POINTER_UP) {
-    my_window_manager_t* wm =
-        (my_window_manager_t*)my_widget_get_user_data(widget);
+    /* the button's user_data is the table (set in dxx_build_ztpool) */
+    ztp_table_t* t = (ztp_table_t*)my_widget_get_user_data(widget);
+    my_window_manager_t* wm;
     my_dialog_t* dlg;
     my_widget_t* msg;
-    if (wm == NULL) {
+    my_widget_t* root;
+    const char* out = NULL;
+    char text[200];
+    if (t == NULL || t->wm == NULL) {
       return MY_RET_OK;
     }
-    dlg = my_dialog_create(NULL, wm->pal, "分享图片", 280, 120);
-    {
-      /* inherit the root window's font so labels render real text */
-      my_widget_t* root = widget;
-      while (root->parent != NULL) {
-        root = root->parent;
-      }
-      if (my_str_eq(root->widget_type, "window") &&
-          ((my_window_t*)root)->font != NULL) {
-        my_window_set_font(dlg->win, ((my_window_t*)root)->font,
-                           ((my_window_t*)root)->font_size);
-      }
+    wm = t->wm;
+    root = widget;
+    while (root->parent != NULL) {
+      root = root->parent;
     }
-    msg = my_label_create(NULL, "演示环境：已生成图片（模拟）");
-    my_widget_set_layout_params(msg, "h:32");
+    if (my_str_eq(root->widget_type, "window")) {
+      my_window_t* rw = (my_window_t*)root;
+      out = ztp_export_png(t, rw->font, rw->font_size);
+    }
+    dlg = my_dialog_create(NULL, wm->pal, "分享图片", 300, 120);
+    if (my_str_eq(root->widget_type, "window") &&
+        ((my_window_t*)root)->font != NULL) {
+      my_window_set_font(dlg->win, ((my_window_t*)root)->font,
+                         ((my_window_t*)root)->font_size);
+    }
+    snprintf(text, sizeof(text), "%s",
+             out != NULL ? "已生成图片（演示环境）：" : "图片生成失败");
+    msg = my_label_create(NULL, text);
+    my_widget_set_layout_params(msg, "h:28");
     my_widget_add_child(my_dialog_content(dlg), msg);
     my_widget_unref(msg);
+    if (out != NULL) {
+      msg = my_label_create(NULL, out);
+      my_widget_set_layout_params(msg, "h:28");
+      my_widget_add_child(my_dialog_content(dlg), msg);
+      my_widget_unref(msg);
+    }
     my_dialog_add_button(dlg, "关闭", 0);
     my_dialog_open(dlg, wm, share_dialog_result, dlg);
     return MY_RET_OK;
@@ -155,11 +241,22 @@ static const my_widget_vtable_t s_share_vtable = {share_btn_paint,
 
 my_widget_t* dxx_build_ztpool(my_window_manager_t* wm, my_widget_t* parent,
                               int32_t w) {
-  my_widget_t* table = my_widget_create(NULL, "dxx_ztpool");
+  ztp_table_t* tt =
+      (ztp_table_t*)my_mem_calloc(NULL, 1, sizeof(ztp_table_t));
+  my_widget_t* table;
   my_widget_t* hdr;
   my_widget_t* share;
   int32_t y;
   int r;
+  if (tt == NULL ||
+      my_widget_init((my_widget_t*)tt, NULL, NULL, "dxx_ztpool") !=
+          MY_RET_OK) {
+    my_mem_free(NULL, tt);
+    return NULL;
+  }
+  tt->wm = wm;
+  snprintf(tt->share_path, sizeof(tt->share_path), "ztpool_share.png");
+  table = (my_widget_t*)tt;
   /* header row */
   hdr = my_widget_create(NULL, "ztp_header");
   my_widget_set_rect(hdr, &(my_rect_t){0, 0, w, ZTP_HEADER_H});
@@ -183,7 +280,7 @@ my_widget_t* dxx_build_ztpool(my_window_manager_t* wm, my_widget_t* parent,
   }
   share = my_widget_create(NULL, "ztp_share");
   share->vtable = &s_share_vtable;
-  my_widget_set_user_data(share, wm);
+  my_widget_set_user_data(share, tt); /* the table (has wm + share path) */
   my_widget_set_rect(share, &(my_rect_t){w - 86, 7, 76, 26});
   my_widget_add_child(hdr, share);
   my_widget_unref(share);
@@ -256,4 +353,11 @@ my_widget_t* dxx_build_ztpool(my_window_manager_t* wm, my_widget_t* parent,
     my_widget_add_child(parent, table);
   }
   return table;
+}
+
+void dxx_ztpool_set_share_path(my_widget_t* table, const char* path) {
+  ztp_table_t* tt = (ztp_table_t*)table;
+  if (table != NULL && path != NULL) {
+    snprintf(tt->share_path, sizeof(tt->share_path), "%s", path);
+  }
 }

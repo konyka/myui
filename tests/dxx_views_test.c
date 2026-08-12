@@ -80,10 +80,10 @@ static void test_dropdown_opens_menu(void) {
   fx_init(&f);
   dxx_build_topbar(f.win, my_window_widget(f.win), &tb);
   before = root_children(&f);
-  /* trigger 0 = 竞价 dropdown (2 items) */
-  anchor = tb.triggers[0].anchor;
+  /* triggers[0] = logo (首页); trigger 1 = 竞价 dropdown (2 items) */
+  anchor = tb.triggers[1].anchor;
   TEST_ASSERT(anchor != NULL);
-  TEST_ASSERT_EQ_INT(tb.triggers[0].menu_index, 0);
+  TEST_ASSERT_EQ_INT(tb.triggers[1].menu_index, 0);
   cx = anchor->rect.w / 2;
   cy = anchor->rect.h / 2;
   my_widget_local_to_global(anchor, &cx, &cy);

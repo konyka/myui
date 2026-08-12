@@ -40,10 +40,26 @@ static const my_widget_vtable_t s_topbar_vtable = {topbar_on_paint, NULL,
 static const my_widget_vtable_t s_divider_vtable = {divider_on_paint, NULL,
                                                     NULL};
 
+static const char* const MENU_JINGJIA[] = {"竞价异动", "竞价强度"};
+static const char* const MENU_WAJUE[] = {"个股挖掘", "概念检索", "研报检索"};
+static const char* const MENU_FUPAN[] = {"每日复盘", "板块轮动", "龙头高度",
+                                         "连板天梯"};
+static const char* const MENU_REDIAN[] = {"热点聚焦", "聚合热搜"};
+
+static const char* const* MENU_NAMES[DXX_MENU_COUNT] = {
+    MENU_JINGJIA, MENU_WAJUE, MENU_FUPAN, MENU_REDIAN};
+static const int MENU_COUNTS[DXX_MENU_COUNT] = {2, 3, 4, 2};
+
 static void on_menu_select(void* ctx, int32_t id) {
-  (void)ctx;
-  (void)id;
-  printf("dxx: menu item id=%d (navigation TODO M14d)\n", (int)id);
+  struct dxx_trigger_t* tr = (struct dxx_trigger_t*)ctx;
+  const char* name = "?";
+  if (tr->menu_index >= 0 && id >= 0 && id < MENU_COUNTS[tr->menu_index]) {
+    name = MENU_NAMES[tr->menu_index][id];
+  }
+  if (tr->tb->nav_cb != NULL) {
+    tr->tb->nav_cb(tr->tb->nav_ctx, name);
+  }
+  dxx_topbar_set_active(tr->tb, name);
 }
 
 static void on_trigger_click(void* ctx, const char* event, void* data) {
@@ -52,13 +68,16 @@ static void on_trigger_click(void* ctx, const char* event, void* data) {
   (void)event;
   (void)data;
   if (tr->menu_index < 0) {
-    printf("dxx: nav '%s' clicked (navigation TODO M14d)\n", tr->log_name);
+    if (tr->tb->nav_cb != NULL) {
+      tr->tb->nav_cb(tr->tb->nav_ctx, tr->log_name);
+    }
+    dxx_topbar_set_active(tr->tb, tr->log_name);
     return;
   }
   y = tr->anchor->rect.h;
   my_widget_local_to_global(tr->anchor, &x, &y);
   my_menu_popup(tr->win, tr->tb->menus[tr->menu_index], x, y, on_menu_select,
-                NULL);
+                tr);
 }
 
 static my_menu_t* build_menu(const char* const* items, int count) {
@@ -70,14 +89,41 @@ static my_menu_t* build_menu(const char* const* items, int count) {
   return m;
 }
 
-static const char* const MENU_JINGJIA[] = {"竞价异动", "竞价强度"};
-static const char* const MENU_WAJUE[] = {"个股挖掘", "概念检索", "研报检索"};
-static const char* const MENU_FUPAN[] = {"每日复盘", "板块轮动", "龙头高度",
-                                         "连板天梯"};
-static const char* const MENU_REDIAN[] = {"热点聚焦", "聚合热搜"};
-
 static const char* const DROPDOWN_NAMES[DXX_MENU_COUNT] = {"竞价▼", "挖掘▼",
                                                            "复盘▼", "热点▼"};
+
+void dxx_topbar_set_nav_handler(dxx_topbar_t* tb, dxx_nav_cb cb, void* ctx) {
+  if (tb != NULL) {
+    tb->nav_cb = cb;
+    tb->nav_ctx = ctx;
+  }
+}
+
+void dxx_topbar_set_active(dxx_topbar_t* tb, const char* name) {
+  int i, j;
+  if (tb == NULL || name == NULL) {
+    return;
+  }
+  for (i = 0; i < 16; i++) {
+    struct dxx_trigger_t* tr = &tb->triggers[i];
+    bool active = false;
+    if (tr->anchor == NULL) {
+      break;
+    }
+    if (tr->menu_index < 0) {
+      active = tr->log_name != NULL && strcmp(tr->log_name, name) == 0;
+    } else {
+      for (j = 0; j < MENU_COUNTS[tr->menu_index]; j++) {
+        if (strcmp(MENU_NAMES[tr->menu_index][j], name) == 0) {
+          active = true;
+          break;
+        }
+      }
+    }
+    dxx_nav_item_set_color(tr->anchor,
+                           active ? DXX_COLOR_PRIMARY : tr->base_color);
+  }
+}
 
 static int add_item(dxx_topbar_t* tb, my_window_t* win, int x, int y,
                     const char* text, uint32_t color, bool bold,
@@ -100,6 +146,7 @@ static int add_item(dxx_topbar_t* tb, my_window_t* win, int x, int y,
     tr->menu_index = menu_index;
     tr->anchor = it;
     tr->log_name = text;
+    tr->base_color = color;
     my_widget_on(it, "click", on_trigger_click, tr);
   }
   my_widget_unref(it);
@@ -141,12 +188,21 @@ void dxx_build_topbar(my_window_t* win, my_widget_t* parent,
   out->menus[2] = build_menu(MENU_FUPAN, 4);
   out->menus[3] = build_menu(MENU_REDIAN, 2);
 
-  /* logo (site uses a 150px image; text stand-in, see docs) */
+  /* logo (site uses a 150px image; text stand-in, see docs) — click
+   * returns to the home page */
   {
     my_widget_t* logo = dxx_nav_item_create(NULL, "短线侠", DXX_COLOR_WHITE,
                                             true, 20, 0);
+    struct dxx_trigger_t* tr = &out->triggers[0];
     my_widget_set_rect(logo, &(my_rect_t){x, 0, 120, TOPBAR_H});
     my_widget_add_child(out->bar, logo);
+    tr->win = win;
+    tr->tb = out;
+    tr->menu_index = -1;
+    tr->anchor = logo;
+    tr->log_name = "首页";
+    tr->base_color = DXX_COLOR_WHITE;
+    my_widget_on(logo, "click", on_trigger_click, tr);
     my_widget_unref(logo);
     x += 120 + 10;
   }

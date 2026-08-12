@@ -122,3 +122,10 @@ my_widget_t* dxx_nav_item_create(const my_allocator_t* allocator,
   it->bold = bold;
   return (my_widget_t*)it;
 }
+
+void dxx_nav_item_set_color(my_widget_t* item, uint32_t rgba_color) {
+  if (item != NULL) {
+    ((dxx_nav_item_t*)item)->color = rgba_color;
+    my_widget_invalidate(item, NULL);
+  }
+}
