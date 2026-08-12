@@ -11,8 +11,13 @@
  *  - POINTER_MOVE/UP: delivered to the grabbed widget while a grab is
  *    active (otherwise to the hit widget); UP releases the grab.
  *  - KEY_DOWN/UP: delivered to the focused widget (bubbles to parents).
+ *  - Hover (M14a): the dispatcher tracks the widget under the pointer
+ *    (grab wins while dragging; UP re-hits); on change it flips the
+ *    widget->hovered flag and emits "hover_leave"/"hover_enter". The
+ *    flag drives the MY_STATE_HOVER style slot.
  *  - Emitter listener names mirror event types: "pointer_down",
- *    "pointer_move", "pointer_up", "key_down", "key_up".
+ *    "pointer_move", "pointer_up", "key_down", "key_up",
+ *    "hover_enter", "hover_leave".
  * grabbed/focused are weak refs: a widget removed mid-grab leaves them
  * dangling (TODO M3b: clear on remove_child).
  */
@@ -26,6 +31,8 @@ typedef struct my_event_dispatcher_t {
   my_widget_t* root;    /**< weak */
   my_widget_t* grabbed; /**< weak: pointer grab target */
   my_widget_t* focused; /**< weak: key focus */
+  my_widget_t* hovered; /**< weak: hover target (M14a); its widget->hovered
+                         * flag is set and hover_enter/leave are emitted */
 } my_event_dispatcher_t;
 
 /** @brief Initialize a dispatcher for the given root widget. */

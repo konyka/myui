@@ -242,6 +242,149 @@ my_layouter_t* my_layouter_linear_create(const my_allocator_t* allocator,
   return (my_layouter_t*)lin;
 }
 
+/* ---------------- flow layouter (M14a) ---------------- */
+
+typedef struct my_layouter_flow_t {
+  my_layouter_t base;
+  const my_allocator_t* allocator;
+  int32_t h_spacing;
+  int32_t v_spacing;
+  my_flow_align_t align;
+} my_layouter_flow_t;
+
+/** @brief Child size under flow: PX/% from params, AUTO (=current rect)
+ * for everything else (FLEX is meaningless in flow). */
+static void flow_child_size(my_widget_t* parent, my_widget_t* c, int32_t* out_w,
+                            int32_t* out_h) {
+  const my_layout_params_t* p = &c->layout_params;
+  switch (p->w_mode) {
+    case MY_LAYOUT_PX:
+      *out_w = (int32_t)p->w_value;
+      break;
+    case MY_LAYOUT_PERCENT:
+      *out_w = (int32_t)(parent->rect.w * p->w_value / 100.0f);
+      break;
+    default:
+      *out_w = c->rect.w;
+      break;
+  }
+  switch (p->h_mode) {
+    case MY_LAYOUT_PX:
+      *out_h = (int32_t)p->h_value;
+      break;
+    case MY_LAYOUT_PERCENT:
+      *out_h = (int32_t)(parent->rect.h * p->h_value / 100.0f);
+      break;
+    default:
+      *out_h = c->rect.h;
+      break;
+  }
+}
+
+/** @brief Shift row [first, last) horizontally per the align setting. */
+static void flow_align_row(my_layouter_flow_t* fl, my_widget_t* parent,
+                           size_t first, size_t last, int32_t row_w) {
+  int32_t off;
+  size_t j;
+  if (fl->align != MY_FLOW_ALIGN_CENTER) {
+    return;
+  }
+  off = (parent->rect.w - row_w) / 2;
+  if (off <= 0) {
+    return;
+  }
+  for (j = first; j < last; j++) {
+    my_widget_t* c = my_widget_get_child(parent, j);
+    if (c->visible && !c->floating) {
+      c->rect.x += off;
+    }
+  }
+}
+
+/** @brief Walk the rows; assign=true also writes child rects (and marks
+ * them dirty). Returns the total content height. */
+static int32_t flow_run(my_layouter_flow_t* fl, my_widget_t* parent,
+                        bool assign) {
+  size_t i, n = my_widget_child_count(parent);
+  size_t row_first = 0;
+  int32_t x = 0, y = 0, row_h = 0, row_w = 0;
+  bool row_empty = true;
+  for (i = 0; i < n; i++) {
+    my_widget_t* c = my_widget_get_child(parent, i);
+    int32_t cw, ch;
+    if (!c->visible || c->floating) {
+      continue;
+    }
+    flow_child_size(parent, c, &cw, &ch);
+    if (!row_empty && x + cw > parent->rect.w) {
+      /* close the current row, wrap */
+      if (assign) {
+        flow_align_row(fl, parent, row_first, i, row_w);
+      }
+      y += row_h + fl->v_spacing;
+      x = 0;
+      row_h = 0;
+      row_w = 0;
+      row_empty = true;
+      row_first = i;
+    }
+    if (assign) {
+      c->rect.x = x;
+      c->rect.y = y;
+      c->rect.w = cw;
+      c->rect.h = ch;
+      my_widget_invalidate(c, NULL);
+    }
+    x += cw + fl->h_spacing;
+    row_w = x - fl->h_spacing; /* width without the trailing spacing */
+    if (ch > row_h) {
+      row_h = ch;
+    }
+    row_empty = false;
+  }
+  if (!row_empty) {
+    if (assign) {
+      flow_align_row(fl, parent, row_first, n, row_w);
+    }
+    y += row_h;
+  }
+  return y;
+}
+
+static void flow_layout(my_layouter_t* self, my_widget_t* parent) {
+  flow_run((my_layouter_flow_t*)self, parent, true);
+}
+
+static void flow_destroy(my_layouter_t* self) {
+  my_layouter_flow_t* fl = (my_layouter_flow_t*)self;
+  my_mem_free(fl->allocator, fl);
+}
+
+my_layouter_t* my_layouter_flow_create(const my_allocator_t* allocator,
+                                       int32_t h_spacing, int32_t v_spacing,
+                                       my_flow_align_t align) {
+  my_layouter_flow_t* fl =
+      (my_layouter_flow_t*)my_mem_calloc(allocator, 1, sizeof(my_layouter_flow_t));
+  if (fl == NULL) {
+    return NULL;
+  }
+  fl->base.layout = flow_layout;
+  fl->base.destroy = flow_destroy;
+  fl->allocator = allocator;
+  fl->h_spacing = h_spacing;
+  fl->v_spacing = v_spacing;
+  fl->align = align;
+  return (my_layouter_t*)fl;
+}
+
+int32_t my_layouter_flow_measure(my_widget_t* parent) {
+  if (parent == NULL || parent->layouter == NULL ||
+      parent->layouter->layout != flow_layout) {
+    return 0;
+  }
+  return flow_run((my_layouter_flow_t*)parent->layouter, parent, false);
+}
+
 /* ---------------- attach / run ---------------- */
 
 my_ret_t my_widget_set_layouter(my_widget_t* widget, my_layouter_t* layouter) {

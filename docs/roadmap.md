@@ -43,6 +43,7 @@
 - **M13c 复合控件（dialog/menu/tooltip）** ✅ 已完成：浮层基础设施（widget `floating` 布局跳过 + `user_data`、PAL 窗口 `move` 槽四 port、dummy `inject_event` 测试钩子）；wm 模态阻断（top modal 吞下层 POINTER/KEY/IME）+ 被遮窗 scrim 半透明幕；`my_dialog` 组合式模态对话框（真实子窗口、内容容器 ESC=CANCEL、按钮 result 回调）；`my_menu` 数据模型 + 窗口内 overlay 弹出（外部点关、边缘翻转钳位、级联上限 3、Up/Down/Enter/ESC 键盘导航）；tooltip（widget `tooltip` 字段 + XML 通用属性，窗口 500ms hover 定时器、光标旁钳位浮层、移除/销毁全路径清态无泄漏）；主题默认色四组；demo_widgets 演示 + dummy dump 四图目检。级联深度、悬停开级联、dialog 拖拽留 TODO。
 - **M13d XML=OFF 回归修复 + CI 裁剪 job + 收尾** ✅ 已完成：`my_ui_loader_test` 的 ui2c golden 死代码从 `#ifndef MYUI_UI_XML` 分支删除（OFF 分支的拷贝永远不会运行）+ tests/CMake 仅在 XML ON 时定义 `MY_UI2C_SAMPLE_C`/生成样例（修 `-Werror=unused-function`）；`my_text_align_test` 的 XML 用例加 `MYUI_UI_XML` guard（OFF 时 my_ui_load_str 返回 NULL 段错误）；`my_wrap_rtl_test` 补 `MYUI_BIDI` guard（M13b 遗漏，全 OFF 裁剪暴露）；CI 新增 linux-minimal job（dummy + FONT_STB/IMAGE_STB/UI_XML/BIDI 全 OFF）防裁剪回归；bench 汇总刷新；M14+ 清单整理。
 - **M13 完成**。
+- **M14a 框架补齐（flow/rich_label/scroll_view/hover）** ✅ 已完成（duanxianxia 复刻前置，spec: docs/superpowers/specs/2026-08-04-duanxianxia-clone-design.md）：`my_layouter_flow` 流式换行布局器（行高取最大、LEFT/CENTER 行对齐、PX/% 尺寸、FLEX 按 AUTO、`flow_measure` 内容测高）；`my_rich_label` 行内多段富文本（段级颜色 + 1px 二次绘制伪粗体、垂直居中、超宽截断）；`my_scroll_view` 通用滚动容器（单内容子树、wheel + 外挂 scroll_bar 双向同步无反馈环、clip 复用 paint 既有机制零新代码、内容高显式/flow measure/rect 三级来源）；hover 状态机收进分发器（`hovered` 弱引用 + hover_enter/leave 事件 + widget 基类 `hovered` 标志驱动 MY_STATE_HOVER 样式槽，grab 期间跟随被压控件、UP 按落点 re-hit；button 迁移修掉"移出不复位"旧缺陷）。测试：flow 9 + rich_label 5 + scroll_view 6 + hover 4 全绿。
 
 ## 性能基线汇总（M13d 刷新，GCC 16，-O0 Debug，本机）
 
@@ -59,4 +60,4 @@
 | list_view 万行滚动（固定/变高） | 0.002 ms/次（~22 行控件） |
 | 1051 控件构建 / relayout / 10 万 hit_test | 0.36 / 0.06 / 27.1 ms |
 
-- **M14+ 候选**：wayland text-input-v3、候选窗内嵌、IM 重启（XRegisterIMInstantiateCallback）、IME 真实打字自动化；盒式降采样积分图（SAT）路线、fractional-scale/跨屏/RandR 多屏、真高分屏实测；竖排、自由合字（Lam-Alef 之外）、UAX#14 全规则、wrap+RTL 混排视觉行级重排；INCR 接收端并发、wayland 剪贴板焦点握手实测；菜单悬停开级联/级联深度>3/ESC 焦点回退父层、dialog 拖拽移动（PAL `move` 槽已备）。**SDK 顺延**：iOS/HarmonyOS/Android/Web/win32/sdl2 port、Metal backend、FreeBSD/linux_fb 实机复核。
+- **M14b+ 候选**：duanxianxia 首页复刻（M14b 骨架/M14c 直播面板+股票池/M14d 交互收尾，spec 已批准）；wayland text-input-v3、候选窗内嵌、IM 重启（XRegisterIMInstantiateCallback）、IME 真实打字自动化；盒式降采样积分图（SAT）路线、fractional-scale/跨屏/RandR 多屏、真高分屏实测；竖排、自由合字（Lam-Alef 之外）、UAX#14 全规则、wrap+RTL 混排视觉行级重排；INCR 接收端并发、wayland 剪贴板焦点握手实测；菜单悬停开级联/级联深度>3/ESC 焦点回退父层、dialog 拖拽移动（PAL `move` 槽已备）。**SDK 顺延**：iOS/HarmonyOS/Android/Web/win32/sdl2 port、Metal backend、FreeBSD/linux_fb 实机复核。

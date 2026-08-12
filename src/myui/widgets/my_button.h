@@ -20,7 +20,7 @@ typedef struct my_button_t {
   my_color_t color_pressed;
   my_color_t color_disabled;
   bool pressed;               /**< pointer is down inside */
-  bool hover;                 /**< pointer is over */
+  /* hover comes from the base widget (dispatcher-maintained, M14a) */
 } my_button_t;
 
 /** @brief Create a button (NULL allocator = default, NULL text allowed). */

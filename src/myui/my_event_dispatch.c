@@ -10,6 +10,7 @@ void my_event_dispatcher_init(my_event_dispatcher_t* dispatcher,
     dispatcher->root = root;
     dispatcher->grabbed = NULL;
     dispatcher->focused = NULL;
+    dispatcher->hovered = NULL;
   }
 }
 
@@ -119,6 +120,27 @@ static my_widget_t* nearest_focusable(my_widget_t* w) {
   return w;
 }
 
+/** @brief Switch the hover target (M14a): clears the old widget's
+ * `hovered` flag (emitting "hover_leave"), sets the new one (emitting
+ * "hover_enter"), invalidating both so the MY_STATE_HOVER style slot
+ * takes effect. While a grab is active the grabbed widget keeps hover. */
+static void hover_update(my_event_dispatcher_t* d, my_widget_t* target) {
+  if (d->hovered == target) {
+    return;
+  }
+  if (d->hovered != NULL) {
+    d->hovered->hovered = false;
+    my_widget_invalidate(d->hovered, NULL);
+    my_emitter_emit(d->hovered->emitter, "hover_leave", NULL);
+  }
+  d->hovered = target;
+  if (target != NULL) {
+    target->hovered = true;
+    my_widget_invalidate(target, NULL);
+    my_emitter_emit(target->emitter, "hover_enter", NULL);
+  }
+}
+
 /** @brief Switch key focus, emitting "blur"/"focus" on the widgets. */
 static void set_focus(my_event_dispatcher_t* d, my_widget_t* widget) {
   if (d->focused == widget) {
@@ -152,6 +174,7 @@ bool my_event_dispatch(my_event_dispatcher_t* dispatcher,
       target = my_widget_hit_test(dispatcher->root, event->u.pointer.x,
                                   event->u.pointer.y);
       dispatcher->grabbed = target;
+      hover_update(dispatcher, target);
       if (target != NULL) {
         set_focus(dispatcher, nearest_focusable(target));
         return deliver(target, event);
@@ -168,6 +191,7 @@ bool my_event_dispatch(my_event_dispatcher_t* dispatcher,
         target = my_widget_hit_test(dispatcher->root, event->u.pointer.x,
                                     event->u.pointer.y);
       }
+      hover_update(dispatcher, target);
       return target != NULL ? deliver(target, event) : false;
     case MY_EVENT_POINTER_UP:
       target = dispatcher->grabbed;
@@ -176,6 +200,10 @@ bool my_event_dispatch(my_event_dispatcher_t* dispatcher,
                                     event->u.pointer.y);
       }
       dispatcher->grabbed = NULL;
+      /* the grab kept hover on the pressed widget; re-hit on release */
+      hover_update(dispatcher,
+                   my_widget_hit_test(dispatcher->root, event->u.pointer.x,
+                                      event->u.pointer.y));
       return target != NULL ? deliver(target, event) : false;
     case MY_EVENT_KEY_DOWN:
       if (event->u.key.key == MY_KEY_TAB) {
@@ -230,5 +258,11 @@ void my_event_dispatcher_forget(my_event_dispatcher_t* dispatcher,
   if (dispatcher->focused != NULL &&
       is_self_or_descendant(dispatcher->focused, widget)) {
     dispatcher->focused = NULL;
+  }
+  if (dispatcher->hovered != NULL &&
+      is_self_or_descendant(dispatcher->hovered, widget)) {
+    /* no hover_leave: the widget is leaving the tree */
+    dispatcher->hovered->hovered = false;
+    dispatcher->hovered = NULL;
   }
 }

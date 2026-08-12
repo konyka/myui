@@ -43,6 +43,34 @@ my_layouter_t* my_layouter_default(void);
 my_layouter_t* my_layouter_linear_create(const my_allocator_t* allocator,
                                          bool horizontal, int32_t spacing);
 
+/** @brief Flow layouter row alignment (M14a). */
+typedef enum my_flow_align_t {
+  MY_FLOW_ALIGN_LEFT = 0, /**< rows start at the left edge */
+  MY_FLOW_ALIGN_CENTER    /**< rows are centered horizontally */
+} my_flow_align_t;
+
+/**
+ * @brief Flow layouter (M14a): children are placed left-to-right with
+ * h_spacing between them; a child that does not fit the remaining row
+ * width wraps to the next row (v_spacing between rows). Row height =
+ * tallest child in the row; align controls each row's horizontal
+ * alignment. Child sizing: w/h layout_params PX or % (of the parent's
+ * width/height); AUTO keeps the current rect size; FLEX is meaningless
+ * in flow and treated as AUTO. The layouter only positions children —
+ * the parent's height is NOT adjusted; use my_layouter_flow_measure()
+ * for the content height (e.g. scroll_view content).
+ */
+my_layouter_t* my_layouter_flow_create(const my_allocator_t* allocator,
+                                       int32_t h_spacing, int32_t v_spacing,
+                                       my_flow_align_t align);
+
+/**
+ * @brief Total content height the flow layouter would produce for
+ * parent's children at the parent's current width (no rects are
+ * changed). Returns 0 when parent has no flow layouter attached.
+ */
+int32_t my_layouter_flow_measure(my_widget_t* parent);
+
 /** @brief Attach a layouter (takes ownership; NULL resets to absolute). */
 my_ret_t my_widget_set_layouter(my_widget_t* widget, my_layouter_t* layouter);
 

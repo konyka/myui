@@ -14,7 +14,7 @@ static my_widget_state_t button_state(my_button_t* b) {
   if (b->pressed) {
     return MY_STATE_PRESSED;
   }
-  if (b->hover) {
+  if (w->hovered) { /* dispatcher-maintained (M14a) */
     return MY_STATE_HOVER;
   }
   return MY_STATE_NORMAL;
@@ -97,15 +97,6 @@ static my_ret_t button_on_event(my_widget_t* widget, const my_event_t* event) {
         my_emitter_emit(widget->emitter, "click", (void*)event);
       }
       return MY_RET_OK;
-    case MY_EVENT_POINTER_MOVE: {
-      bool inside = button_point_inside(widget, event->u.pointer.x,
-                                        event->u.pointer.y);
-      if (inside != b->hover) {
-        b->hover = inside;
-        my_widget_invalidate(widget, NULL);
-      }
-      return MY_RET_FAIL; /* hover is not consumed */
-    }
     default:
       return MY_RET_FAIL;
   }

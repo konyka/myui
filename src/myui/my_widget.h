@@ -79,6 +79,8 @@ struct my_widget_t {
   bool enable;
   bool focusable;
   bool dirty;                       /**< needs repaint */
+  bool hovered;  /**< pointer is over (dispatcher-maintained, M14a);
+                  * drives the MY_STATE_HOVER style slot */
   bool need_layout;                 /**< children need re-layout */
   bool floating;  /**< overlay/popup child: layouters skip it, rect is
                        * set absolutely by the owner (M13c) */
