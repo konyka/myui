@@ -6,7 +6,7 @@
 
 #include <string.h>
 
-#define MY_ANIM_TICK_MS 16
+#define MY_ANIM_TICK_MS 33 /* 30 fps frame cap (matches the wm paint tick) */
 
 /* ---------------- easing ---------------- */
 

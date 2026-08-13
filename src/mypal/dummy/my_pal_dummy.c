@@ -18,6 +18,7 @@ typedef struct dummy_pal_t {
   void* handler_ctx;
   char* clipboard;                    /**< in-memory clipboard text */
   float scale;                        /**< injectable (M12c, default 1) */
+  bool needs_csd;  /**< injectable (M16, default false = zero regression) */
 } dummy_pal_t;
 
 static dummy_pal_t* pal_from(my_pal_t* pal) {
@@ -39,6 +40,7 @@ typedef struct dummy_window_t {
   int32_t ime_spot_y;
   int32_t pos_x; /**< last move (M13c, for tests) */
   int32_t pos_y;
+  uint32_t begin_move_count; /**< begin_move calls (M16, for tests) */
 } dummy_window_t;
 
 static my_ret_t dummy_win_set_title(my_pal_window_t* win, const char* title) {
@@ -122,11 +124,21 @@ static my_ret_t dummy_win_move(my_pal_window_t* win, int32_t x, int32_t y) {
   return MY_RET_OK;
 }
 
+static my_ret_t dummy_win_begin_move(my_pal_window_t* win) {
+  dummy_window_t* w = (dummy_window_t*)win;
+  w->begin_move_count++; /* recorded for tests (M16) */
+  return MY_RET_OK;
+}
+
+static bool dummy_needs_csd(my_pal_t* pal) {
+  return pal_from(pal)->needs_csd; /* injectable test hook (M16) */
+}
+
 static const my_pal_window_vtable_t s_dummy_window_vtable = {
     dummy_win_set_title, dummy_win_resize,  dummy_win_show,
     dummy_win_get_size,  dummy_win_get_lcd, dummy_win_destroy,
     dummy_win_gl_enable, dummy_win_ime_set_spot,
-    dummy_win_move};
+    dummy_win_move,      dummy_win_begin_move};
 
 static my_pal_window_t* dummy_window_create(my_pal_t* pal, int32_t w, int32_t h,
                                             const char* title) {
@@ -348,7 +360,7 @@ static void dummy_pal_destroy(my_pal_t* pal) {
 static const my_pal_vtable_t s_dummy_pal_vtable = {
     dummy_window_create, dummy_main_loop_create, dummy_time_now_ms,
     dummy_set_event_handler, dummy_clipboard_set, dummy_clipboard_get,
-    dummy_get_scale, dummy_pal_destroy};
+    dummy_get_scale, dummy_pal_destroy, dummy_needs_csd};
 
 void my_pal_dummy_set_scale_factor(my_pal_t* pal, float scale) {
   if (pal != NULL && scale > 0.0f) {
@@ -393,4 +405,14 @@ void my_pal_dummy_set_now_ms(my_pal_t* pal, uint64_t now_ms) {
   if (pal != NULL && pal->vtable == &s_dummy_pal_vtable) {
     pal_from(pal)->now_ms = now_ms;
   }
+}
+
+void my_pal_dummy_set_needs_csd(my_pal_t* pal, bool needs) {
+  if (pal != NULL && pal->vtable == &s_dummy_pal_vtable) {
+    pal_from(pal)->needs_csd = needs;
+  }
+}
+
+uint32_t my_pal_dummy_begin_move_count(my_pal_window_t* win) {
+  return win != NULL ? ((dummy_window_t*)win)->begin_move_count : 0;
 }

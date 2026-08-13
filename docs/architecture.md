@@ -277,6 +277,15 @@ PAL port 矩阵：
 - **tooltip（窗口级悬停浮层）**：widget 新 owned `tooltip` 字符串（set/get，destroy 释放；XML 通用属性 `tooltip="..."`）；my_window 在事件分发**前**做 hover 跟踪（POINTER_MOVE hit_test 后沿祖先找带 tooltip 者，排除 tip 自身）：目标变更→取消 500ms one-shot 定时器（win->loop，回调返回 FAIL 即单次）并隐藏旧 tip，到时→在光标 +(12,16) 处弹 floating "tooltip" 小控件（越界钳进窗口、底部越界翻到光标上方）；POINTER_DOWN/KEY_DOWN 立即取消+隐藏；目标子树被移除经 removed_hook 清态（tip_hide 先清指针再 remove 防重入）；窗口 destroy 取消定时器并收 tip（window/tree 各持一引用，平衡释放）。
 - **主题默认色**：menu_box/menu_item（hover 高亮）/dialog_content/tooltip 四组键入 `my_theme_default_create`；demo_widgets 增 Dialog/Menu 按钮、各按钮 tooltip，dummy dump 出 scrim/dialog/menu/tooltip 四张目检图。级联深度>3、菜单鼠标悬停开级联（现要点/Enter）、dialog 拖拽移动为 TODO。
 
+## 客户端装饰（CSD）标题栏（M16）
+
+- **动机（实测）**：GNOME/mutter 的 wayland 会话对 plain xdg-shell 客户端**不提供 SSD**（registry 不广告 zxdg_decoration_manager_v1）——窗口无标题栏、无法拖动。结论：必须由客户端自绘装饰。
+- **PAL 能力槽**：pal vtable 新 `needs_client_decoration`（wayland=true；x11/dummy/linux_fb=false；NULL 槽安全返回 false，`my_pal_needs_client_decoration` 包装）；window vtable 新 `begin_move`（wayland = `xdg_toplevel_move(toplevel, seat, last_button_serial)`，serial 在 on_pointer_button 里记录；x11 由 WM 管移动为 noop；dummy 记录次数供测试）。
+- **my_window 结构**：`my_pal_needs_client_decoration(pal)` 为真时，root 挂垂直 linear 布局，下挂 `csd_bar`（h:36：#3C4043 深灰底、居中白色 13px 标题——窗口新增 owned `title` 副本、右侧 32px "×" 关闭钮，on_layout 里贴右缘）+ `csd_content`（h:1f 普通容器）。**`my_window_widget(win)` 在 CSD 模式返回内容容器**（非 CSD 返回 root，行为不变）；paint/hit/dispatch 仍走 root。tooltip/menu 浮层是 `floating`，linear 布局跳过它们，挂哪层都安全。
+- **交互**：栏体 POINTER_DOWN → `begin_move`（关闭钮是子控件先吃事件，天然排除）；关闭钮 click → 经 `win->wm`（wm_open 时设置，close/destroy 时清 NULL + 吸收 CSD create ref）**延迟 1ms 定时器**关闭（同步关闭会在 dispatch 中途释放控件树，与 dialog 延迟关闭同因同构）；无 wm 时 no-op（注释注明）。
+- **引用计数契约**：通用模式 `unref(my_window_widget(win))` 在 CSD 下落在内容容器上——容器在 setup 时多拿一引用与之平衡；窗口 create ref 由 wm close/destroy 对 CSD 窗口多 unref 一次吸收（代码注释钉死），泄漏测试（debug allocator）固化全路径平衡。dialog 自动获得 CSD（拖动 + 关闭钮）。
+- **测试钩子**：dummy port `my_pal_dummy_set_needs_csd` / `my_pal_dummy_begin_move_count`。最大化/最小化钮、边缘 resize、双击最大化为 TODO。
+
 ## 框架补齐：flow / rich_label / scroll_view / hover（M14a）
 
 - **flow 流式布局器**（my_layout.c 扩展）：`my_layouter_flow_create(alloc, h_spacing, v_spacing, align)`——子控件按声明宽度横排，`x + cw > 父宽` 且行非空则换行（恰好放下不换行）；行高=行内最高子控件；`MY_FLOW_ALIGN_LEFT/CENTER` 控制每行水平对齐（CENTER 在行收尾时按行宽回溯偏移）。子控件尺寸：layout_params 的 PX/% （% 相对父宽/高），AUTO=保持当前 rect，**FLEX 在 flow 里无意义按 AUTO 处理**；invisible/floating 跳过（同 linear）。只定位子控件、**不改父高**：`my_layouter_flow_measure(parent)` 用同一走行算法纯计算内容总高（父未挂 flow 返回 0），供 scroll_view 等取内容尺寸。

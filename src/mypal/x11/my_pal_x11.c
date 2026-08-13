@@ -134,7 +134,24 @@ static const my_lcd_vtable_t s_x11_lcd_vtable = {
 
 static my_ret_t x11_win_set_title(my_pal_window_t* win, const char* title) {
   x11_window_t* w = (x11_window_t*)win;
-  XStoreName(w->pal->display, w->xwin, title != NULL ? title : "");
+  const char* t = title != NULL ? title : "";
+  Display* dpy = w->pal->display;
+  XTextProperty prop;
+  /* WM_NAME as COMPOUND_TEXT (many WMs prefer it over _NET_WM_NAME) */
+  if (Xutf8TextListToTextProperty(dpy, (char**)&t, 1, XUTF8StringStyle,
+                                  &prop) == Success) {
+    XSetWMName(dpy, w->xwin, &prop);
+    XFree(prop.value);
+  } else {
+    XStoreName(dpy, w->xwin, t);
+  }
+  /* UTF-8 title for modern WMs (XStoreName garbles non-latin1 text) */
+  {
+    Atom net_name = XInternAtom(dpy, "_NET_WM_NAME", False);
+    XChangeProperty(dpy, w->xwin, net_name, w->pal->atom_utf8, 8,
+                    PropModeReplace, (const unsigned char*)t,
+                    (int)strlen(t));
+  }
   return MY_RET_OK;
 }
 
@@ -382,11 +399,22 @@ static my_ret_t x11_win_move(my_pal_window_t* win, int32_t x, int32_t y) {
   return MY_RET_OK;
 }
 
+/** @brief M16: the WM owns interactive move on x11 (SSD) — noop. */
+static my_ret_t x11_win_begin_move(my_pal_window_t* win) {
+  (void)win;
+  return MY_RET_OK;
+}
+
+static bool x11_needs_csd(my_pal_t* pal) {
+  (void)pal;
+  return false; /* WMs decorate x11 windows (SSD) */
+}
+
 static const my_pal_window_vtable_t s_x11_window_vtable = {
     x11_win_set_title, x11_win_resize,  x11_win_show,
     x11_win_get_size,  x11_win_get_lcd, x11_win_destroy,
     x11_win_gl_enable, x11_win_ime_set_spot,
-    x11_win_move};
+    x11_win_move,      x11_win_begin_move};
 
 static my_pal_window_t* x11_window_create(my_pal_t* pal, int32_t w, int32_t h,
                                           const char* title) {
@@ -1194,7 +1222,7 @@ static void x11_pal_destroy(my_pal_t* pal) {
 static const my_pal_vtable_t s_x11_pal_vtable = {
     x11_window_create, x11_main_loop_create, x11_pal_time_now_ms,
     x11_pal_set_event_handler, x11_clipboard_set, x11_clipboard_get,
-    x11_get_scale, x11_pal_destroy};
+    x11_get_scale, x11_pal_destroy, x11_needs_csd};
 
 my_pal_t* my_pal_x11_create(const my_allocator_t* allocator) {
   x11_pal_t* p;

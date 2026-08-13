@@ -37,4 +37,11 @@ void my_pal_dummy_inject_event(my_pal_t* pal, my_pal_window_t* win,
  */
 uint32_t my_pal_main_loop_pump_n(my_pal_main_loop_t* loop, uint32_t n);
 
+/** @brief Test hook (M16): pretend the compositor gives no SSD, so
+ * windows are created with client-side decoration. Default false. */
+void my_pal_dummy_set_needs_csd(my_pal_t* pal, bool needs);
+
+/** @brief Test hook (M16): how often begin_move was requested. */
+uint32_t my_pal_dummy_begin_move_count(my_pal_window_t* win);
+
 #endif /* MY_PAL_DUMMY_H */

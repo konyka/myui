@@ -45,7 +45,12 @@
 - 窗口 vtable `ime_set_spot(x, y)`（逻辑坐标）：控件在焦点/光标移动时上报，port 转换成物理坐标喂候选窗锚点；无 IME 的 port 打桩空函数。
 - x11 参考实现 `my_pal_x11_ime.c`（XIM）：XOpenIM → 每窗口 XIC（优先 PreeditCallbacks 自绘预编辑，回落 PreeditNothing 只收提交）→ KeyPress 先 XFilterEvent 再 Xutf8LookupString（多字节结果=提交）→ FocusIn/Out 对 IC 聚焦。IM 不在时一切照旧。
 - **手动验证步骤**（x11 + ibus）：`./build-c99/demos/demo_widgets/demo_widgets` → 点击文本框聚焦 → Ctrl+Space 激活 ibus → 打拼音选候选 → 提交：中文落进控件、可 Ctrl+Z 单步撤销；候选窗跟随光标（spot）。
-- wayland 对应物是 text-input-v3 协议（TODO；当前 wayland port 打桩）。
+- wayland 对应物是 text-input-v3 协议（已实现：pending 状态 done 前聚合，经 my_window_on_pal_event 转发到焦点控件）。
+
+## 装饰/CSD 决策点（M16）
+
+- pal vtable `needs_client_decoration`：**合成器/WM 给不给窗口装饰（SSD）**——给（x11 各 WM、windows/macOS）返回 false；不给（mutter 的 plain xdg-shell）返回 true，my_window 会自绘标题栏（拖动 + 关闭）。嵌入式/全屏 port（linux_fb 类）返回 false（根本没有装饰概念）。
+- 返回 true 的 port 必须实现窗口 vtable `begin_move`：记录最近一次指针 button 的 serial/句柄，调入合成器的交互式移动（wayland 参考实现 = `xdg_toplevel_move`）。返回 false 的 port 打桩 noop 即可。
 
 ## GL 窗口集成（M10c，可选）
 

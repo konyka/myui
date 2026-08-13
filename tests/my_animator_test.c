@@ -98,7 +98,7 @@ static void test_on_done_and_on_update(void) {
 
   my_animator_animate(c.wm->anim_mgr, c.btn, "x", 50, 0, 40, 0,
                       my_easing_linear, 0, false, on_update, on_done, NULL);
-  my_pal_dummy_set_now_ms(c.pal, 20);
+  my_pal_dummy_set_now_ms(c.pal, 40); /* past the first 33ms anim tick */
   my_pal_main_loop_run(c.loop);
   TEST_ASSERT(g_updates > 0);
   my_pal_dummy_set_now_ms(c.pal, 100);
@@ -134,7 +134,7 @@ static void test_yoyo_repeat(void) {
   my_animator_animate(c.wm->anim_mgr, c.btn, "x", 100, 0, 50, 0,
                       my_easing_linear, 1, true, NULL, on_done, NULL);
 
-  my_pal_dummy_set_now_ms(c.pal, 25); /* forward, t=0.5 */
+  my_pal_dummy_set_now_ms(c.pal, 40); /* forward (first 33ms tick fired) */
   my_pal_main_loop_run(c.loop);
   TEST_ASSERT(c.btn->rect.x > 0);
 

@@ -27,14 +27,23 @@ elseif(MYUI_PAL_RESOLVED STREQUAL "wayland")
   set(XDG_SHELL_XML "${WAYLAND_PROTOCOLS_DIR}/stable/xdg-shell/xdg-shell.xml")
   set(XDG_SHELL_H "${CMAKE_CURRENT_BINARY_DIR}/xdg-shell-client-protocol.h")
   set(XDG_SHELL_C "${CMAKE_CURRENT_BINARY_DIR}/xdg-shell-protocol.c")
+  set(TEXT_INPUT_XML
+      "${WAYLAND_PROTOCOLS_DIR}/unstable/text-input/text-input-unstable-v3.xml")
+  set(TEXT_INPUT_H
+      "${CMAKE_CURRENT_BINARY_DIR}/text-input-unstable-v3-client-protocol.h")
+  set(TEXT_INPUT_C
+      "${CMAKE_CURRENT_BINARY_DIR}/text-input-unstable-v3-protocol.c")
   add_custom_command(
-    OUTPUT ${XDG_SHELL_H} ${XDG_SHELL_C}
+    OUTPUT ${XDG_SHELL_H} ${XDG_SHELL_C} ${TEXT_INPUT_H} ${TEXT_INPUT_C}
     COMMAND ${WAYLAND_SCANNER} client-header ${XDG_SHELL_XML} ${XDG_SHELL_H}
     COMMAND ${WAYLAND_SCANNER} private-code ${XDG_SHELL_XML} ${XDG_SHELL_C}
-    DEPENDS ${XDG_SHELL_XML}
-    COMMENT "Generating xdg-shell protocol code")
+    COMMAND ${WAYLAND_SCANNER} client-header ${TEXT_INPUT_XML} ${TEXT_INPUT_H}
+    COMMAND ${WAYLAND_SCANNER} private-code ${TEXT_INPUT_XML} ${TEXT_INPUT_C}
+    DEPENDS ${XDG_SHELL_XML} ${TEXT_INPUT_XML}
+    COMMENT "Generating xdg-shell and text-input-v3 protocol code")
   list(APPEND MYPAL_SOURCES
-    wayland/my_pal_wayland.c wayland/my_pal_wayland_keymap.c ${XDG_SHELL_C})
+    wayland/my_pal_wayland.c wayland/my_pal_wayland_keymap.c ${XDG_SHELL_C}
+    ${TEXT_INPUT_C})
 endif()
 
 add_library(mypal STATIC ${MYPAL_SOURCES})

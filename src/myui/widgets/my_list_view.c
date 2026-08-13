@@ -265,11 +265,16 @@ static void lv_on_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
 static my_ret_t lv_on_event(my_widget_t* widget, const my_event_t* event) {
   my_list_view_t* lv = (my_list_view_t*)widget;
   switch (event->type) {
-    case MY_EVENT_POINTER_WHEEL:
+    case MY_EVENT_POINTER_WHEEL: {
+      int32_t before = lv->scroll_offset;
       lv->scroll_offset -= event->u.pointer.delta * lv->row_height * 3;
       lv_clamp_scroll(lv);
+      if (lv->scroll_offset == before) {
+        return MY_RET_FAIL; /* at the limit: bubble to outer scroll containers */
+      }
       lv_on_layout_changed(lv);
       return MY_RET_OK;
+    }
     case MY_EVENT_POINTER_DOWN:
       lv->drag_y = event->u.pointer.y;
       lv->drag_start_offset = lv->scroll_offset;

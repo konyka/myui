@@ -2,6 +2,8 @@
  * @file my_window_manager.c
  * @brief Window stack manager + my_app_run entry point.
  */
+#include <stdio.h>
+#include <stdlib.h>
 #include "myui/my_window_manager.h"
 
 #include "myui/my_animator.h"
@@ -30,7 +32,22 @@ static my_ret_t wm_on_pal_event(void* ctx, my_pal_window_t* pal_window,
   }
   win = wm_find_window(wm, pal_window);
   if (win == NULL) {
+    if (getenv("MYUI_WL_TRACE") != NULL &&
+        (event->type == MY_EVENT_POINTER_DOWN ||
+         event->type == MY_EVENT_POINTER_UP)) {
+      fprintf(stderr, "[wltrace] wm route: pal_window=%p NOT FOUND type=%d\n",
+              (void*)pal_window, (int)event->type);
+    }
     return MY_RET_OK;
+  }
+  if (getenv("MYUI_WL_TRACE") != NULL &&
+      (event->type == MY_EVENT_POINTER_DOWN ||
+       event->type == MY_EVENT_POINTER_UP)) {
+    my_window_t* t = my_window_manager_top(wm);
+    fprintf(stderr,
+            "[wltrace] wm route: win=%p top=%p top_modal=%d type=%d xy=(%d,%d)\n",
+            (void*)win, (void*)t, t != NULL ? (int)t->modal : -1,
+            (int)event->type, event->u.pointer.x, event->u.pointer.y);
   }
   if (event->type == MY_EVENT_QUIT) {
     my_window_manager_close(wm, win);
@@ -89,7 +106,7 @@ my_window_manager_t* my_window_manager_create(const my_allocator_t* allocator,
     my_mem_free(allocator, wm);
     return NULL;
   }
-  wm->paint_timer_id = my_pal_main_loop_add_timer(loop, wm_paint_tick, wm, 16);
+  wm->paint_timer_id = my_pal_main_loop_add_timer(loop, wm_paint_tick, wm, 33);
   my_pal_set_event_handler(pal, wm_on_pal_event, wm);
   return wm;
 }
@@ -105,6 +122,7 @@ my_ret_t my_window_manager_open(my_window_manager_t* wm, my_window_t* win) {
   }
   ((my_widget_t*)win)->anim_mgr = wm->anim_mgr;
   win->loop = wm->loop;
+  win->wm = wm; /* M16: CSD close button routes through this */
   my_pal_window_show(win->pal_window);
   my_widget_invalidate((my_widget_t*)win, NULL);
   return MY_RET_OK;
@@ -119,7 +137,15 @@ my_ret_t my_window_manager_close(my_window_manager_t* wm, my_window_t* win) {
   for (i = 0; i < n; i++) {
     if (my_darray_get(wm->windows, i) == win) {
       my_darray_remove_at(wm->windows, i);
+      win->wm = NULL; /* no longer managed */
       my_widget_unref((my_widget_t*)win);
+      if (win->csd) {
+        /* M16 CSD: the app's `unref(my_window_widget(win))` balances the
+         * content container's extra ref, NOT the window's create ref —
+         * the manager absorbs the create ref here so the window dies
+         * with its last manager reference like non-CSD windows. */
+        my_widget_unref((my_widget_t*)win);
+      }
       if (my_darray_size(wm->windows) == 0) {
         wm->quit_requested = true;
         my_pal_main_loop_quit(wm->loop);
@@ -170,7 +196,11 @@ void my_window_manager_destroy(my_window_manager_t* wm) {
     my_window_t* top =
         (my_window_t*)my_darray_get(wm->windows, my_darray_size(wm->windows) - 1);
     my_darray_remove_at(wm->windows, my_darray_size(wm->windows) - 1);
+    top->wm = NULL;
     my_widget_unref((my_widget_t*)top);
+    if (top->csd) {
+      my_widget_unref((my_widget_t*)top); /* M16: absorb the create ref */
+    }
   }
   my_animator_manager_destroy(wm->anim_mgr);
   wm->anim_mgr = NULL;

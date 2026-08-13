@@ -50,15 +50,28 @@ static uint32_t darken(uint32_t c) {
   return (r << 24) | (g << 16) | (b << 8) | (c & 0xFFu);
 }
 
+/** @brief Darken an rgba32 color to 93% (hover state, subtler than active). */
+static uint32_t darken_hover(uint32_t c) {
+  uint32_t r = (c >> 24) & 0xFF, g = (c >> 16) & 0xFF, b = (c >> 8) & 0xFF;
+  r = r * 93 / 100;
+  g = g * 93 / 100;
+  b = b * 93 / 100;
+  return (r << 24) | (g << 16) | (b << 8) | (c & 0xFFu);
+}
+
 static void stat_btn_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
   stat_btn_t* b = (stat_btn_t*)widget;
   const dxx_stat_t* s = b->stat;
   uint32_t bg = b->active ? darken(s->bg) : s->bg;
-  bool white_bg = s->bg == DXX_COLOR_WHITE;
+  bool white_bg;
   int32_t tw = 0, th = 0;
   int32_t vw = 0;
   float x;
   float y = ((float)widget->rect.h - 13.0f) / 2.0f;
+  if (!b->active && widget->hovered) {
+    bg = darken_hover(bg); /* hover feedback (M16) */
+  }
+  white_bg = s->bg == DXX_COLOR_WHITE; /* border decision uses base color */
   my_vgcanvas_set_fill_color(vg, my_color_from_rgba32(bg));
   my_vgcanvas_fill_rounded_rect(vg, &(my_rectf_t){0, 0, (float)widget->rect.w,
                                                   (float)widget->rect.h},

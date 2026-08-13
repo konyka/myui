@@ -214,12 +214,17 @@ static void test_nested_wheel_inner_first(void) {
   inject(&f, MY_EVENT_POINTER_WHEEL, 100, 100, -1);
   TEST_ASSERT_EQ_INT(my_scroll_view_get_offset(inner), 72);
   TEST_ASSERT_EQ_INT(my_scroll_view_get_offset(outer), 0);
-  /* inner at its end still consumes (no leak to the page) */
+  /* inner at its end: wheel bubbles to the outer page (standard nested
+   * scrolling; the old "inner always eats" semantics froze the page over
+   * any maxed-out panel) */
   my_scroll_view_set_offset(inner, 400);
   inject(&f, MY_EVENT_POINTER_WHEEL, 100, 100, -1);
   TEST_ASSERT_EQ_INT(my_scroll_view_get_offset(inner), 400);
+  TEST_ASSERT_EQ_INT(my_scroll_view_get_offset(outer), 72);
+  /* wheel up over outer-only area scrolls the page back */
+  inject(&f, MY_EVENT_POINTER_WHEEL, 300, 250, 1);
   TEST_ASSERT_EQ_INT(my_scroll_view_get_offset(outer), 0);
-  /* wheel over outer-only area scrolls the page */
+  /* and down again */
   inject(&f, MY_EVENT_POINTER_WHEEL, 300, 250, -1);
   TEST_ASSERT_EQ_INT(my_scroll_view_get_offset(outer), 72);
   fx_destroy(&f);

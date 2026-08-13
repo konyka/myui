@@ -18,6 +18,7 @@
 
 #include <poll.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
 #include <time.h>
@@ -36,10 +37,12 @@
 #endif
 
 #include "myc/my_darray.h"
+#include "myc/my_str.h"
 #include "mypal/wayland/my_pal_wayland_keymap.h"
 #include "myr/my_lcd_mem.h"
 
 #include "xdg-shell-client-protocol.h"
+#include "text-input-unstable-v3-client-protocol.h"
 
 /* ---------------- platform ---------------- */
 
@@ -69,6 +72,18 @@ typedef struct wl_pal_t {
   struct wl_data_source* data_source;    /**< our offer (owned, NULL ok) */
   struct wl_data_offer* selection_offer; /**< current selection (owned) */
   uint32_t kb_enter_serial;              /**< last keyboard enter serial */
+  uint32_t last_button_serial; /**< last pointer button serial (M16 CSD:
+                                * xdg_toplevel_move needs it) */
+  struct wl_window_t* kb_focus;          /**< window with keyboard focus */
+  /** @brief text-input-v3 (IME): pending state until done (M16). */
+  struct zwp_text_input_manager_v3* ti_mgr;
+  struct zwp_text_input_v3* ti;
+  char* ti_preedit;   /**< pending preedit text (owned, NULL = none) */
+  int32_t ti_preedit_caret_cp; /**< caret in codepoints */
+  bool ti_preedit_dirty;       /**< a preedit event arrived since last done */
+  char* ti_commit;    /**< pending commit text (owned, NULL = none) */
+  int32_t ti_spot_x, ti_spot_y; /**< last caret anchor (logical, per window) */
+  bool ti_spot_set;
 #if defined(MYUI_PAL_GL_EGL)
   EGLDisplay egl_dpy; /**< shared EGL display (lazy, EGL_NO_DISPLAY off) */
   EGLConfig egl_cfg;
@@ -83,6 +98,8 @@ static void dispatch_event(wl_pal_t* p, my_pal_window_t* win, my_event_t* e) {
   }
 }
 
+static bool wl_ti_ready(wl_pal_t* p); /* text-input-v3 (M16) */
+
 /* ---------------- window ---------------- */
 
 typedef struct wl_window_t {
@@ -96,6 +113,10 @@ typedef struct wl_window_t {
   int shm_fd;
   uint8_t* pixels;
   size_t shm_size;
+  uint8_t* shadow;  /**< CPU-side copy: all painting goes here, never into
+                         the attached shm buffer (single shm buffer painted
+                         while attached races the compositor scanout) */
+  bool pending;     /**< a frame was painted while buffer_busy */
   int32_t w, h;
   my_lcd_t* lcd;      /**< over pixels (owned wrapper) */
   bool configured;    /**< got first xdg_surface.configure */
@@ -110,8 +131,18 @@ typedef struct wl_window_t {
 } wl_window_t;
 
 static void present(wl_window_t* w) {
-  if (w->wlbuf == NULL || w->buffer_busy || !w->configured) {
+  if (w->wlbuf == NULL || !w->configured) {
     return;
+  }
+  if (w->buffer_busy) {
+    w->pending = true; /* flushed when the compositor releases the buffer */
+    return;
+  }
+  if (getenv("MYUI_WL_TRACE") != NULL) {
+    fprintf(stderr, "[wltrace] present: memcpy+commit win=%p\n", (void*)w);
+  }
+  if (w->shadow != NULL) {
+    memcpy(w->pixels, w->shadow, w->shm_size);
   }
   wl_surface_attach(w->surface, w->wlbuf, 0, 0);
   /* damage is in BUFFER (physical) coordinates */
@@ -143,6 +174,10 @@ static my_ret_t wl_lcd_begin(my_lcd_t* lcd, const my_rect_t* dirty) {
 static my_ret_t wl_lcd_end(my_lcd_t* lcd) {
   wl_lcd_t* x = (wl_lcd_t*)lcd;
   my_ret_t ret = my_lcd_end_frame(x->mem);
+  if (getenv("MYUI_WL_TRACE") != NULL) {
+    fprintf(stderr, "[wltrace] lcd_end win=%p busy=%d pending=%d\n",
+            (void*)x->win, (int)x->win->buffer_busy, (int)x->win->pending);
+  }
   present(x->win);
   return ret;
 }
@@ -194,6 +229,12 @@ static bool wl_buffer_create(wl_window_t* w) {
   w->wlbuf = wl_shm_pool_create_buffer(pool, 0, bw, bh, bw * 4,
                                        WL_SHM_FORMAT_XRGB8888);
   wl_shm_pool_destroy(pool);
+  my_mem_free(w->allocator, w->shadow);
+  w->shadow =
+      (uint8_t*)my_mem_calloc(w->allocator, 1, w->shm_size);
+  if (w->shadow == NULL) {
+    return false;
+  }
   return w->wlbuf != NULL;
 }
 
@@ -202,8 +243,15 @@ static bool wl_buffer_create(wl_window_t* w) {
 static void on_buffer_release(void* data, struct wl_buffer* buffer) {
   wl_window_t* w = (wl_window_t*)data;
   (void)buffer;
+  if (getenv("MYUI_WL_TRACE") != NULL) {
+    fprintf(stderr, "[wltrace] release win=%p pending=%d\n", (void*)w,
+            (int)w->pending);
+  }
   w->buffer_busy = false;
-  present(w); /* flush any frame skipped while busy */
+  if (w->pending) { /* flush the frame painted while the buffer was busy */
+    w->pending = false;
+    present(w);
+  }
 }
 
 static const struct wl_buffer_listener BUFFER_LISTENER = {
@@ -243,7 +291,16 @@ static void on_toplevel_configure(void* data, struct xdg_toplevel* tl,
                                   struct wl_array* states) {
   wl_window_t* w = (wl_window_t*)data;
   (void)tl;
-  (void)states;
+  if (getenv("MYUI_WL_TRACE") != NULL && states != NULL) {
+    uint32_t* st;
+    fprintf(stderr, "[wltrace] toplevel configure %dx%d states:", width,
+            height);
+    for (st = states->data; (char*)st < (char*)states->data + states->size;
+         st++) {
+      fprintf(stderr, " %u", *st);
+    }
+    fprintf(stderr, "\n");
+  }
   if (width > 0 && height > 0 && (width != w->w || height != w->h)) {
     my_event_t e;
     /* resize: recreate the shm buffer + lcd at the new size */
@@ -279,7 +336,7 @@ static void on_toplevel_configure(void* data, struct xdg_toplevel* tl,
         xl->mem = my_lcd_mem_create_from_buffer(w->allocator, (uint32_t)bw,
                                                 (uint32_t)bh,
                                                 MY_PIXEL_FORMAT_BGRA8888,
-                                                w->pixels, (uint32_t)bw * 4u);
+                                                w->shadow, (uint32_t)bw * 4u);
         xl->win = w;
         w->lcd = (my_lcd_t*)xl;
       }
@@ -334,6 +391,9 @@ static void on_pointer_enter(void* data, struct wl_pointer* ptr,
   wl_window_t* w;
   (void)ptr;
   (void)serial;
+  if (getenv("MYUI_WL_TRACE") != NULL) {
+    fprintf(stderr, "[wltrace] enter surf=%p\n", (void*)surface);
+  }
   g_last_surface = surface;
   w = find_by_surface(p, surface);
   if (w != NULL) {
@@ -348,6 +408,9 @@ static void on_pointer_leave(void* data, struct wl_pointer* ptr,
   (void)ptr;
   (void)serial;
   (void)surface;
+  if (getenv("MYUI_WL_TRACE") != NULL) {
+    fprintf(stderr, "[wltrace] leave surf=%p\n", (void*)surface);
+  }
   g_last_surface = NULL;
 }
 
@@ -363,6 +426,13 @@ static void on_pointer_motion(void* data, struct wl_pointer* ptr,
   }
   w->pointer_x = wl_fixed_to_int(sx);
   w->pointer_y = wl_fixed_to_int(sy);
+  {
+    static int g_motion_n;
+    if (getenv("MYUI_WL_TRACE") != NULL && (g_motion_n++ % 25) == 0) {
+      fprintf(stderr, "[wltrace] motion n=%d win=%p xy=(%d,%d)\n",
+              g_motion_n, (void*)w, w->pointer_x, w->pointer_y);
+    }
+  }
   e = my_event_init(MY_EVENT_POINTER_MOVE);
   e.u.pointer.x = w->pointer_x;
   e.u.pointer.y = w->pointer_y;
@@ -376,8 +446,8 @@ static void on_pointer_button(void* data, struct wl_pointer* ptr,
   wl_window_t* w = find_by_surface(p, g_last_surface);
   my_event_t e;
   (void)ptr;
-  (void)serial;
   (void)time;
+  p->last_button_serial = serial; /* M16: interactive move/resize anchor */
   if (w == NULL) {
     return;
   }
@@ -387,6 +457,11 @@ static void on_pointer_button(void* data, struct wl_pointer* ptr,
   e.u.pointer.x = w->pointer_x;
   e.u.pointer.y = w->pointer_y;
   e.u.pointer.button = button == 0x111 ? 2 : (button == 0x112 ? 3 : 1);
+  if (getenv("MYUI_WL_TRACE") != NULL) {
+    fprintf(stderr, "[wltrace] button state=%u win=%p surf=%p xy=(%d,%d)\n",
+            state, (void*)w, (void*)g_last_surface, w->pointer_x,
+            w->pointer_y);
+  }
   dispatch_event(p, (my_pal_window_t*)w, &e);
 }
 
@@ -404,6 +479,10 @@ static void on_pointer_axis(void* data, struct wl_pointer* ptr, uint32_t time,
   e.u.pointer.x = w->pointer_x;
   e.u.pointer.y = w->pointer_y;
   e.u.pointer.delta = wl_fixed_to_int(value) < 0 ? 1 : -1;
+  if (getenv("MYUI_WL_TRACE") != NULL) {
+    fprintf(stderr, "[wltrace] wheel delta=%d win=%p\n",
+            (int)e.u.pointer.delta, (void*)w);
+  }
   dispatch_event(p, (my_pal_window_t*)w, &e);
 }
 
@@ -446,17 +525,19 @@ static void on_kb_enter(void* data, struct wl_keyboard* kb, uint32_t serial,
                         struct wl_surface* surface, struct wl_array* keys) {
   wl_pal_t* p = (wl_pal_t*)data;
   (void)kb;
-  (void)surface;
   (void)keys;
   p->kb_enter_serial = serial; /* needed by set_selection (M12b) */
+  p->kb_focus = find_by_surface(p, surface); /* key events route here */
 }
 
 static void on_kb_leave(void* data, struct wl_keyboard* kb, uint32_t serial,
                         struct wl_surface* surface) {
-  (void)data;
+  wl_pal_t* p = (wl_pal_t*)data;
   (void)kb;
   (void)serial;
-  (void)surface;
+  if (p->kb_focus != NULL && p->kb_focus->surface == surface) {
+    p->kb_focus = NULL;
+  }
 }
 
 static void on_kb_keymap(void* data, struct wl_keyboard* kb, uint32_t format,
@@ -500,7 +581,7 @@ static void on_kb_key(void* data, struct wl_keyboard* kb, uint32_t serial,
   (void)kb;
   (void)serial;
   (void)time;
-  if (p->xkb_state == NULL) {
+  if (p->xkb_state == NULL || p->kb_focus == NULL) {
     return;
   }
   sym = xkb_state_key_get_one_sym(p->xkb_state, key + 8);
@@ -508,7 +589,19 @@ static void on_kb_key(void* data, struct wl_keyboard* kb, uint32_t serial,
                                                            : MY_EVENT_KEY_UP);
   e.u.key.key = my_pal_wayland_key_from_keysym((uint32_t)sym);
   e.u.key.modifiers = 0;
-  dispatch_event(p, NULL, &e);
+  if (xkb_state_mod_name_is_active(p->xkb_state, XKB_MOD_NAME_SHIFT,
+                                   XKB_STATE_MODS_EFFECTIVE) > 0) {
+    e.u.key.modifiers |= MY_KEYMOD_SHIFT;
+  }
+  if (xkb_state_mod_name_is_active(p->xkb_state, XKB_MOD_NAME_CTRL,
+                                   XKB_STATE_MODS_EFFECTIVE) > 0) {
+    e.u.key.modifiers |= MY_KEYMOD_CTRL;
+  }
+  if (xkb_state_mod_name_is_active(p->xkb_state, XKB_MOD_NAME_ALT,
+                                   XKB_STATE_MODS_EFFECTIVE) > 0) {
+    e.u.key.modifiers |= MY_KEYMOD_ALT;
+  }
+  dispatch_event(p, (my_pal_window_t*)p->kb_focus, &e);
 }
 
 static void on_kb_modifiers(void* data, struct wl_keyboard* kb,
@@ -537,7 +630,123 @@ static const struct wl_keyboard_listener KEYBOARD_LISTENER = {
     .key = on_kb_key, .modifiers = on_kb_modifiers,
     .repeat_info = on_kb_repeat_info};
 
-/* ---------------- wl_data_device clipboard (M12b) ---------------- */
+/* ---------------- text-input-v3 (IME, M16) ---------------- */
+
+/** @brief Codepoint count of the first `byte_len` bytes of a UTF-8 string. */
+static int32_t ti_cps_of_prefix(const char* text, int32_t byte_len) {
+  int32_t i = 0, cps = 0;
+  while (text != NULL && i < byte_len && text[i] != '\0') {
+    i += my_str_utf8_char_len(text + i);
+    cps++;
+  }
+  return cps;
+}
+
+static void ti_set_str(const my_allocator_t* a, char** slot, const char* text) {
+  my_mem_free(a, *slot);
+  *slot = text != NULL ? (char*)my_strdup(a, text) : NULL;
+}
+
+static void ti_on_enter(void* data, struct zwp_text_input_v3* ti,
+                        struct wl_surface* surface) {
+  /* the IM focus entered our surface: enable input now (the spec wants
+   * enable after enter; enabling earlier is ignored by mutter) */
+  wl_pal_t* p = (wl_pal_t*)data;
+  (void)ti;
+  (void)surface;
+  zwp_text_input_v3_enable(p->ti);
+  if (p->ti_spot_set) { /* re-apply the caret anchor cached before enter */
+    zwp_text_input_v3_set_cursor_rectangle(p->ti, p->ti_spot_x, p->ti_spot_y,
+                                           1, 20);
+  }
+  zwp_text_input_v3_commit(p->ti);
+}
+static void ti_on_leave(void* data, struct zwp_text_input_v3* ti,
+                        struct wl_surface* surface) {
+  wl_pal_t* p = (wl_pal_t*)data;
+  (void)ti;
+  (void)surface;
+  zwp_text_input_v3_disable(p->ti);
+  zwp_text_input_v3_commit(p->ti);
+}
+static void ti_on_preedit(void* data, struct zwp_text_input_v3* ti,
+                          const char* text, int32_t cursor_begin,
+                          int32_t cursor_end) {
+  wl_pal_t* p = (wl_pal_t*)data;
+  (void)ti;
+  (void)cursor_end;
+  ti_set_str(p->allocator, &p->ti_preedit, text);
+  p->ti_preedit_caret_cp = ti_cps_of_prefix(p->ti_preedit, cursor_begin);
+  p->ti_preedit_dirty = true;
+}
+static void ti_on_commit(void* data, struct zwp_text_input_v3* ti,
+                         const char* text) {
+  wl_pal_t* p = (wl_pal_t*)data;
+  (void)ti;
+  ti_set_str(p->allocator, &p->ti_commit, text);
+}
+static void ti_on_delete_surrounding(void* data,
+                                     struct zwp_text_input_v3* ti,
+                                     uint32_t before, uint32_t after) {
+  /* not mapped to myui edit semantics yet (rarely sent by ibus) */
+  (void)data;
+  (void)ti;
+  (void)before;
+  (void)after;
+}
+static void ti_on_done(void* data, struct zwp_text_input_v3* ti,
+                       uint32_t serial) {
+  wl_pal_t* p = (wl_pal_t*)data;
+  (void)ti;
+  (void)serial;
+  if (p->kb_focus == NULL) {
+    p->ti_preedit_dirty = false;
+    return;
+  }
+  if (p->ti_commit != NULL) {
+    my_event_t e = my_event_init(MY_EVENT_IME_COMMIT);
+    e.u.ime.text = p->ti_commit;
+    dispatch_event(p, (my_pal_window_t*)p->kb_focus, &e);
+    ti_set_str(p->allocator, &p->ti_commit, NULL);
+    p->ti_preedit_dirty = true; /* commit clears any preedit too */
+  }
+  if (p->ti_preedit_dirty) {
+    my_event_t e = my_event_init(MY_EVENT_IME_PREEDIT);
+    e.u.ime.text = p->ti_preedit != NULL ? p->ti_preedit : "";
+    e.u.ime.cursor = p->ti_preedit_caret_cp;
+    dispatch_event(p, (my_pal_window_t*)p->kb_focus, &e);
+    p->ti_preedit_dirty = false;
+    if (p->ti_commit == NULL && p->ti_preedit != NULL &&
+        p->ti_preedit[0] == '\0') {
+      ti_set_str(p->allocator, &p->ti_preedit, NULL);
+    }
+  }
+}
+
+static const struct zwp_text_input_v3_listener TI_LISTENER = {
+    .enter = ti_on_enter,
+    .leave = ti_on_leave,
+    .preedit_string = ti_on_preedit,
+    .commit_string = ti_on_commit,
+    .delete_surrounding_text = ti_on_delete_surrounding,
+    .done = ti_on_done};
+
+/** @brief Lazily create the text input for the seat. */
+static bool wl_ti_ready(wl_pal_t* p) {
+  if (p->ti != NULL) {
+    return true;
+  }
+  if (p->ti_mgr == NULL || p->seat == NULL) {
+    return false;
+  }
+  p->ti = zwp_text_input_manager_v3_get_text_input(p->ti_mgr, p->seat);
+  if (p->ti != NULL) {
+    zwp_text_input_v3_add_listener(p->ti, &TI_LISTENER, p);
+  }
+  return p->ti != NULL;
+}
+
+
 
 static void on_ds_target(void* data, struct wl_data_source* src,
                          const char* mime) {
@@ -764,9 +973,15 @@ static void on_registry_global(void* data, struct wl_registry* registry,
   } else if (strcmp(interface, wl_seat_interface.name) == 0) {
     p->seat = (struct wl_seat*)wl_registry_bind(registry, name, &wl_seat_interface, 5);
     wl_seat_add_listener(p->seat, &SEAT_LISTENER, p);
+    wl_ti_ready(p); /* create the text-input object so enter events flow */
   } else if (strcmp(interface, wl_data_device_manager_interface.name) == 0) {
     p->data_mgr = (struct wl_data_device_manager*)wl_registry_bind(
         registry, name, &wl_data_device_manager_interface, 3);
+  } else if (strcmp(interface, zwp_text_input_manager_v3_interface.name) ==
+             0) {
+    p->ti_mgr = (struct zwp_text_input_manager_v3*)wl_registry_bind(
+        registry, name, &zwp_text_input_manager_v3_interface, 1);
+    wl_ti_ready(p); /* seat may already be bound (global order varies) */
   } else if (strcmp(interface, wl_output_interface.name) == 0 &&
              p->output == NULL) {
     p->output = (struct wl_output*)wl_registry_bind(registry, name,
@@ -791,6 +1006,7 @@ static const struct wl_registry_listener REGISTRY_LISTENER = {
 static my_ret_t wl_win_set_title(my_pal_window_t* win, const char* title) {
   wl_window_t* w = (wl_window_t*)win;
   xdg_toplevel_set_title(w->toplevel, title != NULL ? title : "");
+  xdg_toplevel_set_app_id(w->toplevel, "myui");
   return MY_RET_OK;
 }
 
@@ -852,6 +1068,10 @@ static void wl_win_destroy(my_pal_window_t* win) {
   }
   if (w->shm_fd >= 0) {
     close(w->shm_fd);
+  }
+  my_mem_free(w->allocator, w->shadow);
+  if (p->kb_focus == w) {
+    p->kb_focus = NULL;
   }
   my_lcd_destroy(w->lcd);
   xdg_toplevel_destroy(w->toplevel);
@@ -1020,9 +1240,19 @@ static my_pal_gl_t* wl_win_gl_enable(my_pal_window_t* win) {
 #endif /* MYUI_PAL_GL_EGL */
 
 static void wl_win_ime_noop(my_pal_window_t* win, int32_t x, int32_t y) {
-  (void)win;
-  (void)x;
-  (void)y; /* wayland text-input protocol is a TODO (M13+) */
+  /* text-input-v3 cursor rectangle: candidate window follows the caret.
+   * Always cache: reports made before ti enter would otherwise be lost. */
+  wl_window_t* w = (wl_window_t*)win;
+  if (w == NULL || w->pal == NULL) {
+    return;
+  }
+  w->pal->ti_spot_x = x;
+  w->pal->ti_spot_y = y;
+  w->pal->ti_spot_set = true;
+  if (w->pal->ti != NULL) {
+    zwp_text_input_v3_set_cursor_rectangle(w->pal->ti, x, y, 1, 20);
+    zwp_text_input_v3_commit(w->pal->ti);
+  }
 }
 
 static my_ret_t wl_win_move(my_pal_window_t* win, int32_t x, int32_t y) {
@@ -1032,11 +1262,30 @@ static my_ret_t wl_win_move(my_pal_window_t* win, int32_t x, int32_t y) {
   return MY_RET_NOT_SUPPORTED; /* the compositor owns placement */
 }
 
+/** @brief M16 CSD: start an interactive move with the last button
+ * serial (mutter gives plain xdg-shell clients no SSD, so our title
+ * bar's drag comes through here). */
+static my_ret_t wl_win_begin_move(my_pal_window_t* win) {
+  wl_window_t* w = (wl_window_t*)win;
+  if (w->toplevel == NULL || w->pal->seat == NULL) {
+    return MY_RET_FAIL;
+  }
+  xdg_toplevel_move(w->toplevel, w->pal->seat, w->pal->last_button_serial);
+  return MY_RET_OK;
+}
+
+/** @brief M16: mutter on plain xdg-shell advertises no decoration
+ * manager -> we must draw our own title bar. */
+static bool wl_needs_csd(my_pal_t* pal) {
+  (void)pal;
+  return true;
+}
+
 static const my_pal_window_vtable_t s_wl_window_vtable = {
     wl_win_set_title, wl_win_resize,  wl_win_show,
     wl_win_get_size,  wl_win_get_lcd, wl_win_destroy,
     wl_win_gl_enable, wl_win_ime_noop,
-    wl_win_move};
+    wl_win_move,      wl_win_begin_move};
 
 static my_pal_window_t* wl_window_create(my_pal_t* pal, int32_t w, int32_t h,
                                          const char* title) {
@@ -1082,7 +1331,7 @@ static my_pal_window_t* wl_window_create(my_pal_t* pal, int32_t w, int32_t h,
   xl->base.vtable = &s_wl_lcd_vtable;
   xl->mem = my_lcd_mem_create_from_buffer(
       p->allocator, (uint32_t)(w * p->output_scale),
-      (uint32_t)(h * p->output_scale), MY_PIXEL_FORMAT_BGRA8888, win->pixels,
+      (uint32_t)(h * p->output_scale), MY_PIXEL_FORMAT_BGRA8888, win->shadow,
       (uint32_t)(w * p->output_scale) * 4u);
   xl->win = win;
   win->lcd = (my_lcd_t*)xl;
@@ -1378,6 +1627,14 @@ static void wl_pal_destroy(my_pal_t* pal) {
   if (p->keyboard != NULL) {
     wl_keyboard_destroy(p->keyboard);
   }
+  if (p->ti != NULL) {
+    zwp_text_input_v3_destroy(p->ti);
+  }
+  if (p->ti_mgr != NULL) {
+    zwp_text_input_manager_v3_destroy(p->ti_mgr);
+  }
+  my_mem_free(p->allocator, p->ti_preedit);
+  my_mem_free(p->allocator, p->ti_commit);
   if (p->seat != NULL) {
     wl_seat_destroy(p->seat);
   }
@@ -1404,7 +1661,8 @@ static const my_pal_vtable_t s_wl_pal_vtable = {wl_window_create,
                                                 wl_clipboard_set,
                                                 wl_clipboard_get,
                                                 wl_get_scale,
-                                                wl_pal_destroy};
+                                                wl_pal_destroy,
+                                                wl_needs_csd};
 
 my_pal_t* my_pal_wayland_create(const my_allocator_t* allocator) {
   wl_pal_t* p;
@@ -1454,5 +1712,9 @@ bool my_pal_wayland_listeners_complete(void) {
          KEYBOARD_LISTENER.modifiers != NULL &&
          KEYBOARD_LISTENER.repeat_info != NULL &&
          SEAT_LISTENER.capabilities != NULL && SEAT_LISTENER.name != NULL &&
-         WM_BASE_LISTENER.ping != NULL;
+         WM_BASE_LISTENER.ping != NULL && TI_LISTENER.enter != NULL &&
+         TI_LISTENER.leave != NULL && TI_LISTENER.preedit_string != NULL &&
+         TI_LISTENER.commit_string != NULL &&
+         TI_LISTENER.delete_surrounding_text != NULL &&
+         TI_LISTENER.done != NULL;
 }

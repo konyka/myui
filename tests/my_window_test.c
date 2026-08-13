@@ -57,7 +57,10 @@ static void test_window_resize_updates_root(void) {
   my_window_on_pal_event(win, &e);
   TEST_ASSERT_EQ_INT(my_window_widget(win)->rect.w, 200);
   TEST_ASSERT_EQ_INT(my_window_widget(win)->rect.h, 120);
-  TEST_ASSERT_EQ_INT(my_dirty_rects_count(&win->dirty), 0); /* painted already */
+  /* painting is coalesced (tick-driven), not immediate after dispatch */
+  TEST_ASSERT(my_dirty_rects_count(&win->dirty) > 0);
+  my_window_paint(win);
+  TEST_ASSERT_EQ_INT(my_dirty_rects_count(&win->dirty), 0);
 
   my_widget_unref(my_window_widget(win));
   my_pal_destroy(pal);

@@ -66,6 +66,13 @@ static void click_via_pal(fx_t* f, my_window_t* win, int32_t x, int32_t y) {
   my_pal_dummy_inject_event(f->pal, win->pal_window, &e);
 }
 
+/** @brief Run pending one-shot timers (dialog close is deferred one tick
+ * so the window is never destroyed mid-dispatch). */
+static void pump(fx_t* f) {
+  my_pal_dummy_set_now_ms(f->pal, 10000);
+  my_pal_main_loop_run(f->loop);
+}
+
 static void test_modal_blocks_lower_window(void) {
   fx_t f;
   my_dialog_t* dlg;
@@ -82,6 +89,7 @@ static void test_modal_blocks_lower_window(void) {
   TEST_ASSERT_EQ_INT(g_clicked, 0);
 
   my_dialog_close(dlg, 1);
+  pump(&f); /* deferred close runs on the next loop tick */
   TEST_ASSERT_EQ_INT(g_result, 1);
   TEST_ASSERT(!f.main_win->scrim);
   TEST_ASSERT_EQ_INT(my_window_manager_count(f.wm), 1);
@@ -105,6 +113,7 @@ static void test_esc_cancels(void) {
     e.u.key.key = MY_KEY_ESCAPE;
     my_pal_dummy_inject_event(f.pal, dlg->win->pal_window, &e);
   }
+  pump(&f);
   TEST_ASSERT_EQ_INT(g_result, MY_DIALOG_CANCEL);
   my_dialog_destroy(dlg);
   fx_destroy(&f);
@@ -123,6 +132,7 @@ static void test_button_click_reports(void) {
   /* the button sits in the bottom row: h=40 row at y = 120-40 = 80,
    * button w:96 h:32 at x 0..96 */
   click_via_pal(&f, dlg->win, 10, 90);
+  pump(&f);
   TEST_ASSERT_EQ_INT(g_result, 2);
   my_dialog_destroy(dlg);
   fx_destroy(&f);

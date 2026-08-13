@@ -13,6 +13,8 @@
 #include "mypal/my_pal.h"
 #include "myui/my_event_dispatch.h"
 
+struct my_window_manager_t;
+
 /** @brief Top-level window (IS-A widget: embed as first member). */
 typedef struct my_window_t {
   my_widget_t base;                  /**< root widget of the window */
@@ -40,15 +42,26 @@ typedef struct my_window_t {
   uint32_t tip_timer;       /**< pending hover timer id, 0 = none */
   int32_t tip_x;            /**< cursor pos at hover start (window space) */
   int32_t tip_y;
+  char* title;       /**< owned copy (M16: CSD bar text) */
+  struct my_window_manager_t* wm; /**< weak: set by wm open (M16) */
+  bool csd;                 /**< client-side decoration active (M16) */
+  my_widget_t* csd_content; /**< CSD content container (weak; the root
+                             * holds the tree ref) */
 } my_window_t;
 
 /** @brief Create a window (hidden) of w x h with the given title. */
 my_window_t* my_window_create(const my_allocator_t* allocator, my_pal_t* pal,
                               int32_t w, int32_t h, const char* title);
 
-/** @brief The root widget (for add_child etc.). Same pointer as win. */
+/**
+ * @brief The widget apps add children to. In CSD mode (M16: the port's
+ * compositor provides no decoration) this is the content container
+ * BELOW the built-in title bar; otherwise the window root itself.
+ * Window internals (paint/hit/dispatch) always operate on the root.
+ */
 static inline my_widget_t* my_window_widget(my_window_t* win) {
-  return (my_widget_t*)win;
+  return win->csd && win->csd_content != NULL ? win->csd_content
+                                              : (my_widget_t*)win;
 }
 
 /**

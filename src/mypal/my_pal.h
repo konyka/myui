@@ -72,6 +72,13 @@ typedef struct my_pal_window_vtable_t {
    * compositor owns placement (wayland).
    */
   my_ret_t (*move)(my_pal_window_t* win, int32_t x, int32_t y);
+  /**
+   * @brief Ask the compositor/window manager to start an interactive
+   * move (M16 CSD: the client-drawn title bar calls this on pointer
+   * down). No-op on ports where the WM owns moving (x11) or that have
+   * no concept of it (dummy/linux_fb).
+   */
+  my_ret_t (*begin_move)(my_pal_window_t* win);
 } my_pal_window_vtable_t;
 
 /** @brief Window base "class". */
@@ -169,6 +176,15 @@ static inline my_ret_t my_pal_window_move(my_pal_window_t* win, int32_t x,
   return win->vtable->move(win, x, y);
 }
 
+/** @brief Start an interactive move (M16 CSD). NOT_SUPPORTED/no-op when
+ * the port has no such concept. */
+static inline my_ret_t my_pal_window_begin_move(my_pal_window_t* win) {
+  if (win->vtable->begin_move == NULL) {
+    return MY_RET_NOT_SUPPORTED;
+  }
+  return win->vtable->begin_move(win);
+}
+
 /* ---------------- main loop ---------------- */
 
 /** @brief Main loop vtable. */
@@ -255,6 +271,13 @@ typedef struct my_pal_vtable_t {
    */
   float (*get_scale_factor)(my_pal_t* pal);
   void (*destroy)(my_pal_t* pal);
+  /**
+   * @brief Whether the compositor/WM provides NO server-side decoration
+   * for our windows (M16): true => my_window draws its own title bar
+   * (CSD). wayland (mutter on plain xdg-shell gives no SSD) = true;
+   * x11/dummy/linux_fb = false. Optional slot: NULL means false.
+   */
+  bool (*needs_client_decoration)(my_pal_t* pal);
 } my_pal_vtable_t;
 
 /** @brief Platform base "class". */
@@ -294,6 +317,13 @@ static inline my_ret_t my_pal_clipboard_get_text(my_pal_t* pal, char* buf,
 
 static inline float my_pal_get_scale_factor(my_pal_t* pal) {
   return pal->vtable->get_scale_factor(pal);
+}
+
+/** @brief M16: true when the port's compositor gives no SSD and windows
+ * must draw their own title bar (NULL slot = false). */
+static inline bool my_pal_needs_client_decoration(my_pal_t* pal) {
+  return pal->vtable->needs_client_decoration != NULL &&
+         pal->vtable->needs_client_decoration(pal);
 }
 
 static inline void my_pal_destroy(my_pal_t* pal) {

@@ -165,11 +165,21 @@ static my_ret_t fb_win_move_noop(my_pal_window_t* win, int32_t x, int32_t y) {
   return MY_RET_OK; /* fb is fullscreen: nothing to move */
 }
 
+static my_ret_t fb_win_begin_move_noop(my_pal_window_t* win) {
+  (void)win;
+  return MY_RET_OK; /* M16: fullscreen, no interactive move */
+}
+
+static bool fb_needs_csd(my_pal_t* pal) {
+  (void)pal;
+  return false; /* fullscreen: no decoration at all */
+}
+
 static const my_pal_window_vtable_t s_fb_window_vtable = {
     fb_win_set_title, fb_win_resize,  fb_win_show,
     fb_win_get_size,  fb_win_get_lcd, fb_win_destroy,
     fb_win_gl_enable, fb_win_ime_noop,
-    fb_win_move_noop};
+    fb_win_move_noop, fb_win_begin_move_noop};
 
 static my_pal_window_t* fb_window_create(my_pal_t* pal, int32_t w, int32_t h,
                                          const char* title) {
@@ -479,7 +489,8 @@ static const my_pal_vtable_t s_fb_pal_vtable = {fb_window_create,
                                                 fb_clipboard_set,
                                                 fb_clipboard_get,
                                                 fb_get_scale,
-                                                fb_pal_destroy};
+                                                fb_pal_destroy,
+                                                fb_needs_csd};
 
 my_pal_t* my_pal_linux_fb_create(const my_allocator_t* allocator,
                                  const my_osal_t* osal, const char* fb_dev,

@@ -11,11 +11,13 @@
 #include "myr/my_vgcanvas_soft.h"
 #include "myui/my_animator.h"
 #include "myui/my_layout.h"
+#include "myui/my_window_manager.h"
 
 /* ---------------- widget vtable ---------------- */
 
 static void tip_cancel_timer(my_window_t* win);
 static void tip_hide(my_window_t* win);
+static void csd_bar_layout(my_widget_t* widget);
 
 static void window_on_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
   my_window_t* win = (my_window_t*)widget;
@@ -27,6 +29,171 @@ static void window_on_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
 }
 
 static const my_widget_vtable_t s_window_vtable = {window_on_paint, NULL, NULL};
+
+/* ---------------- CSD title bar (M16) ---------------- */
+
+#define CSD_BAR_H 36
+#define CSD_BAR_BG 0x3C4043FFu  /**< GNOME-ish dark grey */
+#define CSD_CLOSE_HOVER 0xE81123FFu /**< convention red */
+
+typedef struct csd_bar_t {
+  my_widget_t base;
+  my_window_t* win; /**< weak */
+} csd_bar_t;
+
+typedef struct csd_close_t {
+  my_widget_t base;
+  my_window_t* win; /**< weak */
+} csd_close_btn_t;
+
+static void csd_bar_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
+  csd_bar_t* bar = (csd_bar_t*)widget;
+  my_window_t* win = bar->win;
+  int32_t tw = 0, th = 0;
+  my_vgcanvas_set_fill_color(vg, my_color_from_rgba32(CSD_BAR_BG));
+  my_vgcanvas_fill_rect(vg, &(my_rectf_t){0, 0, (float)widget->rect.w,
+                                          (float)widget->rect.h});
+  if (win->title != NULL) {
+    my_vgcanvas_set_font(vg, NULL, 13);
+    if (my_vgcanvas_measure_text(vg, win->title, &tw, &th) != MY_RET_OK) {
+      tw = (int32_t)strlen(win->title) * 8;
+      th = 13;
+    }
+    my_vgcanvas_set_fill_color(vg, my_color_from_rgba32(0xFFFFFFFFu));
+    my_vgcanvas_draw_text(vg, win->title,
+                          ((float)widget->rect.w - (float)tw) / 2.0f,
+                          ((float)widget->rect.h - (float)th) / 2.0f);
+  }
+}
+
+static my_ret_t csd_bar_event(my_widget_t* widget, const my_event_t* event) {
+  csd_bar_t* bar = (csd_bar_t*)widget;
+  /* only direct hits on the bar body reach here: the close button is a
+   * child and eats its own DOWN/UP first */
+  if (event->type == MY_EVENT_POINTER_DOWN) {
+    my_pal_window_begin_move(bar->win->pal_window);
+    return MY_RET_OK;
+  }
+  return MY_RET_FAIL;
+}
+
+/** @brief Deferred close ctx (sync close would free the tree
+ * mid-dispatch — same pattern as my_dialog's deferred close). */
+typedef struct csd_close_req_t {
+  struct my_window_manager_t* wm;
+  my_window_t* win;
+} csd_close_req_t;
+
+static my_ret_t csd_close_idle(void* ctx) {
+  csd_close_req_t* req = (csd_close_req_t*)ctx;
+  my_window_manager_close(req->wm, req->win);
+  my_mem_free(NULL, req);
+  return MY_RET_FAIL; /* one-shot */
+}
+
+static void csd_close_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
+  my_vgcanvas_set_fill_color(
+      vg, my_color_from_rgba32(widget->hovered ? CSD_CLOSE_HOVER
+                                               : CSD_BAR_BG));
+  my_vgcanvas_fill_rect(vg, &(my_rectf_t){0, 0, (float)widget->rect.w,
+                                          (float)widget->rect.h});
+  my_vgcanvas_set_font(vg, NULL, 14);
+  my_vgcanvas_set_fill_color(vg, my_color_from_rgba32(0xFFFFFFFFu));
+  my_vgcanvas_draw_text(vg, "\xC3\x97" /* × */, 11, 10);
+}
+
+static my_ret_t csd_close_event(my_widget_t* widget, const my_event_t* event) {
+  csd_close_btn_t* btn = (csd_close_btn_t*)widget;
+  if (event->type == MY_EVENT_POINTER_DOWN) {
+    return MY_RET_OK;
+  }
+  if (event->type == MY_EVENT_POINTER_UP) {
+    my_window_t* win = btn->win;
+    csd_close_req_t* req;
+    if (win->wm == NULL || win->loop == NULL) {
+      /* not under a window manager: nothing to route a close through
+       * (the QUIT path lives in the wm) — no-op by design */
+      return MY_RET_OK;
+    }
+    req = (csd_close_req_t*)my_mem_calloc(NULL, 1, sizeof(csd_close_req_t));
+    if (req == NULL) {
+      return MY_RET_OK;
+    }
+    req->wm = win->wm;
+    req->win = win;
+    if (my_pal_main_loop_add_timer(win->loop, csd_close_idle, req, 1) == 0) {
+      my_mem_free(NULL, req);
+    }
+    return MY_RET_OK;
+  }
+  return MY_RET_FAIL;
+}
+
+static const my_widget_vtable_t s_csd_bar_vtable = {csd_bar_paint,
+                                                    csd_bar_event,
+                                                    csd_bar_layout};
+static const my_widget_vtable_t s_csd_close_vtable = {csd_close_paint,
+                                                      csd_close_event, NULL};
+
+/** @brief Keep the close button glued to the bar's right edge. */
+static void csd_bar_layout(my_widget_t* widget) {
+  size_t n = my_widget_child_count(widget);
+  if (n > 0) {
+    my_widget_t* close_btn = my_widget_get_child(widget, n - 1);
+    close_btn->rect.x = widget->rect.w - 32;
+    close_btn->rect.y = 0;
+    close_btn->rect.w = 32;
+    close_btn->rect.h = widget->rect.h;
+  }
+}
+
+/** @brief Build the CSD title bar + content container under the root
+ * (vertical linear: bar h:36 + content h:1f). */
+static void window_setup_csd(my_window_t* win) {
+  my_widget_t* root = (my_widget_t*)win;
+  csd_bar_t* bar;
+  csd_close_btn_t* close_btn;
+  my_widget_t* content;
+  my_widget_set_layouter(root, my_layouter_linear_create(win->allocator,
+                                                         false, 0));
+  bar = (csd_bar_t*)my_mem_calloc(win->allocator, 1, sizeof(csd_bar_t));
+  content = my_widget_create(win->allocator, "csd_content");
+  if (bar == NULL || content == NULL ||
+      my_widget_init((my_widget_t*)bar, win->allocator, &s_csd_bar_vtable,
+                     "csd_bar") != MY_RET_OK) {
+    my_mem_free(win->allocator, bar);
+    if (content != NULL) {
+      my_widget_unref(content);
+    }
+    return; /* out of memory: stay undecorated rather than broken */
+  }
+  bar->win = win;
+  my_widget_set_layout_params((my_widget_t*)bar, "h:36");
+  close_btn =
+      (csd_close_btn_t*)my_mem_calloc(win->allocator, 1, sizeof(csd_close_btn_t));
+  if (close_btn != NULL &&
+      my_widget_init((my_widget_t*)close_btn, win->allocator,
+                     &s_csd_close_vtable, "csd_close") == MY_RET_OK) {
+    close_btn->win = win;
+    ((my_widget_t*)close_btn)->rect =
+        my_rect_init(0, 0, 32, CSD_BAR_H); /* x set in csd_bar_layout */
+    my_widget_add_child((my_widget_t*)bar, (my_widget_t*)close_btn);
+    my_widget_unref((my_widget_t*)close_btn);
+  } else {
+    my_mem_free(win->allocator, close_btn);
+  }
+  my_widget_set_layout_params(content, "h:1f");
+  my_widget_add_child(root, (my_widget_t*)bar);
+  my_widget_unref((my_widget_t*)bar);
+  my_widget_add_child(root, content);
+  my_widget_unref(content);
+  /* my_window_widget() hands the content container to apps, and the
+   * universal pattern `unref(my_window_widget(win))` after wm_open
+   * expects to own one reference — give it one (the tree keeps its
+   * own, so this balances exactly like the root does in non-CSD). */
+  win->csd_content = my_widget_ref(content);
+  win->csd = true;
+}
 
 /* ---------------- lifecycle ---------------- */
 
@@ -73,6 +240,8 @@ static void window_destroy_chain(my_object_t* obj) {
     my_theme_destroy(win->theme);
   }
   win->theme = NULL;
+  my_mem_free(win->allocator, win->title);
+  win->title = NULL;
   my_pal_window_destroy(win->pal_window);
   win->pal_window = NULL;
   my_widget_destroy((my_widget_t*)win);
@@ -103,6 +272,7 @@ my_window_t* my_window_create(const my_allocator_t* allocator, my_pal_t* pal,
     return NULL;
   }
   win->bg_color = my_color_rgb(32, 32, 32);
+  win->title = my_strdup(allocator, title); /* M16: CSD bar text */
   win->scale = my_pal_get_scale_factor(pal); /* HiDPI (M12c): applied to
                                                 the vgcanvas in ensure/GL */
   if (win->scale <= 0.0f) {
@@ -120,6 +290,9 @@ my_window_t* my_window_create(const my_allocator_t* allocator, my_pal_t* pal,
   ((my_widget_t*)win)->removed_hook = window_on_subtree_removed;
   my_dirty_rects_init(&win->dirty);
   my_event_dispatcher_init(&win->dispatcher, (my_widget_t*)win);
+  if (my_pal_needs_client_decoration(pal)) {
+    window_setup_csd(win); /* M16: compositor gives no SSD (mutter/wl) */
+  }
   return win;
 }
 
@@ -470,15 +643,17 @@ my_ret_t my_window_on_pal_event(my_window_t* win, const my_event_t* event) {
     case MY_EVENT_POINTER_WHEEL:
     case MY_EVENT_KEY_DOWN:
     case MY_EVENT_KEY_UP:
+    case MY_EVENT_IME_PREEDIT:
+    case MY_EVENT_IME_COMMIT:
       tip_track(win, event); /* hover tooltip bookkeeping (M13c) */
       my_event_dispatch(&win->dispatcher, event);
       break;
     default:
       break;
   }
-  /* immediate redraw of anything the dispatch dirtied */
-  if (my_dirty_rects_count(&win->dirty) > 0) {
-    my_window_paint(win);
-  }
+  /* Dirty rects accumulate here and are painted by the window manager's
+   * ~33 ms tick (frame coalescing): high-frequency event streams (wheel,
+   * pointer motion) then cost at most one repaint per frame instead of one
+   * full repaint per event. */
   return MY_RET_OK;
 }

@@ -42,13 +42,14 @@ static void dialog_report(my_dialog_t* dlg, int32_t result) {
   }
 }
 
-void my_dialog_close(my_dialog_t* dlg, int32_t result) {
-  my_window_manager_t* wm;
+typedef struct {
+  my_dialog_t* dlg;
+  int32_t result;
+} dialog_close_t;
+
+static void dialog_close_now(my_dialog_t* dlg, int32_t result) {
+  my_window_manager_t* wm = dlg->wm;
   size_t i, n;
-  if (dlg == NULL) {
-    return;
-  }
-  wm = dlg->wm;
   if (wm != NULL) {
     n = my_darray_size(wm->windows);
     for (i = 0; i < n; i++) {
@@ -58,10 +59,48 @@ void my_dialog_close(my_dialog_t* dlg, int32_t result) {
         my_widget_invalidate((my_widget_t*)w, NULL);
       }
     }
-    my_window_manager_close(wm, dlg->win);
-    dlg->win = NULL; /* the window is destroyed by the close */
+      my_window_manager_close(wm, dlg->win); /* drops the wm's ref only */
+      /* dlg->win stays valid (creator's ref): my_dialog_destroy() drops it,
+     * which finally destroys the window and its PAL window. NULL-ing it
+     * here leaked the window (ghost surface on wayland). */
   }
   dialog_report(dlg, result);
+}
+
+static my_ret_t dialog_close_idle(void* ctx) {
+  dialog_close_t* dc = (dialog_close_t*)ctx;
+  my_dialog_t* dlg = dc->dlg;
+  int32_t result = dc->result;
+  my_mem_free(dlg->allocator, dc);
+  dialog_close_now(dlg, result);
+  return MY_RET_FAIL; /* one-shot */
+}
+
+void my_dialog_close(my_dialog_t* dlg, int32_t result) {
+  dialog_close_t* dc;
+  if (dlg == NULL) {
+    return;
+  }
+  /* Close is usually triggered from inside event dispatch on the dialog's
+   * own widgets; destroying the window synchronously would free the widget
+   * tree mid-dispatch. Defer to the next main-loop tick. */
+  if (dlg->wm == NULL || dlg->wm->loop == NULL) {
+    dialog_close_now(dlg, result);
+    return;
+  }
+  dc = (dialog_close_t*)my_mem_calloc(dlg->allocator, 1, sizeof(dialog_close_t));
+  if (dc != NULL) {
+    dc->dlg = dlg;
+    dc->result = result;
+  }
+  if (dc == NULL || my_pal_main_loop_add_timer(dlg->wm->loop,
+                                               dialog_close_idle, dc, 1) == 0) {
+    if (dc != NULL) {
+      my_mem_free(dlg->allocator, dc);
+    }
+    dialog_close_now(dlg, result); /* fallback: no loop, close directly */
+    return;
+  }
 }
 
 static void dialog_on_key(void* ctx, const char* event, void* data) {
@@ -200,7 +239,10 @@ void my_dialog_destroy(my_dialog_t* dlg) {
     my_mem_free(dlg->allocator, my_darray_get(st->btn_ctxs, i));
   }
   my_darray_destroy(st->btn_ctxs);
-  if (dlg->win != NULL) { /* NULL after close (the wm destroyed it) */
+  /* Drops the creator's ref: after my_dialog_close() this hits 0 and the
+   * window (and its PAL window) is destroyed; without close() the wm still
+   * holds its ref and the window stays alive. */
+  if (dlg->win != NULL) {
     my_widget_unref(my_window_widget(dlg->win));
   }
   my_mem_free(dlg->allocator, st);

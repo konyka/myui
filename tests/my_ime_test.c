@@ -72,6 +72,31 @@ static void test_edit_commit_inserts_and_undoes(void) {
   my_widget_unref(e);
 }
 
+static void test_ime_via_window_pal_event(void) {
+  /* regression (M16): my_window_on_pal_event must forward IME events to
+   * the dispatcher — the real pal→window path dropped them entirely */
+  my_pal_t* pal = my_pal_dummy_create(NULL);
+  my_window_t* win = my_window_create(NULL, pal, 300, 100, "ime");
+  my_widget_t* e = my_edit_create(NULL);
+  my_event_t ev;
+  my_widget_add_child(my_window_widget(win), e);
+  my_widget_unref(e);
+  my_event_dispatcher_set_focus(&win->dispatcher, e);
+  ((my_edit_t*)e)->focused = true;
+
+  ev = ime_ev(MY_EVENT_IME_PREEDIT, "ni", 2);
+  my_window_on_pal_event(win, &ev);
+  TEST_ASSERT(((my_edit_t*)e)->ime_preedit != NULL);
+  TEST_ASSERT_EQ_STR(((my_edit_t*)e)->ime_preedit, "ni");
+
+  ev = ime_ev(MY_EVENT_IME_COMMIT, "\xE4\xBD\xA0\xE5\xA5\xBD", 0); /* 你好 */
+  my_window_on_pal_event(win, &ev);
+  TEST_ASSERT_EQ_STR(my_edit_get_text(e), "\xE4\xBD\xA0\xE5\xA5\xBD");
+
+  my_widget_unref(my_window_widget(win));
+  my_pal_destroy(pal);
+}
+
 static void test_edit_commit_drives_mvvm(void) {
   my_pal_t* pal = my_pal_dummy_create(NULL);
   my_window_t* win = my_window_create(NULL, pal, 300, 100, "ime");
@@ -157,6 +182,7 @@ static void test_ime_leak(void) {
 MYTEST_MAIN_BEGIN()
   MYTEST_RUN(test_edit_preedit_not_in_document);
   MYTEST_RUN(test_edit_commit_inserts_and_undoes);
+  MYTEST_RUN(test_ime_via_window_pal_event);
   MYTEST_RUN(test_edit_commit_drives_mvvm);
   MYTEST_RUN(test_edit_spot_reported);
   MYTEST_RUN(test_text_area_commit);

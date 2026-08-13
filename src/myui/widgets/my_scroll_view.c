@@ -100,9 +100,12 @@ void my_scroll_view_set_content_height(my_scroll_view_t* sv, int32_t height) {
 static my_ret_t sv_on_event(my_widget_t* widget, const my_event_t* event) {
   my_scroll_view_t* sv = (my_scroll_view_t*)widget;
   if (event->type == MY_EVENT_POINTER_WHEEL) {
+    int32_t before = sv->offset;
     my_scroll_view_set_offset(sv,
                               sv->offset - event->u.pointer.delta * SV_WHEEL_STEP);
-    return MY_RET_OK;
+    /* nested scrolling (M16): only eat the wheel when we actually scrolled;
+     * at the limit (or no overflow) let it bubble to an outer scroll view */
+    return sv->offset != before ? MY_RET_OK : MY_RET_FAIL;
   }
   return MY_RET_FAIL;
 }

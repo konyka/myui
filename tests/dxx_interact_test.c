@@ -59,6 +59,13 @@ static void click_widget(my_window_t* w, my_widget_t* widget) {
   inject_at(w, MY_EVENT_POINTER_UP, cx, cy);
 }
 
+/* Dialog close is deferred to the next main-loop tick (destroying the
+ * window synchronously would free the widget tree mid-dispatch). */
+static void pump(fx_t* f) {
+  my_pal_dummy_set_now_ms(f->pal, 10000);
+  my_pal_main_loop_run(f->loop);
+}
+
 static void type_text(my_window_t* w, const char* text) {
   const char* p;
   for (p = text; *p != '\0'; p++) {
@@ -218,6 +225,7 @@ static void test_login_dialog_validation(void) {
     my_widget_t* btn_row = my_widget_get_child(my_window_widget(dw), 1);
     click_widget(dw, my_widget_get_child(btn_row, 0));
   }
+  pump(&f); /* dialog close is deferred to the next loop tick */
   TEST_ASSERT(my_window_manager_top(f.wm) == f.win);
   fx_destroy(&f);
 }
@@ -237,6 +245,7 @@ static void test_register_dialog_has_confirm(void) {
     my_widget_t* btn_row = my_widget_get_child(my_window_widget(dw), 1);
     click_widget(dw, my_widget_get_child(btn_row, 0));
   }
+  pump(&f); /* dialog close is deferred to the next loop tick */
   TEST_ASSERT(my_window_manager_top(f.wm) == f.win);
   fx_destroy(&f);
 }
@@ -276,6 +285,7 @@ static void test_share_writes_png(void) {
     btn_row = my_widget_get_child(my_window_widget(dw), 1);
     click_widget(dw, my_widget_get_child(btn_row, 0));
   }
+  pump(&f); /* dialog close is deferred to the next loop tick */
   TEST_ASSERT(my_window_manager_top(f.wm) == f.win);
   remove(path);
   fx_destroy(&f);
