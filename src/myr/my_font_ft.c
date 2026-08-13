@@ -11,6 +11,7 @@
 
 #include <ft2build.h>
 #include FT_FREETYPE_H
+#include FT_MULTIPLE_MASTERS_H
 
 #define MY_FONT_FT_DEFAULT_CACHE 256
 
@@ -207,9 +208,9 @@ static const my_font_vtable_t s_ft_vtable = {ft_measure,  ft_get_glyph,
                                              ft_line_height, ft_destroy,
                                              ft_has_glyph};
 
-my_font_t* my_font_ft_create(const my_allocator_t* allocator,
-                             const char* path, int32_t face_index,
-                             size_t cache_capacity) {
+my_font_t* my_font_ft_create_ex(const my_allocator_t* allocator,
+                                const char* path, int32_t face_index,
+                                int32_t weight, size_t cache_capacity) {
   my_font_ft_t* f;
   FT_Library lib = ft_library();
   if (lib == NULL || path == NULL) {
@@ -222,6 +223,30 @@ my_font_t* my_font_ft_create(const my_allocator_t* allocator,
   if (FT_New_Face(lib, path, face_index, &f->face) != 0) {
     my_mem_free(allocator, f);
     return NULL;
+  }
+  if (weight > 0) { /* variable font: pin the wght axis (0 = font default) */
+    FT_MM_Var* mm = NULL;
+    if (FT_Get_MM_Var(f->face, &mm) == 0 && mm != NULL) {
+      FT_Fixed* coords = (FT_Fixed*)my_mem_calloc(allocator, mm->num_axis,
+                                                  sizeof(FT_Fixed));
+      FT_UInt i;
+      for (i = 0; i < mm->num_axis; i++) {
+        coords[i] = mm->axis[i].def;
+        if (mm->axis[i].tag == 0x77676874u) { /* 'wght' */
+          FT_Fixed w = (FT_Fixed)(weight << 16);
+          if (w < mm->axis[i].minimum) {
+            w = mm->axis[i].minimum;
+          }
+          if (w > mm->axis[i].maximum) {
+            w = mm->axis[i].maximum;
+          }
+          coords[i] = w;
+        }
+      }
+      FT_Set_Var_Design_Coordinates(f->face, mm->num_axis, coords);
+      my_mem_free(allocator, coords);
+      FT_Done_MM_Var(lib, mm);
+    }
   }
   f->base.vtable = &s_ft_vtable;
   f->allocator = allocator;
@@ -237,16 +262,29 @@ my_font_t* my_font_ft_create(const my_allocator_t* allocator,
   return (my_font_t*)f;
 }
 
-#else /* !MYUI_FONT_FREETYPE */
-
 my_font_t* my_font_ft_create(const my_allocator_t* allocator,
                              const char* path, int32_t face_index,
                              size_t cache_capacity) {
+  return my_font_ft_create_ex(allocator, path, face_index, 0, cache_capacity);
+}
+
+#else /* !MYUI_FONT_FREETYPE */
+
+my_font_t* my_font_ft_create_ex(const my_allocator_t* allocator,
+                                const char* path, int32_t face_index,
+                                int32_t weight, size_t cache_capacity) {
   (void)allocator;
+  (void)weight;
   (void)path;
   (void)face_index;
   (void)cache_capacity;
   return NULL;
+}
+
+my_font_t* my_font_ft_create(const my_allocator_t* allocator,
+                             const char* path, int32_t face_index,
+                             size_t cache_capacity) {
+  return my_font_ft_create_ex(allocator, path, face_index, 0, cache_capacity);
 }
 
 #endif /* MYUI_FONT_FREETYPE */

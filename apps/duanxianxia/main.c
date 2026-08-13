@@ -19,6 +19,7 @@
 #include "views/placeholder.h"
 #include "views/views.h"
 
+#include "myr/my_font_ft.h"
 #include "myr/my_lcd_mem.h"
 #ifdef MYUI_PAL_DUMMY
 #include "mypal/dummy/my_pal_dummy.h"
@@ -31,6 +32,16 @@
  * Latin side (each lacks the other's glyphs; the chain routes per
  * codepoint). Falls back to the built-in 8x8 bitmap font. */
 static my_font_t* create_app_font(void) {
+#ifdef MYUI_FONT_FREETYPE
+  /* GNOME 风格的系统矢量字体（终端/标题栏同款）：Noto Sans CJK SC 可变
+   * 字体，hinted 渲染；一张脸覆盖 CJK + Latin */
+  my_font_t* vf = my_font_ft_create_ex(
+      NULL, "/usr/share/fonts/google-noto-sans-cjk-vf-fonts/NotoSansCJK-VF.ttc",
+      2 /* SC face */, 400 /* Regular weight */, 0);
+  if (vf != NULL) {
+    return vf;
+  }
+#endif
   static const char* chain[] = {
       "/usr/share/fonts/google-droid-sans-fonts/DroidSansFallbackFull.ttf",
       "/usr/share/fonts/liberation-sans-fonts/LiberationSans-Regular.ttf",

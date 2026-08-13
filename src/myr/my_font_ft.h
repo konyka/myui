@@ -20,6 +20,14 @@ my_font_t* my_font_ft_create(const my_allocator_t* allocator,
                              const char* path, int32_t face_index,
                              size_t cache_capacity);
 
+/**
+ * @brief Like my_font_ft_create, plus an optional variable-font weight
+ * (wght axis, e.g. 400 = Regular; 0 = the font's default instance).
+ */
+my_font_t* my_font_ft_create_ex(const my_allocator_t* allocator,
+                                const char* path, int32_t face_index,
+                                int32_t weight, size_t cache_capacity);
+
 /** @brief Test/diagnostics: glyph cache hit counter (0 without FT). */
 size_t my_font_ft_cache_hits(my_font_t* font);
 

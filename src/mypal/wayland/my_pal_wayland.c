@@ -153,6 +153,27 @@ static void present(wl_window_t* w) {
                         (uint32_t)(w->h * w->pal->output_scale),
                         (uint32_t)(w->w * w->pal->output_scale) * 4u,
                         10 * w->pal->output_scale);
+    if (getenv("MYUI_WL_DUMP_SHM") != NULL) { /* debug: dump post-punch */
+      static int dumped;
+      if (dumped++ == 3) { /* after the window settled */
+        FILE* f = fopen(getenv("MYUI_WL_DUMP_SHM"), "wb");
+        uint32_t bw = (uint32_t)(w->w * w->pal->output_scale);
+        uint32_t bh = (uint32_t)(w->h * w->pal->output_scale);
+        uint32_t x, y;
+        if (f != NULL) {
+          fprintf(f, "P6\n%u %u\n255\n", bw, bh);
+          for (y = 0; y < bh; y++) {
+            for (x = 0; x < bw; x++) {
+              const uint8_t* px = w->pixels + ((size_t)y * bw + x) * 4;
+              fputc(px[3] == 0 ? 255 : px[2], f); /* transparent -> red */
+              fputc(px[3] == 0 ? 0 : px[1], f);
+              fputc(px[3] == 0 ? 0 : px[0], f);
+            }
+          }
+          fclose(f);
+        }
+      }
+    }
   }
   wl_surface_attach(w->surface, w->wlbuf, 0, 0);
   /* damage is in BUFFER (physical) coordinates */

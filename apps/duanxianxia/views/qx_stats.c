@@ -14,6 +14,7 @@
 
 #include "../dxx_data.h"
 #include "../dxx_theme.h"
+#include "myr/my_font.h"
 #include "qx_chart.h"
 #include "views.h"
 
@@ -68,6 +69,8 @@ static void stat_btn_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
   int32_t vw = 0;
   float x;
   float y = ((float)widget->rect.h - 13.0f) / 2.0f;
+  my_font_t* wfont = NULL;
+  int32_t ascent = 0;
   if (b->pressed) {
     bg = darken(darken(bg)); /* held down: deepest (bootstrap active look) */
   } else if (!b->active && widget->hovered) {
@@ -84,14 +87,21 @@ static void stat_btn_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
     my_vgcanvas_stroke_rect(vg, &(my_rectf_t){0, 0, (float)widget->rect.w,
                                               (float)widget->rect.h});
   }
-  /* "label：value" centered; value colored separately */
+  /* "label：value" centered (both axes); value colored separately */
   my_vgcanvas_set_font(vg, NULL, 13);
   {
     char label[48];
     snprintf(label, sizeof(label), "%s%s", s->label,
              s->value != NULL ? "：" : "");
     if (my_vgcanvas_measure_text(vg, label, &tw, &th) != MY_RET_OK) {
-      tw = (int32_t)strlen(label) * 13;
+      /* fallback estimate must count codepoints, not bytes (CJK) */
+      const char* p;
+      tw = 0;
+      for (p = label; *p != '\0';) {
+        uint32_t cp = my_utf8_next(&p);
+        tw += cp < 0x80 ? 7 : 13;
+      }
+      th = 13;
     }
     if (s->value != NULL) {
       if (my_vgcanvas_measure_text(vg, s->value, &vw, &th) != MY_RET_OK) {
@@ -99,6 +109,16 @@ static void stat_btn_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
       }
     }
     x = ((float)widget->rect.w - (float)(tw + vw)) / 2.0f;
+    y = th > 0 ? ((float)widget->rect.h - (float)th) / 2.0f : y;
+    /* optical vertical centering: glyphs sit at baseline - ~0.75*ascent;
+     * plain line-box centering leaves the text visibly low */
+    my_window_font_of_widget(widget, &wfont, NULL);
+    if (wfont != NULL) {
+      ascent = my_font_ascent(wfont, 13);
+      if (ascent > 0) {
+        y = (float)widget->rect.h / 2.0f - 0.75f * (float)ascent;
+      }
+    }
     my_vgcanvas_set_fill_color(vg, my_color_from_rgba32(s->fg));
     my_vgcanvas_draw_text(vg, label, x, y);
     if (s->value != NULL) {
