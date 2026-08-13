@@ -582,6 +582,35 @@ my_pal_t* my_window_pal_of_widget(my_widget_t* widget) {
   return NULL;
 }
 
+/** @brief The window's default font for a widget (NULL/size 0 when unset).
+ * Widgets without an explicit font should use this so measurement and
+ * rendering stay consistent (caret math bug, M16). */
+void my_window_font_of_widget(my_widget_t* widget, my_font_t** font,
+                              int32_t* font_size) {
+  my_widget_t* root = widget;
+  if (font != NULL) {
+    *font = NULL;
+  }
+  if (font_size != NULL) {
+    *font_size = 0;
+  }
+  if (widget == NULL) {
+    return;
+  }
+  while (root->parent != NULL) {
+    root = root->parent;
+  }
+  if (my_str_eq(root->widget_type, "window")) {
+    my_window_t* win = (my_window_t*)root;
+    if (font != NULL) {
+      *font = win->font;
+    }
+    if (font_size != NULL) {
+      *font_size = win->font_size;
+    }
+  }
+}
+
 my_pal_main_loop_t* my_window_loop_of_widget(my_widget_t* widget) {
   my_widget_t* root = widget;
   if (widget == NULL) {

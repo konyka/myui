@@ -353,10 +353,18 @@ static void lcd_mem_destroy(my_lcd_t* lcd) {
 
 /* ---------------- create / accessors ---------------- */
 
+static uint8_t* lcd_mem_buffer_slot(my_lcd_t* lcd) {
+  return my_lcd_mem_get_buffer(lcd);
+}
+static uint32_t lcd_mem_stride_slot(my_lcd_t* lcd) {
+  return my_lcd_mem_get_stride(lcd);
+}
+
 static const my_lcd_vtable_t s_lcd_mem_vtable = {
     lcd_mem_get_width,  lcd_mem_get_height, lcd_mem_get_format,
     lcd_mem_begin_frame, lcd_mem_end_frame, lcd_mem_draw_pixels,
-    lcd_mem_fill_rect,  lcd_mem_blend_span, lcd_mem_destroy};
+    lcd_mem_fill_rect,  lcd_mem_blend_span, lcd_mem_destroy,
+    lcd_mem_buffer_slot, lcd_mem_stride_slot};
 
 my_lcd_t* my_lcd_mem_create(const my_allocator_t* allocator, uint32_t w, uint32_t h,
                             my_pixel_format_t format) {

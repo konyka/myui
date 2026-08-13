@@ -3,7 +3,9 @@
  * @brief Wayland PAL port: xdg-shell window over wl_shm buffers.
  *
  * Buffer/present model: one shm buffer per window (memfd + mmap, format
- * XRGB8888 = our BGRA8888). The app draws into it via the window's lcd;
+ * ARGB8888 = our BGRA8888 with a live alpha channel; the alpha feeds
+ * the M16 CSD rounded-corner punch in present()). The app draws into it
+ * via the window's lcd;
  * end_frame attaches + commits only when the compositor released the
  * buffer (wl_buffer.release), and a wl_callback frame event provides
  * the vsync cadence. Events: wl_pointer + wl_keyboard (xkbcommon),
@@ -39,6 +41,7 @@
 #include "myc/my_darray.h"
 #include "myc/my_str.h"
 #include "mypal/wayland/my_pal_wayland_keymap.h"
+#include "mypal/wayland/my_pal_wayland_csd.h"
 #include "myr/my_lcd_mem.h"
 
 #include "xdg-shell-client-protocol.h"
@@ -143,6 +146,13 @@ static void present(wl_window_t* w) {
   }
   if (w->shadow != NULL) {
     memcpy(w->pixels, w->shadow, w->shm_size);
+    /* M16 CSD: round the window corners (alpha punch, ARGB buffer).
+     * Unconditional on this port: every target compositor leaves us
+     * without SSD (see my_pal.h needs_client_decoration). */
+    myui_wl_corner_mask(w->pixels, (uint32_t)(w->w * w->pal->output_scale),
+                        (uint32_t)(w->h * w->pal->output_scale),
+                        (uint32_t)(w->w * w->pal->output_scale) * 4u,
+                        10 * w->pal->output_scale);
   }
   wl_surface_attach(w->surface, w->wlbuf, 0, 0);
   /* damage is in BUFFER (physical) coordinates */
@@ -201,11 +211,19 @@ static void wl_lcd_destroy(my_lcd_t* lcd) {
   }
 }
 
+static uint8_t* wl_lcd_buffer(my_lcd_t* lcd) {
+  return my_lcd_get_buffer(((wl_lcd_t*)lcd)->mem);
+}
+static uint32_t wl_lcd_stride(my_lcd_t* lcd) {
+  return my_lcd_get_stride(((wl_lcd_t*)lcd)->mem);
+}
+
 static const my_lcd_vtable_t s_wl_lcd_vtable = {wl_lcd_w,      wl_lcd_h,
                                                 wl_lcd_fmt,    wl_lcd_begin,
                                                 wl_lcd_end,    wl_lcd_pixels,
                                                 wl_lcd_fill,   wl_lcd_blend,
-                                                wl_lcd_destroy};
+                                                wl_lcd_destroy, wl_lcd_buffer,
+                                                wl_lcd_stride};
 
 /* shm buffer create (memfd + mmap, WL_SHM_FORMAT_XRGB8888). Window w/h
  * is LOGICAL; the buffer is physical = logical*output_scale (M12c),
@@ -227,7 +245,7 @@ static bool wl_buffer_create(wl_window_t* w) {
   }
   pool = wl_shm_create_pool(w->pal->shm, w->shm_fd, (int)w->shm_size);
   w->wlbuf = wl_shm_pool_create_buffer(pool, 0, bw, bh, bw * 4,
-                                       WL_SHM_FORMAT_XRGB8888);
+                                       WL_SHM_FORMAT_ARGB8888);
   wl_shm_pool_destroy(pool);
   my_mem_free(w->allocator, w->shadow);
   w->shadow =
@@ -707,6 +725,14 @@ static void ti_on_done(void* data, struct zwp_text_input_v3* ti,
     my_event_t e = my_event_init(MY_EVENT_IME_COMMIT);
     e.u.ime.text = p->ti_commit;
     dispatch_event(p, (my_pal_window_t*)p->kb_focus, &e);
+    /* ibus quirk: right after commit_string it re-sends the committed text
+     * as preedit, clearing it in the next done ~1ms later. Showing it would
+     * double the committed text on screen — treat it as a clear. */
+    if (p->ti_preedit_dirty && p->ti_preedit != NULL &&
+        strcmp(p->ti_preedit, p->ti_commit) == 0) {
+      ti_set_str(p->allocator, &p->ti_preedit, NULL);
+      p->ti_preedit_caret_cp = 0;
+    }
     ti_set_str(p->allocator, &p->ti_commit, NULL);
     p->ti_preedit_dirty = true; /* commit clears any preedit too */
   }

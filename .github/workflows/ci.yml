@@ -49,7 +49,7 @@ jobs:
         run: |
           cmake -S . -B build -DMYUI_PAL=dummy -DMYUI_C_STANDARD=99 \
             -DMYUI_FONT_STB=OFF -DMYUI_IMAGE_STB=OFF -DMYUI_UI_XML=OFF \
-            -DMYUI_BIDI=OFF
+            -DMYUI_BIDI=OFF -DMYUI_FONT_FREETYPE=OFF
       - name: Build
         run: cmake --build build -j
       - name: Test

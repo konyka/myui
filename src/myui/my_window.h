@@ -85,6 +85,10 @@ my_pal_t* my_window_pal_of_widget(my_widget_t* widget);
 /** @brief The main loop of the window at the root (NULL when unknown). */
 my_pal_main_loop_t* my_window_loop_of_widget(my_widget_t* widget);
 
+/** @brief The window's default font for a widget (see my_window.c). */
+void my_window_font_of_widget(my_widget_t* widget, my_font_t** font,
+                              int32_t* font_size);
+
 /**
  * @brief Attach a shared undo manager (M11b, borrowed; the app owns and
  * destroys it). Widgets can then find it via

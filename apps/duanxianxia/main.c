@@ -19,8 +19,8 @@
 #include "views/placeholder.h"
 #include "views/views.h"
 
-#ifdef MYUI_PAL_DUMMY
 #include "myr/my_lcd_mem.h"
+#ifdef MYUI_PAL_DUMMY
 #include "mypal/dummy/my_pal_dummy.h"
 #endif
 
@@ -35,18 +35,17 @@ static my_font_t* create_app_font(void) {
       "/usr/share/fonts/google-droid-sans-fonts/DroidSansFallbackFull.ttf",
       "/usr/share/fonts/liberation-sans-fonts/LiberationSans-Regular.ttf",
       "/usr/share/fonts/truetype/liberation-sans-fonts/LiberationSans-Regular.ttf"};
-  my_font_t* font = my_font_stb_create_chain(NULL, chain, 3, 0);
+  my_font_t* font = my_font_create_chain(NULL, chain, 3, 0);
   if (font == NULL) {
     font = my_font_bitmap_create(NULL);
   }
   return font;
 }
 
-#ifdef MYUI_PAL_DUMMY
 static void dump_ppm(my_pal_window_t* window, const char* path) {
   my_lcd_t* lcd = my_pal_window_get_lcd(window);
-  uint8_t* buf = my_lcd_mem_get_buffer(lcd);
-  uint32_t stride = my_lcd_mem_get_stride(lcd);
+  uint8_t* buf = my_lcd_get_buffer(lcd);
+  uint32_t stride = my_lcd_get_stride(lcd);
   uint32_t w = my_lcd_get_width(lcd);
   uint32_t h = my_lcd_get_height(lcd);
   uint32_t x, y;
@@ -66,7 +65,18 @@ static void dump_ppm(my_pal_window_t* window, const char* path) {
   fclose(f);
   printf("dxx: dumped %s\n", path);
 }
-#endif
+
+/* live debugging aid: MYUI_LIVE_DUMP=<path> dumps the top window's frame
+ * every 500 ms so visual issues can be inspected from the outside */
+static my_ret_t live_dump_tick(void* ctx) {
+  my_window_manager_t* wm = (my_window_manager_t*)ctx;
+  my_window_t* top = my_window_manager_top(wm);
+  const char* path = getenv("MYUI_LIVE_DUMP");
+  if (top != NULL && path != NULL) {
+    dump_ppm(top->pal_window, path);
+  }
+  return MY_RET_OK; /* repeat */
+}
 
 /* ---------------- app state + navigation (M14d) ---------------- */
 
@@ -181,6 +191,9 @@ int main(void) {
 
   my_window_manager_open(wm, win);
   my_widget_unref(my_window_widget(win));
+  if (getenv("MYUI_LIVE_DUMP") != NULL) {
+    my_pal_main_loop_add_timer(loop, live_dump_tick, wm, 500);
+  }
 
 #ifdef MYUI_PAL_DUMMY
   {

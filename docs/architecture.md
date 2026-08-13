@@ -105,7 +105,8 @@ PAL port 矩阵：
 ## 字体子系统（M7a）
 
 - `my_font.h`：字体抽象 vtable（measure/get_glyph(8bpp alpha 位图+bearing+advance)/ascent/descent/line_height/destroy）；UTF-8 解码 `my_utf8_next`。
-- 两实现：`my_font_bitmap`（内置 8x8 等宽位图字体，ASCII 32..126，零依赖兜底，数据由 `tools/gen_bitmap_font.c` 从 Liberation Sans(OFL) 生成并提交，可用该脚本重新生成）；`my_font_stb`（stb_truetype 后端，编译选项 `MYUI_FONT_STB` 默认 ON，OFF 时嵌入式裁剪；LRU 字形缓存默认 256 项，容量可配，命中/淘汰有诊断计数器；M14b 起支持 .ttc 首 face——"ttcf" 头检测 + `stbtt_GetFontOffsetForIndex`，注意 CFF2 可变字体如 NotoSansCJK-VF 仍不可解析；并提供 `my_font_stb_create_chain` **逐码点 fallback 链**：每个 codepoint 路由到链上第一个含该字形的 face，CJK 无 Latin / Latin 无 CJK 的字体组合透明工作，dxx 即 [DroidSansFallback, LiberationSans]）。
+- 两实现：`my_font_bitmap`（内置 8x8 等宽位图字体，ASCII 32..126，零依赖兜底，数据由 `tools/gen_bitmap_font.c` 从 Liberation Sans(OFL) 生成并提交，可用该脚本重新生成）；`my_font_stb`（stb_truetype 后端，编译选项 `MYUI_FONT_STB` 默认 ON，OFF 时嵌入式裁剪；LRU 字形缓存默认 256 项，容量可配，命中/淘汰有诊断计数器；M14b 起支持 .ttc 首 face——"ttcf" 头检测 + `stbtt_GetFontOffsetForIndex`，注意 CFF2 可变字体如 NotoSansCJK-VF 仍不可解析）；**`my_font_ft`（M16，FreeType 后端，选项 `MYUI_FONT_FREETYPE` 默认 ON、无 freetype2 自动 OFF）：hinted 渲染（FT_LOAD_DEFAULT + RENDER_MODE_NORMAL），小字号明显比无 hinting 的 stb 锐利（测试以"中间覆盖率像素占比"断言 ft < stb×0.95）；LRU 缓存同构仿写**。
+- **fallback 链（M14b 起，M16 后端无关化）**：`my_font_create_chain`——face 按路径数组加载（有 FT 优先 FT、否则 stb），每个 codepoint 经新 vtable 槽 `has_glyph`（追加槽，NULL=假定有）路由到第一个含该字形的 face；dxx 即 [DroidSansFallback, LiberationSans]。
 - 渲染落地：vgcanvas vtable 增加 `set_font(font, size)`（font 可 NULL 仅改字号）与 `measure_text`；soft backend 的 draw_text 把字形 alpha 经 `my_lcd_blend_span`（lcd vtable 新增的 src-over span 混合，各格式特化）写入；gles2 backend 把字形上传为 alpha 纹理（64 项直接映射缓存），第二套纹理着色器 + quad 绘制（纹理图集批提交为 TODO）。
 - 控件：button/label 用 measure 居中真实文本，主题键 `font_size`/`fg_color` 生效；无字体时回退旧占位条（兼容老测试）。窗口 `my_window_set_font` 设默认字体。
 - 第三方说明：`3rd/stb/stb_truetype.h`（public domain），其实现宏单独成 TU 并仅对该文件放宽警告，项目自身标准不变。
@@ -285,6 +286,7 @@ PAL port 矩阵：
 - **交互**：栏体 POINTER_DOWN → `begin_move`（关闭钮是子控件先吃事件，天然排除）；关闭钮 click → 经 `win->wm`（wm_open 时设置，close/destroy 时清 NULL + 吸收 CSD create ref）**延迟 1ms 定时器**关闭（同步关闭会在 dispatch 中途释放控件树，与 dialog 延迟关闭同因同构）；无 wm 时 no-op（注释注明）。
 - **引用计数契约**：通用模式 `unref(my_window_widget(win))` 在 CSD 下落在内容容器上——容器在 setup 时多拿一引用与之平衡；窗口 create ref 由 wm close/destroy 对 CSD 窗口多 unref 一次吸收（代码注释钉死），泄漏测试（debug allocator）固化全路径平衡。dialog 自动获得 CSD（拖动 + 关闭钮）。
 - **测试钩子**：dummy port `my_pal_dummy_set_needs_csd` / `my_pal_dummy_begin_move_count`。最大化/最小化钮、边缘 resize、双击最大化为 TODO。
+- **圆角窗口角（同里程碑）**：shm 格式 XRGB8888→**ARGB8888**（像素布局不变，alpha 生效）；`present()` 在 memcpy 后对四角做 alpha 冲孔（`myui_wl_corner_mask`，半径 10px×scale，像素中心整数弧判定，每角 ~100 像素开销可忽略）——此 port 目标合成器均不供 SSD，无条件生效（注释钉死）；x11/dummy 不动。
 
 ## 框架补齐：flow / rich_label / scroll_view / hover（M14a）
 

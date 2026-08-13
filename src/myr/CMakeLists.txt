@@ -8,6 +8,7 @@ add_library(myr STATIC
   my_gl_real.c
   my_font.c
   my_font_stb.c
+  my_font_ft.c
   my_stb_truetype.c
   my_arabic_shape.c
   my_text_layout.c
@@ -17,6 +18,21 @@ add_library(myr STATIC
 target_include_directories(myr PUBLIC ${CMAKE_SOURCE_DIR}/src)
 target_include_directories(myr PRIVATE ${CMAKE_SOURCE_DIR}/3rd)
 target_link_libraries(myr PUBLIC myc)
+
+# FreeType backend (M16): hinted glyphs; auto-OFF when freetype2 is absent
+if(MYUI_FONT_FREETYPE)
+  find_package(PkgConfig QUIET)
+  if(PkgConfig_FOUND)
+    pkg_check_modules(FREETYPE freetype2)
+  endif()
+  if(FREETYPE_FOUND)
+    target_compile_definitions(myr PUBLIC MYUI_FONT_FREETYPE)
+    target_include_directories(myr PUBLIC ${FREETYPE_INCLUDE_DIRS})
+    target_link_libraries(myr PUBLIC ${FREETYPE_LIBRARIES})
+  else()
+    message(STATUS "myui: freetype2 not found, MYUI_FONT_FREETYPE forced OFF")
+  endif()
+endif()
 
 # third-party single-header lib: relax warnings ONLY for this TU
 # (stb_truetype is not -pedantic clean; the project's own bar is unchanged)

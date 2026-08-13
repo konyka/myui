@@ -68,7 +68,9 @@ static void stat_btn_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
   int32_t vw = 0;
   float x;
   float y = ((float)widget->rect.h - 13.0f) / 2.0f;
-  if (!b->active && widget->hovered) {
+  if (b->pressed) {
+    bg = darken(darken(bg)); /* held down: deepest (bootstrap active look) */
+  } else if (!b->active && widget->hovered) {
     bg = darken_hover(bg); /* hover feedback (M16) */
   }
   white_bg = s->bg == DXX_COLOR_WHITE; /* border decision uses base color */
@@ -115,6 +117,7 @@ static my_ret_t stat_btn_event(my_widget_t* widget, const my_event_t* event) {
   stat_btn_t* b = (stat_btn_t*)widget;
   if (event->type == MY_EVENT_POINTER_DOWN) {
     b->pressed = true;
+    my_widget_invalidate(widget, NULL); /* pressed visual (M16) */
     return MY_RET_OK;
   }
   if (event->type == MY_EVENT_POINTER_UP) {
@@ -124,6 +127,7 @@ static my_ret_t stat_btn_event(my_widget_t* widget, const my_event_t* event) {
       return MY_RET_FAIL;
     }
     b->pressed = false;
+    my_widget_invalidate(widget, NULL);
     my_widget_global_to_local(widget, &lx, &ly);
     inside = lx >= 0 && ly >= 0 && lx < widget->rect.w && ly < widget->rect.h;
     if (inside) {

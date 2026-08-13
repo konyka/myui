@@ -177,128 +177,15 @@ static void stb_destroy(my_font_t* font) {
   my_mem_free(f->allocator, f);
 }
 
+static bool stb_has_glyph(my_font_t* font, uint32_t codepoint) {
+  my_font_stb_t* f = (my_font_stb_t*)font;
+  return stbtt_FindGlyphIndex(&f->info, (int)codepoint) != 0;
+}
+
 static const my_font_vtable_t s_stb_vtable = {stb_measure, stb_get_glyph,
                                               stb_ascent, stb_descent,
-                                              stb_line_height, stb_destroy};
-
-/* ---------------- fallback chain (M14b) ----------------
- * CJK fonts often ship without Latin glyphs (e.g. DroidSansFallback)
- * and vice versa; the chain routes each codepoint to the first face
- * that actually contains it. */
-
-typedef struct my_font_chain_t {
-  my_font_t base;
-  const my_allocator_t* allocator;
-  my_font_t** faces; /**< owned array (each a my_font_stb_t) */
-  size_t count;
-} my_font_chain_t;
-
-/** @brief First face containing cp; the last face when none has it. */
-static my_font_t* chain_face_for(my_font_chain_t* c, uint32_t cp) {
-  size_t i;
-  for (i = 0; i < c->count; i++) {
-    my_font_stb_t* f = (my_font_stb_t*)c->faces[i];
-    if (stbtt_FindGlyphIndex(&f->info, (int)cp) != 0) {
-      return c->faces[i];
-    }
-  }
-  return c->faces[c->count - 1];
-}
-
-static my_ret_t chain_measure(my_font_t* font, const char* text, int32_t size,
-                              int32_t* w, int32_t* h) {
-  my_font_chain_t* c = (my_font_chain_t*)font;
-  const char* p = text;
-  float width = 0.0f;
-  if (text == NULL || size <= 0) {
-    return MY_RET_INVALID_PARAMS;
-  }
-  while (*p != '\0') {
-    uint32_t cp = my_utf8_next(&p);
-    my_font_stb_t* f = (my_font_stb_t*)chain_face_for(c, cp);
-    int adv, lsb;
-    stbtt_GetCodepointHMetrics(&f->info, (int)cp, &adv, &lsb);
-    width += (float)adv * stb_scale(f, size);
-  }
-  if (w != NULL) {
-    *w = (int32_t)(width + 0.5f);
-  }
-  if (h != NULL) {
-    *h = my_font_line_height(c->faces[0], size);
-  }
-  return MY_RET_OK;
-}
-
-static my_ret_t chain_get_glyph(my_font_t* font, uint32_t codepoint,
-                                int32_t size, my_glyph_t* glyph) {
-  my_font_chain_t* c = (my_font_chain_t*)font;
-  return stb_get_glyph(chain_face_for(c, codepoint), codepoint, size, glyph);
-}
-
-static int32_t chain_ascent(my_font_t* font, int32_t size) {
-  return stb_ascent(((my_font_chain_t*)font)->faces[0], size);
-}
-
-static int32_t chain_descent(my_font_t* font, int32_t size) {
-  return stb_descent(((my_font_chain_t*)font)->faces[0], size);
-}
-
-static int32_t chain_line_height(my_font_t* font, int32_t size) {
-  return stb_line_height(((my_font_chain_t*)font)->faces[0], size);
-}
-
-static void chain_destroy(my_font_t* font) {
-  my_font_chain_t* c = (my_font_chain_t*)font;
-  size_t i;
-  if (c == NULL) {
-    return;
-  }
-  for (i = 0; i < c->count; i++) {
-    my_font_destroy(c->faces[i]);
-  }
-  my_mem_free(c->allocator, c->faces);
-  my_mem_free(c->allocator, c);
-}
-
-static const my_font_vtable_t s_chain_vtable = {
-    chain_measure, chain_get_glyph,  chain_ascent,
-    chain_descent, chain_line_height, chain_destroy};
-
-my_font_t* my_font_stb_create_chain(const my_allocator_t* allocator,
-                                    const char* const* paths,
-                                    size_t path_count, size_t cache_capacity) {
-  my_font_chain_t* c;
-  size_t i;
-  if (paths == NULL || path_count == 0) {
-    return NULL;
-  }
-  c = (my_font_chain_t*)my_mem_calloc(allocator, 1, sizeof(my_font_chain_t));
-  if (c == NULL) {
-    return NULL;
-  }
-  c->allocator = allocator;
-  c->faces = (my_font_t**)my_mem_calloc(allocator, path_count,
-                                        sizeof(my_font_t*));
-  if (c->faces == NULL) {
-    my_mem_free(allocator, c);
-    return NULL;
-  }
-  for (i = 0; i < path_count; i++) {
-    /* faces that fail to load are skipped (missing file, CFF2-only
-     * OpenType that stb cannot parse, ...) */
-    my_font_t* f = my_font_stb_create(allocator, paths[i], cache_capacity);
-    if (f != NULL) {
-      c->faces[c->count++] = f;
-    }
-  }
-  if (c->count == 0) {
-    my_mem_free(allocator, c->faces);
-    my_mem_free(allocator, c);
-    return NULL;
-  }
-  c->base.vtable = &s_chain_vtable;
-  return (my_font_t*)c;
-}
+                                              stb_line_height, stb_destroy,
+                                              stb_has_glyph};
 
 my_font_t* my_font_stb_create(const my_allocator_t* allocator, const char* path,
                               size_t cache_capacity) {
@@ -365,16 +252,6 @@ my_font_t* my_font_stb_create(const my_allocator_t* allocator, const char* path,
                               size_t cache_capacity) {
   (void)allocator;
   (void)path;
-  (void)cache_capacity;
-  return NULL;
-}
-
-my_font_t* my_font_stb_create_chain(const my_allocator_t* allocator,
-                                    const char* const* paths,
-                                    size_t path_count, size_t cache_capacity) {
-  (void)allocator;
-  (void)paths;
-  (void)path_count;
   (void)cache_capacity;
   return NULL;
 }

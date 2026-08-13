@@ -125,10 +125,18 @@ static void x11_lcd_destroy(my_lcd_t* lcd) {
   }
 }
 
+static uint8_t* x11_lcd_buffer(my_lcd_t* lcd) {
+  return my_lcd_get_buffer(((x11_lcd_t*)lcd)->mem);
+}
+static uint32_t x11_lcd_stride(my_lcd_t* lcd) {
+  return my_lcd_get_stride(((x11_lcd_t*)lcd)->mem);
+}
+
 static const my_lcd_vtable_t s_x11_lcd_vtable = {
     x11_lcd_get_width,  x11_lcd_get_height, x11_lcd_get_format,
     x11_lcd_begin_frame, x11_lcd_end_frame, x11_lcd_draw_pixels,
-    x11_lcd_fill_rect, x11_lcd_blend_span, x11_lcd_destroy};
+    x11_lcd_fill_rect, x11_lcd_blend_span, x11_lcd_destroy,
+    x11_lcd_buffer, x11_lcd_stride};
 
 /* window vtable */
 

@@ -37,6 +37,9 @@ typedef struct my_font_vtable_t {
   int32_t (*descent)(my_font_t* font, int32_t size); /**< negative or 0 */
   int32_t (*line_height)(my_font_t* font, int32_t size);
   void (*destroy)(my_font_t* font);
+  /** @brief Whether the face has a glyph for cp (M16; appended slot,
+   * NULL = "assume yes"). Used by the fallback chain. */
+  bool (*has_glyph)(my_font_t* font, uint32_t codepoint);
 } my_font_vtable_t;
 
 /** @brief Font base "class". */
@@ -68,6 +71,23 @@ static inline void my_font_destroy(my_font_t* font) {
   }
 }
 
+/** @brief Whether the face has a glyph for codepoint (M16; NULL vtable
+ * slot = assume yes). */
+static inline bool my_font_has_glyph(my_font_t* font, uint32_t codepoint) {
+  return font->vtable->has_glyph == NULL ||
+         font->vtable->has_glyph(font, codepoint);
+}
+
+/**
+ * @brief Fallback chain (M14b; backend-neutral since M16): load several
+ * faces (FreeType preferred when built with MYUI_FONT_FREETYPE, stb
+ * otherwise); each codepoint is routed to the first face containing it.
+ * Faces that fail to load are skipped; NULL when no face loads.
+ */
+my_font_t* my_font_create_chain(const my_allocator_t* allocator,
+                                const char* const* paths, size_t path_count,
+                                size_t cache_capacity);
+
 /**
  * @brief Decode the first UTF-8 codepoint of s and advance the pointer.
  * Invalid bytes decode as 0xFFFD (advance 1). s must not be empty.
@@ -89,20 +109,15 @@ my_font_t* my_font_bitmap_create(const my_allocator_t* allocator);
 my_font_t* my_font_stb_create(const my_allocator_t* allocator, const char* path,
                               size_t cache_capacity);
 
-/**
- * @brief Fallback chain (M14b): load several faces; each codepoint is
- * routed to the first face containing it (CJK fonts without Latin +
- * Latin fonts without CJK combine transparently). Faces that fail to
- * load are skipped; NULL when no face loads (or STB is trimmed).
- */
-my_font_t* my_font_stb_create_chain(const my_allocator_t* allocator,
-                                    const char* const* paths,
-                                    size_t path_count, size_t cache_capacity);
-
 /** @brief Test/diagnostics: glyph cache hit counter (0 without STB). */
 size_t my_font_stb_cache_hits(my_font_t* font);
 
 /** @brief Test/diagnostics: glyph cache miss counter (0 without STB). */
 size_t my_font_stb_cache_misses(my_font_t* font);
+
+/** @brief FreeType backend (M16, hinted): see my_font_ft.h. */
+my_font_t* my_font_ft_create(const my_allocator_t* allocator,
+                             const char* path, int32_t face_index,
+                             size_t cache_capacity);
 
 #endif /* MY_FONT_H */

@@ -42,7 +42,8 @@ elseif(MYUI_PAL_RESOLVED STREQUAL "wayland")
     DEPENDS ${XDG_SHELL_XML} ${TEXT_INPUT_XML}
     COMMENT "Generating xdg-shell and text-input-v3 protocol code")
   list(APPEND MYPAL_SOURCES
-    wayland/my_pal_wayland.c wayland/my_pal_wayland_keymap.c ${XDG_SHELL_C}
+    wayland/my_pal_wayland.c wayland/my_pal_wayland_keymap.c
+    wayland/my_pal_wayland_csd.c ${XDG_SHELL_C}
     ${TEXT_INPUT_C})
 endif()
 

@@ -11,6 +11,7 @@ option(MYUI_FONT_STB "TrueType fonts via stb_truetype (OFF = bitmap font only)" 
 option(MYUI_UI_XML "XML UI loader (OFF trims parser + loader)" ON)
 option(MYUI_IMAGE_STB "Image decode via stb_image (OFF = placeholder)" ON)
 option(MYUI_BIDI "BiDi reorder + Arabic shaping (vendored SheenBidi)" ON)
+option(MYUI_FONT_FREETYPE "Hinted fonts via libfreetype (auto-OFF when absent)" ON)
 set(MYUI_C_STANDARD "99" CACHE STRING "C standard to compile with (99/11/17/23)")
 set_property(CACHE MYUI_C_STANDARD PROPERTY STRINGS 99 11 17 23)
 

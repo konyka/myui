@@ -66,6 +66,10 @@ typedef struct my_lcd_vtable_t {
   my_ret_t (*blend_span)(my_lcd_t* lcd, int32_t x, int32_t y,
                          const uint8_t* alpha, int32_t n, my_color_t color);
   void (*destroy)(my_lcd_t* lcd);
+  /** @brief Optional: raw framebuffer access (mem-backed lcds; wrappers
+   * forward). NULL when the backend has no readable buffer. */
+  uint8_t* (*get_buffer)(my_lcd_t* lcd);
+  uint32_t (*get_stride)(my_lcd_t* lcd);
 } my_lcd_vtable_t;
 
 /** @brief LCD base "class": first member of every backend. */
@@ -75,6 +79,14 @@ struct my_lcd_t {
 
 static inline uint32_t my_lcd_get_width(my_lcd_t* lcd) {
   return lcd->vtable->get_width(lcd);
+}
+
+/** @brief Raw framebuffer access; NULL when the backend has none. */
+static inline uint8_t* my_lcd_get_buffer(my_lcd_t* lcd) {
+  return lcd->vtable->get_buffer != NULL ? lcd->vtable->get_buffer(lcd) : NULL;
+}
+static inline uint32_t my_lcd_get_stride(my_lcd_t* lcd) {
+  return lcd->vtable->get_stride != NULL ? lcd->vtable->get_stride(lcd) : 0;
 }
 
 static inline uint32_t my_lcd_get_height(my_lcd_t* lcd) {

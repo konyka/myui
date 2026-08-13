@@ -206,10 +206,13 @@ static void edit_apply_undo_op(void* widget, const my_undo_op_t* op) {
 
 /* ---------------- measuring ---------------- */
 
+static my_font_t* edit_eff_font(my_edit_t* e);
+static int32_t edit_eff_font_size(my_edit_t* e);
+
 static int32_t text_px(my_edit_t* e, const char* s, size_t n) {
   char buf[128];
   int32_t w = 0;
-  if (e->font == NULL) {
+  if (edit_eff_font(e) == NULL) {
     size_t i, cps = 0;
     for (i = 0; i < n; i++) {
       if ((s[i] & 0xC0) != 0x80) {
@@ -223,7 +226,7 @@ static int32_t text_px(my_edit_t* e, const char* s, size_t n) {
   }
   memcpy(buf, s, n);
   buf[n] = '\0';
-  my_font_measure(e->font, buf, e->font_size, &w, NULL);
+  my_font_measure(edit_eff_font(e), buf, edit_eff_font_size(e), &w, NULL);
   return w;
 }
 
@@ -248,6 +251,28 @@ static size_t edit_cp_index_of(const char* s, size_t byte_off) {
   return idx;
 }
 
+/** @brief Effective font: the edit's own, else the window default (M16 —
+ * rendering used the vg/window font while measurement used the 8px cell
+ * fallback, putting the caret at the wrong x for CJK text). */
+static my_font_t* edit_eff_font(my_edit_t* e) {
+  if (e->font == NULL) {
+    my_font_t* f = NULL;
+    my_window_font_of_widget((my_widget_t*)e, &f, NULL);
+    return f;
+  }
+  return e->font;
+}
+static int32_t edit_eff_font_size(my_edit_t* e) {
+  if (e->font == NULL) {
+    int32_t fs = 0;
+    my_window_font_of_widget((my_widget_t*)e, NULL, &fs);
+    if (fs > 0) {
+      return fs;
+    }
+  }
+  return e->font_size;
+}
+
 /** @brief Byte offset of a codepoint index. */
 static size_t edit_byte_of_cp(const char* s, size_t cp_idx) {
   size_t pos = 0;
@@ -267,7 +292,7 @@ static int32_t edit_cursor_px(my_edit_t* e, const char* shown,
   if (l == NULL) {
     return text_px(e, shown, byte_off);
   }
-  x = my_text_layout_visual_x(l, e->font, e->font_size,
+  x = my_text_layout_visual_x(l, edit_eff_font(e), edit_eff_font_size(e),
                               edit_cp_index_of(shown, byte_off));
   my_text_layout_destroy(l);
   return x;
@@ -286,7 +311,7 @@ static size_t locate_cursor(my_edit_t* e, int32_t local_x) {
     /* RTL (M12a): hit-test in visual space via the layout mapping */
     my_text_layout_t* l = edit_layout_rtl(e, s);
     if (l != NULL) {
-      size_t idx = my_text_layout_logical_at_x(l, e->font, e->font_size,
+      size_t idx = my_text_layout_logical_at_x(l, edit_eff_font(e), edit_eff_font_size(e),
                                                target);
       my_text_layout_destroy(l);
       return edit_byte_of_cp(s, idx);
@@ -665,7 +690,7 @@ static void edit_on_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
   my_vgcanvas_clip_rect(vg, &(my_rectf_t){EDIT_PAD_X, 0,
                                           (float)(widget->rect.w - 2 * EDIT_PAD_X),
                                           (float)widget->rect.h});
-  text_y = (widget->rect.h - e->font_size) / 2;
+  text_y = (widget->rect.h - edit_eff_font_size(e)) / 2;
 
   if (shown == NULL || *shown == '\0') {
     if (e->hint != NULL && !e->focused) {
@@ -684,7 +709,7 @@ static void edit_on_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
          * several visual segments at run boundaries */
         my_rectf_t rects[4];
         size_t n = my_text_layout_visual_rects(
-            l, e->font, e->font_size, edit_cp_index_of(shown, a),
+            l, edit_eff_font(e), edit_eff_font_size(e), edit_cp_index_of(shown, a),
             edit_cp_index_of(shown, b), rects, 4);
         size_t k;
         for (k = 0; k < n && k < 4; k++) {
@@ -719,15 +744,20 @@ static void edit_on_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
           pw > 0) {
         my_vgcanvas_fill_rect(
             vg, &(my_rectf_t){(float)(EDIT_PAD_X + cx - e->scroll_x),
-                              (float)(text_y + e->font_size + 1), (float)pw,
+                              (float)(text_y + edit_eff_font_size(e) + 1), (float)pw,
                               1.0f});
       }
     }
   }
 
-  /* cursor (blinks at 500ms when focused) */
+  /* cursor (blinks at 500ms when focused); during IME composition it sits
+   * at the caret inside the preedit text, not at the document position */
   if (e->focused && e->cursor_visible) {
     int32_t cx = shown != NULL ? edit_cursor_px(e, shown, e->cursor) : 0;
+    if (e->ime_preedit != NULL && e->ime_caret > 0) {
+      cx += text_px(e, e->ime_preedit,
+                    edit_byte_of_cp(e->ime_preedit, (size_t)e->ime_caret));
+    }
     my_vgcanvas_set_fill_color(vg, my_color_from_rgba32(fg));
     my_vgcanvas_fill_rect(vg, &(my_rectf_t){(float)(EDIT_PAD_X + cx - e->scroll_x),
                                             EDIT_PAD_Y + 1, 1,

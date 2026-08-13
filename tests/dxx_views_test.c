@@ -162,7 +162,7 @@ static void test_font_chain_routes_latin_and_cjk(void) {
     return;
   }
   fclose(probe);
-  f = my_font_stb_create_chain(NULL, paths, 2, 0);
+  f = my_font_create_chain(NULL, paths, 2, 0);
   TEST_ASSERT(f != NULL);
   /* Latin routed to Liberation (nonzero advance), CJK to Droid */
   TEST_ASSERT_EQ_INT(my_font_get_glyph(f, '1', 16, &g), MY_RET_OK);
@@ -192,10 +192,10 @@ static void test_font_chain_skips_unloadable(void) {
     return;
   }
   fclose(probe);
-  f = my_font_stb_create_chain(NULL, paths, 2, 0);
+  f = my_font_create_chain(NULL, paths, 2, 0);
   TEST_ASSERT(f != NULL); /* first face skipped, second loads */
   my_font_destroy(f);
-  f = my_font_stb_create_chain(NULL, paths, 1, 0);
+  f = my_font_create_chain(NULL, paths, 1, 0);
   TEST_ASSERT(f == NULL); /* all unloadable -> NULL */
 #else
   fprintf(stdout, "SKIP: MYUI_FONT_STB off\n");
