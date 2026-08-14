@@ -119,7 +119,7 @@ static void test_visibility_and_enable(void) {
       NULL, pal,
       "<window w=\"100\" h=\"100\">"
       "<button text=\"a\" visible=\"false\"/>"
-      "<button text=\"b\" enable=\"false\" tooltip=\"hint b\"/>"
+      "<button text=\"b\" enable=\"false\" tooltip=\"hint b\" class=\"primary big\"/>"
       "</window>",
       NULL);
   my_widget_t* a = my_widget_get_child(root, 0);
@@ -127,6 +127,7 @@ static void test_visibility_and_enable(void) {
   TEST_ASSERT(!a->visible);
   TEST_ASSERT(!b->enable);
   TEST_ASSERT(my_str_eq(my_widget_get_tooltip(b), "hint b"));
+  TEST_ASSERT(my_str_eq(my_widget_get_style_class(b), "primary big"));
   my_widget_unref(root);
   my_pal_destroy(pal);
 }

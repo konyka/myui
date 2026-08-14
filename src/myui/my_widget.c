@@ -84,6 +84,8 @@ void my_widget_destroy(my_widget_t* widget) {
   widget->bind_rules = NULL;
   my_mem_free(((my_object_t*)widget)->allocator, widget->tooltip);
   widget->tooltip = NULL;
+  my_mem_free(((my_object_t*)widget)->allocator, widget->style_class);
+  widget->style_class = NULL;
   if (widget->local_style != NULL) {
     my_style_reset(widget->local_style);
     my_mem_free(((my_object_t*)widget)->allocator, widget->local_style);
@@ -228,6 +230,27 @@ my_ret_t my_widget_set_tooltip(my_widget_t* widget, const char* text) {
 
 const char* my_widget_get_tooltip(const my_widget_t* widget) {
   return widget == NULL ? NULL : widget->tooltip;
+}
+
+my_ret_t my_widget_set_style_class(my_widget_t* widget, const char* cls) {
+  const my_allocator_t* alloc;
+  char* copy;
+  if (widget == NULL) {
+    return MY_RET_INVALID_PARAMS;
+  }
+  alloc = ((my_object_t*)widget)->allocator;
+  copy = my_strdup(alloc, cls);
+  if (cls != NULL && copy == NULL) {
+    return MY_RET_OOM;
+  }
+  my_mem_free(alloc, widget->style_class);
+  widget->style_class = copy;
+  my_widget_invalidate(widget, NULL); /* class rules may differ */
+  return MY_RET_OK;
+}
+
+const char* my_widget_get_style_class(const my_widget_t* widget) {
+  return widget == NULL ? NULL : widget->style_class;
 }
 
 my_ret_t my_widget_set_bind_rules(my_widget_t* widget, const char* rules) {

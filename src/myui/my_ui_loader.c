@@ -275,6 +275,9 @@ static my_ret_t apply_common(my_widget_t* widget, const my_xml_node_t* node,
   if (my_xml_node_attr(node, "tooltip") != NULL) {
     my_widget_set_tooltip(widget, my_xml_node_attr(node, "tooltip"));
   }
+  if (my_xml_node_attr(node, "class") != NULL) {
+    my_widget_set_style_class(widget, my_xml_node_attr(node, "class"));
+  }
   if (lp != NULL &&
       my_widget_set_layout_params(widget, lp) != MY_RET_OK) {
     if (err != NULL) {

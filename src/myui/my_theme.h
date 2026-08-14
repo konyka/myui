@@ -19,10 +19,14 @@
 #define MY_THEME_TYPE_LEN 24
 #define MY_THEME_NAME_LEN 32
 
-/** @brief One theme rule: style for a (type [, name]) pair. */
+/** @brief One theme rule: style for a (type [, name][, class]
+ * [, ancestor-type]) selector. */
 typedef struct my_theme_entry_t {
-  char widget_type[MY_THEME_TYPE_LEN]; /**< e.g. "button" */
-  char name[MY_THEME_NAME_LEN];        /**< empty = type-wide rule */
+  char widget_type[MY_THEME_TYPE_LEN]; /**< e.g. "button"; "" = any */
+  char name[MY_THEME_NAME_LEN];        /**< CSS #id == widget name; empty = none */
+  char style_class[MY_THEME_NAME_LEN]; /**< CSS .class (one word); empty = none */
+  char ancestor_type[MY_THEME_TYPE_LEN]; /**< descendant selector: needs an
+                                          * ancestor of this type; empty = none */
   my_style_t style;
 } my_theme_entry_t;
 
@@ -58,6 +62,29 @@ my_ret_t my_theme_set_int(my_theme_t* theme, const char* widget_type,
 const my_value_t* my_theme_get(const my_theme_t* theme, const char* widget_type,
                                const char* name, my_widget_state_t state,
                                const char* key);
+
+/**
+ * @brief Extended rule write (M18a CSS bridge): class = one class word
+ * (word-matched against the widget's style_class), ancestor_type =
+ * descendant requirement (the widget needs some ancestor of this
+ * type). Same selector rewrites in place (source-order override).
+ */
+my_ret_t my_theme_set_ex(my_theme_t* theme, const char* widget_type,
+                         const char* name, const char* style_class,
+                         const char* ancestor_type, my_widget_state_t state,
+                         const char* key, const my_value_t* value);
+
+struct my_widget_t;
+/**
+ * @brief Widget-aware lookup with the CSS cascade (M18a): #id > .class
+ * > type (state -> normal fallback at each level; descendant selectors
+ * need an ancestor of the given type). Reduces to the plain (type,name)
+ * chain for text-format-only themes.
+ */
+const my_value_t* my_theme_get_for_widget(const my_theme_t* theme,
+                                          const struct my_widget_t* widget,
+                                          my_widget_state_t state,
+                                          const char* key);
 
 /** @brief Built-in default theme (light palette for window/button/label). */
 my_theme_t* my_theme_default_create(const my_allocator_t* allocator);

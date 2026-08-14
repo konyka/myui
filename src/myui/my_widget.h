@@ -93,6 +93,7 @@ struct my_widget_t {
   my_theme_t* theme;                /**< weak; lookup climbs ancestors */
   void* user_data;  /**< app/owner pointer, unused by the core (M13c) */
   char* tooltip;    /**< owned hover hint text, NULL = none (M13c) */
+  char* style_class; /**< owned: space-separated CSS classes (M18a) */
   char* bind_rules;                 /**< owned: MVVM rules (M4b), ";" separated */
   void* anim_mgr;                   /**< root only, weak (my_animator) */
   my_widget_removed_hook_t removed_hook; /**< root only: subtree removed */
@@ -152,6 +153,13 @@ my_ret_t my_widget_set_tooltip(my_widget_t* widget, const char* text);
 
 /** @brief The tooltip text (NULL when none). */
 const char* my_widget_get_tooltip(const my_widget_t* widget);
+
+/** @brief Set the space-separated CSS class list (copied; NULL clears).
+ * Drives .class theme rules (M18a). */
+my_ret_t my_widget_set_style_class(my_widget_t* widget, const char* cls);
+
+/** @brief The style class string (NULL when none). */
+const char* my_widget_get_style_class(const my_widget_t* widget);
 
 /** @brief Attach MVVM binding rules (";"-separated, see docs/mvvm.md). */
 my_ret_t my_widget_set_bind_rules(my_widget_t* widget, const char* rules);

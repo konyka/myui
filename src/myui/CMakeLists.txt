@@ -29,6 +29,7 @@ add_library(myui STATIC
   widgets/my_menu.c
   widgets/my_rich_label.c
   widgets/my_scroll_view.c
+  my_css.c
 )
 
 target_include_directories(myui PUBLIC ${CMAKE_SOURCE_DIR}/src)
