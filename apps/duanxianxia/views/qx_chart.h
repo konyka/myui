@@ -27,6 +27,9 @@ void dxx_chart_set_series(my_widget_t* chart, const char* name,
                           const float* points, int count, float ymin,
                           float ymax);
 
+/** @brief Set bucket labels for bar mode (borrowed). */
+void dxx_chart_set_labels(my_widget_t* chart, const char* const* labels);
+
 /** @brief Current series name (NULL when never set). */
 const char* dxx_chart_get_series_name(my_widget_t* chart);
 

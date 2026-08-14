@@ -317,6 +317,7 @@ my_widget_t* dxx_build_emotion_card(my_widget_t* parent, int32_t x, int32_t y,
   my_widget_set_rect(bar_chart,
                      &(my_rect_t){8, CHART_AREA_Y, bw, 275});
   dxx_chart_set_series(bar_chart, "涨幅分布", DXX_DIST, DXX_DIST_COUNT, 0, 0);
+  dxx_chart_set_labels(bar_chart, DXX_DIST_LABELS);
   my_widget_add_child((my_widget_t*)card, bar_chart);
   my_widget_unref(bar_chart);
   line_chart = dxx_chart_create(NULL, DXX_CHART_LINE);

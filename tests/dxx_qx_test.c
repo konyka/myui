@@ -91,10 +91,13 @@ static void test_bar_chart_red_green(void) {
   rec_vg_t rec;
   my_widget_set_rect(c, &(my_rect_t){0, 0, 180, 275});
   dxx_chart_set_series(c, "涨幅分布", DXX_DIST, DXX_DIST_COUNT, 0, 0);
+  dxx_chart_set_labels(c, DXX_DIST_LABELS);
   paint_chart(c, &rec);
-  TEST_ASSERT(rec_has(&rec, "set_fill #ff0000")); /* up bars */
-  TEST_ASSERT(rec_has(&rec, "set_fill #008000")); /* down bars */
-  TEST_ASSERT(rec_has(&rec, "涨幅分布"));
+  /* echarts-style horizontal buckets (M17): drop / flat / rise colors */
+  TEST_ASSERT(rec_has(&rec, "set_fill #4fb771")); /* 跌幅档 */
+  TEST_ASSERT(rec_has(&rec, "set_fill #acb0c0")); /* 平盘 */
+  TEST_ASSERT(rec_has(&rec, "set_fill #e5562c")); /* 涨幅档 */
+  TEST_ASSERT(rec_has(&rec, "draw_text"));      /* category + value labels */
   my_widget_unref(c);
 }
 
@@ -170,7 +173,7 @@ static void test_stats_data_snapshot(void) {
   TEST_ASSERT_EQ_INT(DXX_SERIES[0].count, 61);
   TEST_ASSERT_EQ_INT(DXX_SERIES[1].count, 61);
   TEST_ASSERT_EQ_INT(DXX_SERIES[2].count, 61);
-  TEST_ASSERT_EQ_INT(DXX_DIST_COUNT, 10);
+  TEST_ASSERT_EQ_INT(DXX_DIST_COUNT, 11);
 }
 
 MYTEST_MAIN_BEGIN()

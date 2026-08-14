@@ -11,6 +11,10 @@
 
 #include <stdio.h>
 
+#include "myui/my_window.h"
+#include "myr/my_font.h"
+#include "../dxx_data.h"
+
 #include "../dxx_theme.h"
 
 #define CHART_PAD_L 36
@@ -23,7 +27,8 @@ typedef struct dxx_chart_t {
   my_widget_t base;
   dxx_chart_mode_t mode;
   char name[32];
-  const float* points; /**< borrowed */
+  const float* points;            /**< borrowed */
+  const char* const* labels;      /**< borrowed bucket labels (bar mode) */
   int count;
   float ymin;
   float ymax;
@@ -106,17 +111,26 @@ static void chart_line_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
   }
 }
 
+/* echarts 风格横向分布条形（对齐原站 qxlive 的 zf 图）：类别标签在左、
+ * 桶色 跌停 #C4E7CF / 跌档 #4FB771 / 平盘 #ACB0C0 / 涨档 #E5562C、
+ * 数值标签在条形右端，无坐标轴/网格线。 */
+#define DIST_LABEL_W 44
+#define DIST_VALUE_W 34
+static const uint32_t DIST_COLORS[DXX_DIST_COUNT] = {
+    0xC4E7CFFFu, 0x4FB771FFu, 0x4FB771FFu, 0x4FB771FFu,
+    0x4FB771FFu, 0xACB0C0FFu, 0xE5562CFFu, 0xE5562CFFu,
+    0xE5562CFFu, 0xE5562CFFu, 0xE5562CFFu,
+};
+
 static void chart_bar_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
   dxx_chart_t* c = (dxx_chart_t*)widget;
-  int32_t plot_w = widget->rect.w - CHART_PAD_R - 8;
-  int32_t plot_h = widget->rect.h - CHART_PAD_T - 8;
-  float mid_y = (float)CHART_PAD_T + (float)plot_h / 2.0f;
+  int32_t plot_w = widget->rect.w - DIST_LABEL_W - DIST_VALUE_W - 10;
+  int32_t plot_h = widget->rect.h - 6;
   float max_v = 1.0f;
-  float bw;
+  float row_h;
   int i;
-  my_vgcanvas_set_font(vg, NULL, 12);
-  my_vgcanvas_set_fill_color(vg, my_color_from_rgba32(DXX_COLOR_TEXT));
-  my_vgcanvas_draw_text(vg, c->name, 8, 6);
+  my_font_t* f = NULL;
+  int32_t ascent = 0;
   if (c->points == NULL || c->count <= 0 || plot_w <= 0 || plot_h <= 0) {
     return;
   }
@@ -126,18 +140,34 @@ static void chart_bar_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
       max_v = v;
     }
   }
-  /* center axis */
-  my_vgcanvas_set_fill_color(vg, my_color_from_rgba32(0xDDDDDDFFu));
-  my_vgcanvas_fill_rect(vg, &(my_rectf_t){4, mid_y, (float)plot_w, 1});
-  bw = (float)plot_w / (float)c->count - 2.0f;
+  my_vgcanvas_set_font(vg, NULL, 11);
+  my_window_font_of_widget(widget, &f, NULL);
+  if (f != NULL) {
+    ascent = my_font_ascent(f, 11);
+  }
+  row_h = (float)plot_h / (float)c->count;
   for (i = 0; i < c->count; i++) {
-    float v = c->points[i];
-    float h = (v < 0 ? -v : v) / max_v * ((float)plot_h / 2.0f - 2.0f);
-    float x = 4.0f + (float)i * ((float)plot_w / (float)c->count);
+    float v = c->points[i] < 0 ? -c->points[i] : c->points[i];
+    float bw = v / max_v * ((float)plot_w - 4.0f);
+    float y = 3.0f + (float)i * row_h;
+    float bh = row_h * 0.62f;
+    float ty = ascent > 0 ? y + row_h / 2.0f - 0.75f * (float)ascent
+                          : y + (row_h - 11.0f) / 2.0f;
+    char val[16];
+    const char* label =
+        (c->labels != NULL && i < c->count) ? c->labels[i] : "";
+    /* category label (left) */
+    my_vgcanvas_set_fill_color(vg, my_color_from_rgba32(DXX_COLOR_MUTED));
+    my_vgcanvas_draw_text(vg, label, 6.0f, ty);
+    /* bar */
     my_vgcanvas_set_fill_color(
-        vg, my_color_from_rgba32(v >= 0 ? DXX_COLOR_UP : DXX_COLOR_DOWN));
-    my_vgcanvas_fill_rect(vg, &(my_rectf_t){x, v >= 0 ? mid_y - h : mid_y + 1,
-                                            bw, h});
+        vg, my_color_from_rgba32(DIST_COLORS[i % DXX_DIST_COUNT]));
+    my_vgcanvas_fill_rect(vg,
+                          &(my_rectf_t){(float)DIST_LABEL_W, y, bw, bh});
+    /* value label at the bar's right end */
+    snprintf(val, sizeof(val), "%d", (int32_t)v);
+    my_vgcanvas_set_fill_color(vg, my_color_from_rgba32(DXX_COLOR_TEXT));
+    my_vgcanvas_draw_text(vg, val, (float)DIST_LABEL_W + bw + 3.0f, ty);
   }
 }
 
@@ -188,6 +218,14 @@ void dxx_chart_set_series(my_widget_t* chart, const char* name,
   c->ymin = ymin;
   c->ymax = ymax;
   my_widget_invalidate(chart, NULL);
+}
+
+void dxx_chart_set_labels(my_widget_t* chart, const char* const* labels) {
+  dxx_chart_t* c = (dxx_chart_t*)chart;
+  if (chart != NULL) {
+    c->labels = labels;
+    my_widget_invalidate(chart, NULL);
+  }
 }
 
 const char* dxx_chart_get_series_name(my_widget_t* chart) {

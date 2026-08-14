@@ -86,3 +86,7 @@ MYUI_DEMO_DUMP_PPM=/tmp/dxx_home.ppm ./build-dummy/apps/duanxianxia/dxx
 - 晋级表：hover 浅灰 + tooltip（真实数据），点击弹个股卡片 dialog。
 - 整页滚动：内容 ~2600px，右侧 scroll_bar 双向同步。
 - dummy dump 10 场景（见下节）。
+
+## 差异点（追加）
+
+- ~~涨幅分布图为竖条红绿~~（M17 起改为与原站一致的 echarts 横向分布条形：类别左、数值右、跌停 #C4E7CF/跌档 #4FB771/平盘 #ACB0C0/涨档 #E5562C；数据仍为模拟快照）

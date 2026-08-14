@@ -131,9 +131,11 @@ typedef struct dxx_series_t {
 /** @brief 0=情绪指标 1=涨停家数 2=跌停家数 (SIMULATED curves). */
 extern const dxx_series_t DXX_SERIES[DXX_SERIES_COUNT];
 
-#define DXX_DIST_COUNT 10
-/** @brief 涨幅分布 buckets (SIMULATED): positive = 上涨档 (red bars),
- * negative = 下跌档 (green bars below the axis). */
+#define DXX_DIST_COUNT 11
+/** @brief 涨幅分布 buckets (SIMULATED), echarts 风格横向条形：
+ * 跌幅档 5 + 平盘 + 涨幅档 5（家数，非负）。标签见 DXX_DIST_LABELS。 */
 extern const float DXX_DIST[DXX_DIST_COUNT];
+/** @brief Bucket labels top->bottom: 跌停档 -> 平盘 -> 涨停档. */
+extern const char* const DXX_DIST_LABELS[DXX_DIST_COUNT];
 
 #endif /* DXX_DATA_H */
