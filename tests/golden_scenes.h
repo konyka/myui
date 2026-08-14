@@ -206,6 +206,32 @@ static void golden_scene_round_cap(my_vgcanvas_t* vg) {
   my_vgcanvas_end_frame(vg);
 }
 
+/** @brief M19a: one S bezier + one tight hook, AA on. */
+static void golden_scene_bezier(my_vgcanvas_t* vg) {
+  static const my_color_t BG = {245, 245, 248, 255};
+  static const my_color_t RED = {200, 30, 60, 255};
+  static const my_color_t BLUE = {40, 60, 200, 255};
+  my_vgcanvas_soft_set_antialias(vg, true);
+  my_vgcanvas_begin_frame(vg, NULL);
+  my_vgcanvas_set_fill_color(vg, BG);
+  my_vgcanvas_fill_rect(vg, &(my_rectf_t){0, 0, 64, 48});
+  /* S curve */
+  my_vgcanvas_set_stroke_color(vg, RED);
+  my_vgcanvas_set_line_width(vg, 3);
+  my_vgcanvas_begin_path(vg);
+  my_vgcanvas_move_to(vg, 6, 36);
+  my_vgcanvas_curve_to(vg, 20, 4, 32, 44, 44, 12);
+  my_vgcanvas_stroke(vg);
+  /* tight hook */
+  my_vgcanvas_set_stroke_color(vg, BLUE);
+  my_vgcanvas_set_line_width(vg, 2);
+  my_vgcanvas_begin_path(vg);
+  my_vgcanvas_move_to(vg, 46, 40);
+  my_vgcanvas_curve_to(vg, 62, 40, 46, 20, 58, 6);
+  my_vgcanvas_stroke(vg);
+  my_vgcanvas_end_frame(vg);
+}
+
 static const golden_scene_t GOLDEN_SCENES[] = {
     {"scene_shapes_rgb565", 64, 48, MY_PIXEL_FORMAT_RGB565, golden_scene_shapes},
     {"scene_clip_rgb888", 32, 24, MY_PIXEL_FORMAT_RGB888, golden_scene_clip},
@@ -217,6 +243,8 @@ static const golden_scene_t GOLDEN_SCENES[] = {
     {"scene_aa_bgra8888", 64, 48, MY_PIXEL_FORMAT_BGRA8888, golden_scene_aa},
     {"scene_round_cap_bgra8888", 64, 48, MY_PIXEL_FORMAT_BGRA8888,
      golden_scene_round_cap},
+    {"scene_bezier_bgra8888", 64, 48, MY_PIXEL_FORMAT_BGRA8888,
+     golden_scene_bezier},
 };
 
 #define GOLDEN_SCENE_COUNT (sizeof(GOLDEN_SCENES) / sizeof(GOLDEN_SCENES[0]))

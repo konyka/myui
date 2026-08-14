@@ -18,6 +18,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "myr/my_bezier.h"
 #include "myr/my_text_layout.h"
 
 typedef struct soft_state_t {
@@ -649,6 +650,30 @@ static my_ret_t soft_close_path(my_vgcanvas_t* vg) {
     s->contours[s->contour_count - 1].closed = true;
   }
   return MY_RET_OK;
+}
+
+/* ---------------- vtable: curve_to (M19a) ---------------- */
+
+/** @brief Emit one subdivision endpoint as a line_to. */
+static my_ret_t soft_bezier_emit(void* ctx, float x, float y) {
+  return my_vgcanvas_line_to((my_vgcanvas_t*)ctx, x, y);
+}
+
+static my_ret_t soft_curve_to(my_vgcanvas_t* vg, float cx1, float cy1,
+                              float cx2, float cy2, float x, float y) {
+  my_vgcanvas_soft_t* s = (my_vgcanvas_soft_t*)vg;
+  float x0 = 0.0f, y0 = 0.0f;
+  if (s->contour_count == 0 ||
+      s->contours[s->contour_count - 1].count == 0) {
+    return MY_RET_FAIL; /* no current point (canvas convention: move
+                         * first); documented in my_vgcanvas.h */
+  }
+  x0 = s->points[s->point_count - 1].x;
+  y0 = s->points[s->point_count - 1].y;
+  /* adaptive de Casteljau -> polyline -> the existing stroke strip/AA
+   * path does the rest (fill of open beziers is a documented TODO) */
+  return my_bezier_cubic_to_lines(x0, y0, cx1, cy1, cx2, cy2, x, y, 0.25f,
+                                  16, soft_bezier_emit, vg, NULL);
 }
 
 static int float_cmp(const void* a, const void* b) {
@@ -1436,7 +1461,8 @@ static const my_vgcanvas_vtable_t s_soft_vtable = {
     soft_fill_rounded_rect, soft_begin_path, soft_move_to,       soft_line_to,
     soft_close_path,       soft_fill,        soft_stroke,        soft_draw_text,
     soft_destroy,          soft_set_font,    soft_measure_text,
-    soft_draw_image,       soft_set_line_cap, soft_set_line_join};
+    soft_draw_image,       soft_set_line_cap, soft_set_line_join,
+    soft_curve_to};
 
 my_vgcanvas_t* my_vgcanvas_soft_create(const my_allocator_t* allocator,
                                        my_lcd_t* lcd) {

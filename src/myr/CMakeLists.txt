@@ -9,6 +9,7 @@ add_library(myr STATIC
   my_font.c
   my_font_stb.c
   my_font_ft.c
+  my_bezier.c
   my_stb_truetype.c
   my_arabic_shape.c
   my_text_layout.c

@@ -196,6 +196,35 @@ static void test_gles2_real_render(void) {
     TEST_ASSERT(px[0] > 200); /* ROUND: cap extends to x=52 */
   }
 
+  /* cubic bezier (M19a): S-curve stroke — endpoints lit, midpoint off
+   * the straight chord lit, far corner dark */
+  {
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+    my_vgcanvas_begin_frame(vg, NULL);
+    my_vgcanvas_set_stroke_color(vg, my_color_rgb(255, 64, 64));
+    my_vgcanvas_set_line_width(vg, 4.0f);
+    my_vgcanvas_begin_path(vg);
+    my_vgcanvas_move_to(vg, 8, 48);
+    my_vgcanvas_curve_to(vg, 24, 0, 40, 64, 56, 16); /* S */
+    my_vgcanvas_stroke(vg);
+    my_vgcanvas_end_frame(vg);
+    glFinish();
+    glReadPixels(8, 64 - 1 - 48, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, px);
+    TEST_ASSERT(px[0] > 50); /* start point lit (cap edge, partial) */
+    glReadPixels(56, 64 - 1 - 16, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, px);
+    TEST_ASSERT(px[0] > 50); /* end point lit */
+    /* off-chord: curve passes (20, 29.5) at t=0.25 while the straight
+     * chord sits at y~40 there */
+    glReadPixels(20, 64 - 1 - 29, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, px);
+    TEST_ASSERT(px[0] > 100);
+    glReadPixels(20, 64 - 1 - 41, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, px);
+    TEST_ASSERT(px[0] < 60); /* the chord position itself is dark */
+    glReadPixels(4, 64 - 1 - 4, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, px);
+    TEST_ASSERT(px[0] < 60); /* far corner dark */
+    TEST_ASSERT(glGetError() == GL_NO_ERROR);
+  }
+
   /* RTL text through the gles2 backend (M11a): Arabic word shaped +
    * reversed via text_layout; skip when the Noto font is absent */
   {

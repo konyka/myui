@@ -111,6 +111,14 @@ typedef struct my_vgcanvas_vtable_t {
    */
   my_ret_t (*set_line_cap)(my_vgcanvas_t* vg, my_line_cap_t cap);
   my_ret_t (*set_line_join)(my_vgcanvas_t* vg, my_line_join_t join);
+  /**
+   * @brief Cubic bezier from the current point to (x, y) with control
+   * points (cx1, cy1), (cx2, cy2) (M19a). Path-level operation like
+   * line_to; backends subdivide adaptively (flatness ~0.25px) into
+   * polylines, so strokes get the usual AA. NULL slot = NOT_SUPPORTED.
+   */
+  my_ret_t (*curve_to)(my_vgcanvas_t* vg, float cx1, float cy1, float cx2,
+                       float cy2, float x, float y);
 } my_vgcanvas_vtable_t;
 
 /** @brief vgcanvas base "class": first member of every backend. */
@@ -184,6 +192,17 @@ static inline my_ret_t my_vgcanvas_move_to(my_vgcanvas_t* vg, float x, float y) 
 
 static inline my_ret_t my_vgcanvas_line_to(my_vgcanvas_t* vg, float x, float y) {
   return vg->vtable->line_to(vg, x, y);
+}
+
+/** @brief Cubic bezier (M19a); NOT_SUPPORTED when the backend has no
+ * curve_to slot. */
+static inline my_ret_t my_vgcanvas_curve_to(my_vgcanvas_t* vg, float cx1,
+                                            float cy1, float cx2, float cy2,
+                                            float x, float y) {
+  if (vg->vtable->curve_to == NULL) {
+    return MY_RET_NOT_SUPPORTED;
+  }
+  return vg->vtable->curve_to(vg, cx1, cy1, cx2, cy2, x, y);
 }
 
 static inline my_ret_t my_vgcanvas_close_path(my_vgcanvas_t* vg) {

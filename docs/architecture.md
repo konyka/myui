@@ -130,6 +130,12 @@ PAL port 矩阵：
 - 绘制：bg/border（**focused 复用样式 HOVER 槽**，文档约定）、选区高亮、光标竖线（常亮，闪烁 TODO）、文本超宽时 scroll_x 跟随光标。
 - MVVM：widget_target 映射 edit 的 text/hint；"changed" 事件驱动 TwoWay 回写，validator 拒绝时自动恢复。
 
+## 三次贝塞尔曲线（M19a）
+
+- **接口**：vgcanvas vtable 末尾追加 `curve_to(cx1,cy1,cx2,cy2,x,y)`（冻结式扩展；NULL 槽 = NOT_SUPPORTED，inline 包装判定）。路径级操作，与 line_to 同类，save/restore 无涉；无当前点（未 move_to）返回 FAIL（canvas 惯例，注释注明）。
+- **共享细分**（src/myr/my_bezier.{h,c}）：de Casteljau 自适应细分，平坦度 = 两控制点到弦的**最大垂直距离**（t=0.5 二分），容差 0.25px，递归深度上限 16 防爆；两后端路径模型同构（点+轮廓数组），各自 curve_to 只把细分端点喂回 line_to——soft 的条带化/覆盖率 AA 与 gles2 的三角化批提交原样复用。fill 开放贝塞尔（弦闭合填充）为 TODO。
+- **验证**：细分单测（直线塌缩 1 段、曲率驱动段数、dyadic 端点精确、深度帽）；soft 像素级（共线贝塞尔≡直线全图逐像素相等；S 曲线端点/驼峰/空角断言——端点为圆帽边界半覆盖，与直线行为一致）；gles2 mock（段数→顶点数增长 + 顶点集非共线）+ EGL 真读回（端点/离弦点/暗角）；golden 新场景 scene_bezier（S+急弯，目检平滑无瑕疵）；bench：100 条 S 曲线 stroke 5.30ms/帧（AA level 2，-O0）。
+
 ## 渲染质量（M7c：alpha 混合 + 抗锯齿）
 
 - **混合**：`my_color_t.a` 全链生效。`lcd_mem` 的 `fill_rect` 在 a<255 时走 src-over（`out = (src*a + dst*(255-a))/255`，整除截断；RGB565 展开-混合-重打包，MONO 阈值化），a=255 保持原快速替换路径。文本 span 混合（M7a 的 `blend_span`）同一公式。混合公式与期望值在 my_lcd_mem_test 中以像素级断言固化（如 50% 红盖白 = (255,127,127)）。

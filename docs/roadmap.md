@@ -54,6 +54,7 @@
 | 50 按钮全帧 | 2.45 ms/帧 |
 | 100 半透明矩形 | 2.00 ms/帧 |
 | 路径 AA level0/1/2 | 0.69 / 1.65 / 2.40 ms/帧 |
+| 100 条贝塞尔 stroke（AA level 2，M19a） | 5.30 ms/帧 |
 | 480x270→800x600 图片 nearest/bilinear | 2.23 / 9.57 ms/帧 |
 | 2000x1500→400x300 图片 nearest/纯双线性/盒式+双线性 | 0.72 / 1.82 / 11.06 ms/帧（M12c 整数化；M11c 时 0.69 / 4.80 / 11.96） |
 | GLES 8 描边路径 no-AA/MSAA4x | 0.025 / 0.026 ms/帧 |
@@ -66,6 +67,8 @@
 - **M14 完成**。
 - **M18b dxx 主题迁 CSS + 收官** ✅ 已完成：`dxx_theme_create` 迁移为 `my_theme_load_css` 字符串（站点色值不变，type/class 选择器示范）；页脚 label 加 `muted` class（站点 #999 灰字真实命中）、分享按钮加 `danger` class（颜色改走主题，fallback 保持站点色 → 首屏迁移前后逐像素 diff=0）；loader `<style>` 按 `{` 路由 CSS/旧文本格式（可并存）；demo_mvvm XML 加 `class="accent"` + CSS 块示范；docs/css.md 迁移示例节。
 - **M18 完成**。
+- **M19a vgcanvas 三次贝塞尔** ✅ 已完成（节点编辑器前置，spec: docs/superpowers/specs/2026-08-14-node-editor-design.md）：vtable 末尾 curve_to 槽（NULL 安全）；共享 de Casteljau 自适应细分 my_bezier（弦距容差 0.25px、深度帽 16）；soft 复用条带化 AA、gles2 复用三角化批提交；测试 4000+ 断言（细分单测/soft 像素等价/gles2 mock/EGL 读回）+ golden scene_bezier 目检 + bench 100 曲线 5.30ms/帧（AA level 2）。
+
 
 - **M15 情绪统计区 + 走势图 + Wayland 演示** ✅ 已完成：情绪直播面板顶部接 qxlive 实测结构（/tmp/dxx/qxlive.html）——居中副标题 + 3×4 统计按钮（bootstrap 配色：橙 #F0AD4E/红 #D9534F/绿 #5CB85C/白底 #ccc 边，涨跌数字分红绿）+ 涨幅分布柱状图（红绿竖条）+ 主折线图（`dxx_chart` 自绘控件：5 网格线/y 三档刻度/x 时间刻度/#E64C62 2px AA 折线，`set_series` 数据接口）；情绪/涨停/跌停三按钮切换曲线 + active 加深（×0.85），量能日志占位；数据全为模拟快照（dxx_data 注明）；情绪卡拉高对齐右列 1276px；Wayland 实跑（wayland-0 活合成器 3 秒无协议错误）+ x11 冒烟通过；dump 增曲线切换场景目检。
 - **M16 客户端装饰（CSD）标题栏** ✅ 已完成（解决"wayland 无标题栏"实测问题：mutter 对 plain xdg-shell 不给 SSD）：PAL 新槽 `needs_client_decoration`（wl=true/其余 false）+ `begin_move`（wl=`xdg_toplevel_move`+button serial）；my_window CSD 模式=root 垂直 linear[csd_bar h:36 + csd_content h:1f]，`my_window_widget` 语义切换为内容容器（非 CSD 零变化）；栏体按下 begin_move、× 钮延迟关闭（1ms 定时器防 dispatch 中途释放树，同 dialog 模式）、win->wm 字段；引用计数契约（容器额外引用 + wm 吸收 create ref）泄漏测试固化；dialog 自动获得 CSD；wayland 实机 dxx 存活无协议错误（configure/present trace 正常），x11/dummy 无标题栏变化。最大化/边缘 resize/双击最大化留 TODO。

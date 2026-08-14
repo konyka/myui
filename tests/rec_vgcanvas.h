@@ -174,6 +174,13 @@ static my_ret_t rec_set_line_join(my_vgcanvas_t* vg, my_line_join_t join) {
   return MY_RET_OK;
 }
 
+static my_ret_t rec_curve_to(my_vgcanvas_t* vg, float cx1, float cy1,
+                             float cx2, float cy2, float x, float y) {
+  rec_op((rec_vg_t*)vg, "curve_to %g %g %g %g %g %g", (double)cx1,
+         (double)cy1, (double)cx2, (double)cy2, (double)x, (double)y);
+  return MY_RET_OK;
+}
+
 static void rec_destroy(my_vgcanvas_t* vg) {
   (void)vg; /* stack-allocated, nothing to free */
 }
@@ -206,7 +213,7 @@ static const my_vgcanvas_vtable_t REC_VG_VTABLE = {
     rec_begin_path,  rec_move_to,    rec_line_to,    rec_close_path,
     rec_fill,        rec_stroke,     rec_draw_text,  rec_destroy,
     rec_set_font,    rec_measure_text, rec_draw_image, rec_set_line_cap,
-    rec_set_line_join};
+    rec_set_line_join, rec_curve_to};
 
 static void rec_vg_init(rec_vg_t* r) {
   memset(r, 0, sizeof(*r));

@@ -296,6 +296,55 @@ static void test_stroke_polyline_segments(void) {
   my_vgcanvas_destroy(vg);
 }
 
+/* ---------------- cubic bezier (M19a) ---------------- */
+
+static bool mock_has_vertex(const mock_gl_t* m, float x, float y); /* below */
+
+static void test_stroke_curve_subdivides(void) {
+  mock_gl_t gl;
+  my_vgcanvas_t* vg;
+  mock_gl_init(&gl);
+  vg = my_vgcanvas_gles2_create_with_gl(NULL, 120, 100, &gl.gl);
+
+  /* S-curve stroke: many segments -> many vertices, non-collinear */
+  my_vgcanvas_begin_frame(vg, NULL);
+  my_vgcanvas_set_line_width(vg, 2.0f);
+  my_vgcanvas_begin_path(vg);
+  my_vgcanvas_move_to(vg, 10, 50);
+  my_vgcanvas_curve_to(vg, 35, -20, 75, 120, 100, 50);
+  my_vgcanvas_stroke(vg);
+  TEST_ASSERT(gl.last_draw_count > 60); /* 10+ segments x 6 verts (+caps) */
+  /* stroke vertices straddle the centerline by half the width; assert
+   * the vertex set is non-collinear: the S-curve spans y beyond the
+   * chord's flat 50 (top hump ~30, bottom hump ~70, ± half width) */
+  {
+    int32_t i;
+    float ymin = 1e9f, ymax = -1e9f;
+    for (i = 1; i < gl.all_count; i += 2) {
+      if (gl.all_xy[i] < ymin) {
+        ymin = gl.all_xy[i];
+      }
+      if (gl.all_xy[i] > ymax) {
+        ymax = gl.all_xy[i];
+      }
+    }
+    TEST_ASSERT(ymin < 45.0f); /* above the chord */
+    TEST_ASSERT(ymax > 55.0f); /* below the chord */
+  }
+  /* collinear curve = the straight line: 1 segment (plus caps) */
+  mock_gl_init(&gl);
+  my_vgcanvas_destroy(vg);
+  vg = my_vgcanvas_gles2_create_with_gl(NULL, 100, 80, &gl.gl);
+  my_vgcanvas_begin_frame(vg, NULL);
+  my_vgcanvas_set_line_width(vg, 2.0f);
+  my_vgcanvas_begin_path(vg);
+  my_vgcanvas_move_to(vg, 10, 20);
+  my_vgcanvas_curve_to(vg, 30, 20, 60, 20, 90, 20);
+  my_vgcanvas_stroke(vg);
+  TEST_ASSERT(gl.last_draw_count <= 12); /* 1 segment x 6 (+cap verts) */
+  my_vgcanvas_destroy(vg);
+}
+
 /* ---------------- round cap/join (M10d) ---------------- */
 
 static bool mock_has_vertex(const mock_gl_t* m, float x, float y) {
@@ -534,6 +583,7 @@ MYTEST_MAIN_BEGIN()
   MYTEST_RUN(test_stroke_rect_vertex_count);
   MYTEST_RUN(test_path_triangle_even_odd_spans);
   MYTEST_RUN(test_stroke_polyline_segments);
+  MYTEST_RUN(test_stroke_curve_subdivides);
   MYTEST_RUN(test_round_cap_adds_semicircle_fans);
   MYTEST_RUN(test_round_join_adds_vertex_disks);
   MYTEST_RUN(test_cap_join_state_saved_restored);

@@ -117,6 +117,31 @@ int main(void) {
                (t1 - t0) / BENCH_FRAMES);
       }
     }
+    /* bezier strokes (M19a): 100 S-curves per frame (AA level 2 — the
+     * AA comparison loop above ends at level 0, so set it back) */
+    {
+      my_vgcanvas_soft_set_antialias_level(vg2, 2);
+      t0 = now_ms();
+      for (f = 0; f < BENCH_FRAMES; f++) {
+        my_vgcanvas_begin_frame(vg2, NULL);
+        for (i = 0; i < 100; i++) {
+          float x = 20.0f + (float)(i % 10) * 76.0f;
+          float y = 20.0f + (float)(i / 10) * 56.0f;
+          my_vgcanvas_set_stroke_color(vg2, my_color_rgb(200, 40, 60));
+          my_vgcanvas_set_line_width(vg2, 2);
+          my_vgcanvas_begin_path(vg2);
+          my_vgcanvas_move_to(vg2, x, y + 20);
+          my_vgcanvas_curve_to(vg2, x + 20, y - 14, x + 36, y + 54,
+                               x + 56, y + 6);
+          my_vgcanvas_stroke(vg2);
+        }
+        my_vgcanvas_end_frame(vg2);
+      }
+      t1 = now_ms();
+      printf("bench_render: 100 bezier strokes x %d frames: total %.1f ms, "
+             "avg %.3f ms/frame\n",
+             BENCH_FRAMES, t1 - t0, (t1 - t0) / BENCH_FRAMES);
+    }
     my_vgcanvas_destroy(vg2);
     my_widget_unref(my_window_widget(win2));
   }
