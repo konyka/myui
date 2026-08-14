@@ -123,6 +123,32 @@ my_conf_node_t* my_conf_parse_json(const my_allocator_t* allocator,
                                    const char* data, size_t len,
                                    my_conf_error_t* err);
 
+/**
+ * @brief Parse the TOML subset (M17b): key=value (basic ".." strings
+ * with escapes, literal '..' strings, dec/0x/0o/0b integers with
+ * underscores, floats incl. inf/nan, bools, datetimes kept as STR
+ * verbatim), [table]/[a.b.c], [[table array]], inline tables, arrays
+ * (mixed types allowed — BSON-style, documented), # comments.
+ * Duplicate keys / table conflicts are errors. No writer (export via
+ * JSON).
+ */
+my_conf_node_t* my_conf_parse_toml(const my_allocator_t* allocator,
+                                   const char* data, size_t len,
+                                   my_conf_error_t* err);
+
+/**
+ * @brief Parse the YAML subset (M17b): indented blocks (key: value,
+ * key: + nested block, - item lists incl. "- key: value" map items),
+ * flow [a, b] / {k: v}, # comments, single/double-quoted strings,
+ * plain scalars with type inference (null/~/true/false/int/float, else
+ * STR). NOT supported (all hard errors): multi-document (---), anchors
+ * (&), tags (!), folded scalars (> |), tab indentation; inconsistent
+ * indentation is an error.
+ */
+my_conf_node_t* my_conf_parse_yaml(const my_allocator_t* allocator,
+                                   const char* data, size_t len,
+                                   my_conf_error_t* err);
+
 /** @brief Serialize to JSON (owned string). pretty: 2-space indent,
  * newlines; otherwise compact. */
 char* my_conf_to_json_str(const my_allocator_t* allocator,

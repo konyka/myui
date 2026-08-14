@@ -12,7 +12,7 @@
 - **编辑体验**：撤销/重做（批合并撤销栈 + 窗口级共享管理器）、Tab 焦点环、PageUp/Down、光标闪烁、剪贴板（x11 含 INCR 大数据并发传输）、水平对齐（left/center/right/justify）、word wrap（UAX#14 子集断行：CJK/禁则标点/连字符）、IME 输入法（x11 XIM 预编辑/提交/候选窗跟随）
 - **MVVM**：data/command/items/condition 绑定、converter/validator、navigator、声明式规则字符串，UI 适配经 binding_target 抽象（base 可独立单测）
 - **XML UI 加载器**：自研零依赖 parser + 控件工厂注册表，`v:*` 绑定/主题/布局内联，可裁剪（`MYUI_UI_XML=OFF`）
-- **配置文件**：文档树（七型 + 点路径）+ JSON 全集读写 + BSON 读写（`src/myc/myconf/`，docs/conf.md；TOML/YAML 子集在 M17b）
+- **配置文件**：文档树（七型 + 点路径）+ JSON 全集读写 + BSON 读写 + TOML/YAML 读子集（`src/myc/myconf/`，docs/conf.md 支持矩阵）
 - **TDD**：自研 mytest 最小框架，35 个 ctest 全绿；golden-image 渲染回归；性能基线（50 按钮全帧 2.25ms）
 
 ## 平台状态

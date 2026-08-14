@@ -9,6 +9,8 @@ add_library(myc STATIC
   myconf/my_conf.c
   myconf/my_conf_json.c
   myconf/my_conf_bson.c
+  myconf/my_conf_toml.c
+  myconf/my_conf_yaml.c
 )
 
 target_include_directories(myc PUBLIC ${CMAKE_SOURCE_DIR}/src)
