@@ -153,18 +153,55 @@ const my_value_t* my_theme_get(const my_theme_t* theme, const char* widget_type,
 
 /* ---------------- CSS cascade lookup (M18a) ---------------- */
 
+/** @brief Word-boundary match of `word` in the space-separated class
+ * list. */
+static bool class_word_match(const char* list, const char* word) {
+  const char* p = list;
+  size_t wl = strlen(word);
+  while (*p != '\0') {
+    while (*p == ' ') {
+      p++;
+    }
+    if (strncmp(p, word, wl) == 0 && (p[wl] == '\0' || p[wl] == ' ')) {
+      return true;
+    }
+    while (*p != '\0' && *p != ' ') {
+      p++;
+    }
+  }
+  return false;
+}
+
 /** @brief Entry matches at one cascade level (level 0 = id, 1 = class,
  * 2 = type). The descendant condition searches from `ancestor_anchor`
  * INCLUSIVE (a part's owner counts as its own ancestor anchor). */
 static bool entry_matches_ex(const my_theme_entry_t* e, const char* type,
                              const char* name, const char* style_class,
                              const my_widget_t* ancestor_anchor, int level) {
-  /* descendant condition first (cheap): needs an ancestor of the type */
+  /* descendant condition first (cheap): needs an ancestor of the type
+   * (entry stores "type" or "type.class" — class word-matched) */
   if (e->ancestor_type[0] != '\0') {
     const my_widget_t* a = ancestor_anchor;
+    char atype[MY_THEME_TYPE_LEN];
+    const char* aclass = NULL;
+    const char* dot = strchr(e->ancestor_type, '.');
     bool found = false;
+    if (dot != NULL) {
+      size_t tl = (size_t)(dot - e->ancestor_type);
+      if (tl >= sizeof(atype)) {
+        tl = sizeof(atype) - 1;
+      }
+      memcpy(atype, e->ancestor_type, tl);
+      atype[tl] = '\0';
+      aclass = dot + 1;
+    } else {
+      snprintf(atype, sizeof(atype), "%s", e->ancestor_type);
+    }
     while (a != NULL) {
-      if (my_str_eq(a->widget_type, e->ancestor_type)) {
+      if (my_str_eq(a->widget_type, atype) &&
+          (aclass == NULL || (a->style_class != NULL &&
+                              class_word_match(a->style_class,
+                                                   aclass)))) {
         found = true;
         break;
       }
@@ -188,23 +225,7 @@ static bool entry_matches_ex(const my_theme_entry_t* e, const char* type,
           style_class == NULL) {
         return false;
       }
-      {
-        const char* p = style_class;
-        size_t wl = strlen(e->style_class);
-        while (*p != '\0') {
-          while (*p == ' ') {
-            p++;
-          }
-          if (strncmp(p, e->style_class, wl) == 0 &&
-              (p[wl] == '\0' || p[wl] == ' ')) {
-            return true;
-          }
-          while (*p != '\0' && *p != ' ') {
-            p++;
-          }
-        }
-      }
-      return false;
+      return class_word_match(style_class, e->style_class);
     default: /* type-wide */
       return e->name[0] == '\0' && e->style_class[0] == '\0' &&
              e->widget_type[0] != '\0' && my_str_eq(e->widget_type, type);

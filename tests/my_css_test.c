@@ -204,6 +204,33 @@ static void test_bridge_descendant_and_aliases(void) {
   my_theme_destroy(t);
 }
 
+/** @brief M19c: descendant ancestor may carry a class (type.class). */
+static void test_bridge_descendant_with_ancestor_class(void) {
+  my_theme_t* t = my_theme_create(NULL);
+  my_widget_t* dark = my_widget_create(NULL, "dark-panel");
+  my_widget_t* light = my_widget_create(NULL, "light-panel");
+  my_widget_t* b1 = my_button_create(NULL, "a");
+  my_widget_t* b2 = my_button_create(NULL, "b");
+  const my_value_t* v;
+  dark->widget_type = "panel";
+  light->widget_type = "panel";
+  my_widget_set_style_class(dark, "dark");
+  my_widget_set_style_class(light, "light");
+  my_widget_add_child(dark, b1);
+  my_widget_unref(b1);
+  my_widget_add_child(light, b2);
+  my_widget_unref(b2);
+  my_theme_load_css(t, "panel.dark button { bg_color: #101010 }");
+  v = my_theme_get_for_widget(t, b1, MY_STATE_NORMAL, "bg_color");
+  TEST_ASSERT(v != NULL && my_value_get_uint32(v) == 0x101010FFu);
+  /* under a "light" panel: no match */
+  v = my_theme_get_for_widget(t, b2, MY_STATE_NORMAL, "bg_color");
+  TEST_ASSERT(v == NULL);
+  my_widget_unref(dark);
+  my_widget_unref(light);
+  my_theme_destroy(t);
+}
+
 static void test_bridge_coexists_with_text_format(void) {
   my_theme_t* t = my_theme_create(NULL);
   const my_value_t* v;
@@ -254,6 +281,7 @@ MYTEST_MAIN_BEGIN()
   MYTEST_RUN(test_bridge_cascade_priority);
   MYTEST_RUN(test_bridge_states_and_source_order);
   MYTEST_RUN(test_bridge_descendant_and_aliases);
+  MYTEST_RUN(test_bridge_descendant_with_ancestor_class);
   MYTEST_RUN(test_bridge_coexists_with_text_format);
   MYTEST_RUN(test_widget_style_class);
   MYTEST_RUN(test_css_no_leak);

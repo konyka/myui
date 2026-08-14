@@ -138,6 +138,7 @@ PAL port 矩阵：
 - **CSS 部件配色**：`my_theme_get_part`/`my_widget_part_color` 新 API——虚拟部件（非真 widget 的绘制件）以 owner widget 为**含自身**的后代锚点查主题（`node .header` 命中 node 绘制的 header）；`my_theme_get_part` 公开，级联同 #id>.class>type。
 - 命中删除：`my_node_view_find_link_at`（细分折线逐段最近距离 ≤4px，后加优先）。
 - 测试 39 断言：模型/预览/拾起重连/选中删除/拖动跟随/pan/CSS 各部件命中/泄漏。缩放/框选/多选/小地图为 TODO。
+- **demo_nodes（M19c）**：demos/demo_nodes——参考图局部复刻（Principled BSDF 大节点 + Mapping/Color/Environment 小节点 + 内嵌 my_slider + Color→BaseColor/Mapping→Metallic 连线 + Environment 悬空输出），全套部件配色一条 CSS 字符串（注释逐条标视觉对应）；dummy dump 两帧（默认 + 选中连线橙）目检通过。
 
 ## 三次贝塞尔曲线（M19a）
 - **接口**：vgcanvas vtable 末尾追加 `curve_to(cx1,cy1,cx2,cy2,x,y)`（冻结式扩展；NULL 槽 = NOT_SUPPORTED，inline 包装判定）。路径级操作，与 line_to 同类，save/restore 无涉；无当前点（未 move_to）返回 FAIL（canvas 惯例，注释注明）。

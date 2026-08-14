@@ -72,3 +72,5 @@ node_link.preview { color: #70C0E8 }          /* 拖线预览态 */
 ```
 
 header/socket/link 不是真 widget——node/node_view 绘制时经 `my_widget_part_color(owner, type, class, state, key, fallback)` 查主题（owner 含自身作后代锚点），回退值为模型自带色（接口类型色）或内建默认。
+
+M19c 起后代祖先可带 class（`panel.dark button`：entry 存 "panel.dark"，匹配=祖先类型为 panel 且其 style_class 词含 dark）——demo_nodes 的类别色标题栏全靠它。完整可跑示例见 demos/demo_nodes/main.c 的 NODES_CSS（每条注释标视觉对应：画布/主体/四类别标题栏/接口/连线/选中/预览）。

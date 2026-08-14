@@ -87,6 +87,7 @@ if(MYUI_BUILD_DEMOS)
   add_subdirectory(demos/demo_hello)
   add_subdirectory(demos/demo_widgets)
   add_subdirectory(demos/demo_mvvm)
+  add_subdirectory(demos/demo_nodes)
 endif()
 
 message(STATUS "myui ${PROJECT_VERSION}: C${MYUI_C_STANDARD}, tests=${MYUI_BUILD_TESTS}, demos=${MYUI_BUILD_DEMOS}")

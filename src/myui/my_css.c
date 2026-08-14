@@ -118,11 +118,12 @@ static bool c_selector(css_p_t* p, my_css_selector_t* out) {
     css_fail(p, "bad selector");
     return false;
   }
-  /* .class / #id (at most one of each; .c#i without type unsupported) */
+  /* .class / #id (at most one of each; .c#i without type unsupported).
+   * Components are ADJACENT in CSS — no whitespace allowed (whitespace
+   * is the descendant combinator, significant). */
   while (c_peek(p) == '.' || c_peek(p) == '#') {
     int kind = c_next(p);
     char buf[MY_CSS_NAME_LEN];
-    c_ws(p);
     if (!c_ident(p, buf, sizeof(buf))) {
       css_fail(p, "bad selector component");
       return false;
@@ -147,7 +148,6 @@ static bool c_selector(css_p_t* p, my_css_selector_t* out) {
       }
       snprintf(out->id, sizeof(out->id), "%s", buf);
     }
-    c_ws(p);
   }
   if (out->widget_type[0] == '\0' && out->style_class[0] == '\0' &&
       out->id[0] == '\0') {
@@ -518,20 +518,40 @@ static my_css_rule_t* css_rule(css_p_t* p) {
     }
     c_ws(p);
     /* descendant: another selector follows a space (simplified: the
-     * first must be a bare type and becomes the ancestor condition) */
+     * first becomes the ancestor condition — bare type, or type.class
+     * since M19c; stored as "type.class" in the entry) */
     if (c_peek(p) != ',' && c_peek(p) != '{') {
-      if (sel.style_class[0] != '\0' || sel.id[0] != '\0' ||
-          sel.ancestor_type[0] != '\0' || sel.state != -1 ||
-          sel.widget_type[0] == '\0') {
-        css_fail(p, "descendant ancestor must be a bare type");
+      if (sel.id[0] != '\0' || sel.ancestor_type[0] != '\0' ||
+          sel.state != -1 || sel.widget_type[0] == '\0') {
+        css_fail(p, "descendant ancestor must be a type[.class]");
         goto fail;
       }
       if (has_ancestor) {
         css_fail(p, "only one descendant level supported");
         goto fail;
       }
-      snprintf(ancestor.widget_type, sizeof(ancestor.widget_type), "%s",
-               sel.widget_type);
+      {
+        /* assemble "type.class" bounded (entry field is 24 wide) */
+        size_t tl = strlen(sel.widget_type);
+        size_t cl = strlen(sel.style_class);
+        size_t room = sizeof(ancestor.widget_type) - 1;
+        if (tl > room) {
+          tl = room;
+        }
+        memcpy(ancestor.widget_type, sel.widget_type, tl);
+        ancestor.widget_type[tl] = '\0';
+        if (cl > 0) {
+          size_t avail = room - tl;
+          if (avail > 0) {
+            ancestor.widget_type[tl] = '.';
+            if (cl > avail - 1) {
+              cl = avail - 1;
+            }
+            memcpy(ancestor.widget_type + tl + 1, sel.style_class, cl);
+            ancestor.widget_type[tl + 1 + cl] = '\0';
+          }
+        }
+      }
       has_ancestor = true;
       continue; /* parse the actual target selector next */
     }
