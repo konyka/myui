@@ -11,6 +11,7 @@
 #include <string.h>
 
 #include "myc/my_str.h"
+#include "myui/my_css.h"
 #include "myui/my_layout.h"
 #include "myui/widgets/my_button.h"
 #include "myui/widgets/my_checkbox.h"
@@ -390,7 +391,13 @@ static void apply_style_children(my_window_t* win, const my_xml_node_t* root) {
     const my_xml_node_t* child = my_xml_node_child(root, i);
     if (my_str_eq(child->name, "style") && child->text != NULL &&
         win->theme != NULL) {
-      my_theme_load_str(win->theme, child->text);
+      /* M18b: a <style> block containing '{' is CSS (my_theme_load_css);
+       * otherwise the legacy text format. Both coexist. */
+      if (strchr(child->text, '{') != NULL) {
+        my_theme_load_css(win->theme, child->text);
+      } else {
+        my_theme_load_str(win->theme, child->text);
+      }
     }
   }
 }

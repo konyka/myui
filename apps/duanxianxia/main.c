@@ -321,6 +321,10 @@ int main(void) {
         my_pal_main_loop_run(loop);
         my_window_paint(win);
         dump_ppm(win->pal_window, "/tmp/dxx_tooltip.ppm");
+        /* footer at max scroll (muted class -> CSS grey, M18b) */
+        my_scroll_view_set_offset(page_sv, y - DXX_WIN_H);
+        my_window_paint(win);
+        dump_ppm(win->pal_window, "/tmp/dxx_footer.ppm");
         /* click -> stock card dialog (separate window) */
         e = my_event_init(MY_EVENT_POINTER_DOWN);
         e.u.pointer.x = cx;

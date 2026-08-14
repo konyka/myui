@@ -194,6 +194,12 @@ static const char* MAIN_PAGE_XML =
     "<style>"
     "button[ok].normal.bg_color=#A5D6A7 "
     "</style>"
+    /* M18b: a second style block in CSS (the loader routes by '{'; both
+     * formats coexist). The submit button carries class="accent". */
+    "<style>"
+    ".accent { background-color: #347DFA; color: white } "
+    ".accent:hover { background-color: #5B8DEF }"
+    "</style>"
     "<label name=\"count\" x=\"20\" y=\"20\" w=\"200\" h=\"32\" "
     "v:text=\"{count, Converter=int_to_str}\"/>"
     "<button x=\"20\" y=\"64\" w=\"90\" h=\"36\" text=\"+1\" "
@@ -207,7 +213,7 @@ static const char* MAIN_PAGE_XML =
     "<edit x=\"20\" y=\"380\" w=\"240\" h=\"32\" hint=\"your name\" "
     "v:text=\"{name, Mode=TwoWay, Validator=not_empty}\"/>"
     "<button x=\"280\" y=\"380\" w=\"120\" h=\"36\" text=\"submit\" "
-    "v:on_click=\"{submit}\"/>"
+    "class=\"accent\" v:on_click=\"{submit}\"/>"
     "<label x=\"420\" y=\"380\" w=\"240\" h=\"32\" v:text=\"{greeting}\"/>"
     "</window>";
 

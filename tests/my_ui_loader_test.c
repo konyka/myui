@@ -173,6 +173,30 @@ static void test_style_and_theme(void) {
   my_pal_destroy(pal);
 }
 
+/** @brief M18b: a <style> block with '{' routes to the CSS loader and
+ * class rules hit widgets carrying the class. */
+static void test_style_css_block(void) {
+  my_pal_t* pal = my_pal_dummy_create(NULL);
+  my_window_t* win = (my_window_t*)my_ui_load_str(
+      NULL, pal,
+      "<window w=\"100\" h=\"100\">"
+      "<style>button.accent { background-color: #347DFA }</style>"
+      "<button text=\"a\"/>"
+      "<button text=\"b\" class=\"accent\"/>"
+      "</window>",
+      NULL);
+  my_widget_t* a = my_widget_get_child((my_widget_t*)win, 0);
+  my_widget_t* b = my_widget_get_child((my_widget_t*)win, 1);
+  uint32_t ca, cb;
+  TEST_ASSERT_NOT_NULL(win);
+  ca = my_widget_style_get_color(a, MY_STATE_NORMAL, "bg_color", 0);
+  cb = my_widget_style_get_color(b, MY_STATE_NORMAL, "bg_color", 0);
+  TEST_ASSERT(ca != 0x347DFAFFu); /* no class -> default theme */
+  TEST_ASSERT_EQ_INT(cb, 0x347DFAFF);
+  my_widget_unref((my_widget_t*)win);
+  my_pal_destroy(pal);
+}
+
 static void test_bind_rules_passthrough_and_mvvm(void) {
   my_pal_t* pal = my_pal_dummy_create(NULL);
   my_pal_main_loop_t* loop = my_pal_main_loop_create(pal);
@@ -280,6 +304,7 @@ MYTEST_MAIN_BEGIN()
   MYTEST_RUN(test_visibility_and_enable);
   MYTEST_RUN(test_errors);
   MYTEST_RUN(test_style_and_theme);
+  MYTEST_RUN(test_style_css_block);
   MYTEST_RUN(test_bind_rules_passthrough_and_mvvm);
   MYTEST_RUN(test_no_leak_with_debug_allocator);
 #ifdef MY_UI2C_SAMPLE_C

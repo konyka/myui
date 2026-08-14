@@ -42,3 +42,19 @@
 
 - 结构错误（选择器不合法/缺 `{}`/未闭合注释/@规则未闭合）→ 硬错误，`my_css_error_t{line,col,msg}`。
 - 声明级问题（缺冒号/坏值）→ 跳过该声明 + MY_LOGW，规则其余部分存活（宽松模式，文档化）。
+
+## 与文本格式共存 / 迁移示例（M18b，dxx 实证）
+
+`<style>` 块按内容路由：含 `{` → CSS（`my_theme_load_css`），否则旧文本格式——两个 `<style>` 块可并存。widget 加 `class="..."`（XML 属性 / `my_widget_set_style_class`）。
+
+dxx 的 `dxx_theme_create` 迁移片段（站点色值不变）：
+
+```css
+window { background-color: white }
+label { background-color: white; color: #333333 }
+label.muted { color: #999999 }           /* 页脚 label class="muted" */
+.danger { background-color: #D9534F; color: white }
+.danger:hover { background-color: #C9302C }  /* 分享按钮 class="danger" */
+```
+
+注意 specificity 语义：`.danger:hover` 恒胜 `.danger`（裸规则只写 NORMAL 槽，伪类写状态槽，级内 state→normal 回落），与真实 CSS 一致。像素级验证：迁移前后 dummy dump 首屏逐像素 diff = 0；页脚灰色化/分享按钮主题化为有意变更（dump 目检 + 单测断言）。

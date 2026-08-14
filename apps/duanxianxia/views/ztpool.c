@@ -100,15 +100,19 @@ static my_widget_t* cell_create(const char* text, uint32_t color,
 
 static void share_btn_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
   int32_t tw = 0, th = 0;
-  my_vgcanvas_set_fill_color(vg,
-                             my_color_from_rgba32(widget->hovered
-                                                      ? 0xC9302CFFu
-                                                      : DXX_COLOR_DANGER));
+  /* M18b: colors via the theme (class "danger" -> dxx CSS rules);
+   * fallbacks keep the site palette when no theme rule hits */
+  uint32_t bg = my_widget_style_get_color(
+      widget, widget->hovered ? MY_STATE_HOVER : MY_STATE_NORMAL, "bg_color",
+      widget->hovered ? 0xC9302CFFu : DXX_COLOR_DANGER);
+  uint32_t fg = my_widget_style_get_color(widget, MY_STATE_NORMAL,
+                                          "fg_color", DXX_COLOR_WHITE);
+  my_vgcanvas_set_fill_color(vg, my_color_from_rgba32(bg));
   my_vgcanvas_fill_rounded_rect(vg, &(my_rectf_t){0, 0, (float)widget->rect.w,
                                                   (float)widget->rect.h},
                                 3);
   my_vgcanvas_set_font(vg, NULL, 12);
-  my_vgcanvas_set_fill_color(vg, my_color_from_rgba32(DXX_COLOR_WHITE));
+  my_vgcanvas_set_fill_color(vg, my_color_from_rgba32(fg));
   if (my_vgcanvas_measure_text(vg, "分享图片", &tw, &th) != MY_RET_OK) {
     tw = 4 * 12;
   }
@@ -281,6 +285,7 @@ my_widget_t* dxx_build_ztpool(my_window_manager_t* wm, my_widget_t* parent,
   share = my_widget_create(NULL, "ztp_share");
   share->vtable = &s_share_vtable;
   my_widget_set_user_data(share, tt); /* the table (has wm + share path) */
+  my_widget_set_style_class(share, "danger"); /* M18b: hits the CSS rule */
   my_widget_set_rect(share, &(my_rect_t){w - 86, 7, 76, 26});
   my_widget_add_child(hdr, share);
   my_widget_unref(share);
