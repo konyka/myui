@@ -130,8 +130,16 @@ PAL port 矩阵：
 - 绘制：bg/border（**focused 复用样式 HOVER 槽**，文档约定）、选区高亮、光标竖线（常亮，闪烁 TODO）、文本超宽时 scroll_x 跟随光标。
 - MVVM：widget_target 映射 edit 的 text/hint；"changed" 事件驱动 TwoWay 回写，validator 拒绝时自动恢复。
 
-## 三次贝塞尔曲线（M19a）
+## 节点编辑器（M19b，Blender 风格连连看）
 
+- **模型在 view 层**：`my_node_view`（focusable 画布控件）持有节点（`my_node` 子控件，后加在上）与连线 darray；连线 = out(node,slot)→in(node,slot)，**输入槽唯一**——connect 替换旧连线（Blender 语义，注释钉死）；变化 emit "changed"。
+- **my_node**：标题栏（类别色，经 style_class=category 供 `node.<cat> .header` 命中）+ 接口行（左 in 右 out，圆点=4 段三次贝塞尔 kappa 近似圆，vgcanvas 无 arc 原语——M19a curve_to 正好用上）+ 圆角主体；标题栏拖动（grab，MOVE 改 rect，invalidate 触发连线重算）。接口命中区 10px（点径 5px）。
+- **连线绘制**：out 右缘→in 左缘，水平切线 handle dx=max(40,|Δx|·0.5)，curve_to 3px；**预览**（输出接口拖出跟光标，preview 色）；落在输入接口=connect，空白=取消；从已连接输入拖出=拾起旧线（断开+预览）；点选高亮 + Del 删除（键盘可达）；拖空白=pan（直接移节点 rect，hit_test 免换算）。
+- **CSS 部件配色**：`my_theme_get_part`/`my_widget_part_color` 新 API——虚拟部件（非真 widget 的绘制件）以 owner widget 为**含自身**的后代锚点查主题（`node .header` 命中 node 绘制的 header）；`my_theme_get_part` 公开，级联同 #id>.class>type。
+- 命中删除：`my_node_view_find_link_at`（细分折线逐段最近距离 ≤4px，后加优先）。
+- 测试 39 断言：模型/预览/拾起重连/选中删除/拖动跟随/pan/CSS 各部件命中/泄漏。缩放/框选/多选/小地图为 TODO。
+
+## 三次贝塞尔曲线（M19a）
 - **接口**：vgcanvas vtable 末尾追加 `curve_to(cx1,cy1,cx2,cy2,x,y)`（冻结式扩展；NULL 槽 = NOT_SUPPORTED，inline 包装判定）。路径级操作，与 line_to 同类，save/restore 无涉；无当前点（未 move_to）返回 FAIL（canvas 惯例，注释注明）。
 - **共享细分**（src/myr/my_bezier.{h,c}）：de Casteljau 自适应细分，平坦度 = 两控制点到弦的**最大垂直距离**（t=0.5 二分），容差 0.25px，递归深度上限 16 防爆；两后端路径模型同构（点+轮廓数组），各自 curve_to 只把细分端点喂回 line_to——soft 的条带化/覆盖率 AA 与 gles2 的三角化批提交原样复用。fill 开放贝塞尔（弦闭合填充）为 TODO。
 - **验证**：细分单测（直线塌缩 1 段、曲率驱动段数、dyadic 端点精确、深度帽）；soft 像素级（共线贝塞尔≡直线全图逐像素相等；S 曲线端点/驼峰/空角断言——端点为圆帽边界半覆盖，与直线行为一致）；gles2 mock（段数→顶点数增长 + 顶点集非共线）+ EGL 真读回（端点/离弦点/暗角）；golden 新场景 scene_bezier（S+急弯，目检平滑无瑕疵）；bench：100 条 S 曲线 stroke 5.30ms/帧（AA level 2，-O0）。

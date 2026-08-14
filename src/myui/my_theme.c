@@ -153,14 +153,15 @@ const my_value_t* my_theme_get(const my_theme_t* theme, const char* widget_type,
 
 /* ---------------- CSS cascade lookup (M18a) ---------------- */
 
-/** @brief Entry matches the widget at one cascade level (level 0 = id,
- * 1 = class, 2 = type). */
-static bool entry_matches(const my_theme_entry_t* e, const my_widget_t* widget,
-                          int level) {
-  const char* wname = ((const my_object_t*)widget)->name;
+/** @brief Entry matches at one cascade level (level 0 = id, 1 = class,
+ * 2 = type). The descendant condition searches from `ancestor_anchor`
+ * INCLUSIVE (a part's owner counts as its own ancestor anchor). */
+static bool entry_matches_ex(const my_theme_entry_t* e, const char* type,
+                             const char* name, const char* style_class,
+                             const my_widget_t* ancestor_anchor, int level) {
   /* descendant condition first (cheap): needs an ancestor of the type */
   if (e->ancestor_type[0] != '\0') {
-    const my_widget_t* a = widget->parent;
+    const my_widget_t* a = ancestor_anchor;
     bool found = false;
     while (a != NULL) {
       if (my_str_eq(a->widget_type, e->ancestor_type)) {
@@ -173,22 +174,22 @@ static bool entry_matches(const my_theme_entry_t* e, const my_widget_t* widget,
       return false;
     }
   }
-  /* type condition ("" = any) */
+  /* type condition ("" = any; NULL type param = no type constraint) */
   if (e->widget_type[0] != '\0' &&
-      !my_str_eq(e->widget_type, widget->widget_type)) {
+      (type == NULL || !my_str_eq(e->widget_type, type))) {
     return false;
   }
   switch (level) {
     case 0: /* #id */
       return e->name[0] != '\0' && e->style_class[0] == '\0' &&
-             wname != NULL && my_str_eq(e->name, wname);
-    case 1: /* .class (word match in the widget's class list) */
+             name != NULL && my_str_eq(e->name, name);
+    case 1: /* .class (word match in the class list) */
       if (e->style_class[0] == '\0' || e->name[0] != '\0' ||
-          widget->style_class == NULL) {
+          style_class == NULL) {
         return false;
       }
       {
-        const char* p = widget->style_class;
+        const char* p = style_class;
         size_t wl = strlen(e->style_class);
         while (*p != '\0') {
           while (*p == ' ') {
@@ -206,28 +207,29 @@ static bool entry_matches(const my_theme_entry_t* e, const my_widget_t* widget,
       return false;
     default: /* type-wide */
       return e->name[0] == '\0' && e->style_class[0] == '\0' &&
-             e->widget_type[0] != '\0' &&
-             my_str_eq(e->widget_type, widget->widget_type);
+             e->widget_type[0] != '\0' && my_str_eq(e->widget_type, type);
   }
 }
 
-const my_value_t* my_theme_get_for_widget(const my_theme_t* theme,
-                                          const my_widget_t* widget,
-                                          my_widget_state_t state,
-                                          const char* key) {
+/** @brief Shared cascade scan. */
+static const my_value_t* theme_cascade(const my_theme_t* theme,
+                                       const char* type, const char* name,
+                                       const char* style_class,
+                                       const my_widget_t* ancestor_anchor,
+                                       my_widget_state_t state,
+                                       const char* key) {
   size_t i, n;
   int level;
-  if (theme == NULL || widget == NULL || key == NULL) {
+  if (theme == NULL || key == NULL) {
     return NULL;
   }
   n = my_darray_size(theme->entries);
-  /* cascade: #id > .class > type; state -> normal fallback inside
-   * my_style_get */
   for (level = 0; level < 3; level++) {
     for (i = 0; i < n; i++) {
       const my_theme_entry_t* e =
           (const my_theme_entry_t*)my_darray_get(theme->entries, i);
-      if (entry_matches(e, widget, level)) {
+      if (entry_matches_ex(e, type, name, style_class, ancestor_anchor,
+                           level)) {
         const my_value_t* v = my_style_get(&e->style, state, key);
         if (v != NULL) {
           return v;
@@ -236,6 +238,49 @@ const my_value_t* my_theme_get_for_widget(const my_theme_t* theme,
     }
   }
   return NULL;
+}
+
+const my_value_t* my_theme_get_for_widget(const my_theme_t* theme,
+                                          const my_widget_t* widget,
+                                          my_widget_state_t state,
+                                          const char* key) {
+  if (widget == NULL) {
+    return NULL;
+  }
+  return theme_cascade(theme, widget->widget_type,
+                       ((const my_object_t*)widget)->name,
+                       widget->style_class, widget->parent, state, key);
+}
+
+const my_value_t* my_theme_get_part(const my_theme_t* theme,
+                                    const my_widget_t* owner,
+                                    const char* part_type,
+                                    const char* part_class,
+                                    my_widget_state_t state,
+                                    const char* key) {
+  /* M19b: virtual parts (node headers, sockets, links...) — the owner
+   * widget itself anchors the descendant search (inclusive) */
+  return theme_cascade(theme, part_type, NULL, part_class, owner, state, key);
+}
+
+/** @brief Part color lookup with theme climbing + fallback (used by
+ * widgets painting virtual parts). */
+uint32_t my_widget_part_color(my_widget_t* widget, const char* part_type,
+                              const char* part_class, my_widget_state_t state,
+                              const char* key, uint32_t fallback) {
+  my_widget_t* w = widget;
+  const my_value_t* v;
+  while (w != NULL) {
+    if (w->theme != NULL) {
+      v = my_theme_get_part(w->theme, widget, part_type, part_class, state,
+                            key);
+      return v != NULL && v->type == MY_VALUE_UINT32
+                 ? my_value_get_uint32(v)
+                 : fallback;
+    }
+    w = w->parent;
+  }
+  return fallback;
 }
 
 /* ---------------- default theme ---------------- */

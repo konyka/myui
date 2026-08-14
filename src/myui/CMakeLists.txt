@@ -29,6 +29,8 @@ add_library(myui STATIC
   widgets/my_menu.c
   widgets/my_rich_label.c
   widgets/my_scroll_view.c
+  widgets/my_node.c
+  widgets/my_node_view.c
   my_css.c
 )
 

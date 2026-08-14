@@ -58,3 +58,17 @@ label.muted { color: #999999 }           /* 页脚 label class="muted" */
 ```
 
 注意 specificity 语义：`.danger:hover` 恒胜 `.danger`（裸规则只写 NORMAL 槽，伪类写状态槽，级内 state→normal 回落），与真实 CSS 一致。像素级验证：迁移前后 dummy dump 首屏逐像素 diff = 0；页脚灰色化/分享按钮主题化为有意变更（dump 目检 + 单测断言）。
+
+## 节点编辑器部件选择器（M19b 实证）
+
+```css
+node_view { background-color: #101010 }       /* 画布底色 */
+node { background-color: #202020 }            /* 节点主体 */
+node.shader .header { background-color: #663300 }  /* 标题栏：类别 class + 后代 */
+node_socket.output { background-color: #00FF00 }   /* 接口圆点（虚拟部件） */
+node_link { color: #FF00FF }                  /* 连线 */
+node_link.selected { color: #E0A030 }         /* 选中态 */
+node_link.preview { color: #70C0E8 }          /* 拖线预览态 */
+```
+
+header/socket/link 不是真 widget——node/node_view 绘制时经 `my_widget_part_color(owner, type, class, state, key, fallback)` 查主题（owner 含自身作后代锚点），回退值为模型自带色（接口类型色）或内建默认。

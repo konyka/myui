@@ -75,6 +75,7 @@ my_ret_t my_theme_set_ex(my_theme_t* theme, const char* widget_type,
                          const char* key, const my_value_t* value);
 
 struct my_widget_t;
+
 /**
  * @brief Widget-aware lookup with the CSS cascade (M18a): #id > .class
  * > type (state -> normal fallback at each level; descendant selectors
@@ -85,6 +86,26 @@ const my_value_t* my_theme_get_for_widget(const my_theme_t* theme,
                                           const struct my_widget_t* widget,
                                           my_widget_state_t state,
                                           const char* key);
+
+/**
+ * @brief Virtual-part lookup (M19b): for drawn parts that are not real
+ * widgets (node headers, sockets, links). `owner` anchors the
+ * descendant search INCLUSIVE (CSS `node .header` hits when the owner
+ * is a node). Cascade is the same #id > .class > type.
+ */
+const my_value_t* my_theme_get_part(const my_theme_t* theme,
+                                    const struct my_widget_t* owner,
+                                    const char* part_type,
+                                    const char* part_class,
+                                    my_widget_state_t state,
+                                    const char* key);
+
+/** @brief Virtual-part color with theme climbing + fallback (widgets
+ * painting drawn parts; M19b). */
+uint32_t my_widget_part_color(struct my_widget_t* widget,
+                              const char* part_type, const char* part_class,
+                              my_widget_state_t state, const char* key,
+                              uint32_t fallback);
 
 /** @brief Built-in default theme (light palette for window/button/label). */
 my_theme_t* my_theme_default_create(const my_allocator_t* allocator);

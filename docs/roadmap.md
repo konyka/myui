@@ -67,6 +67,7 @@
 - **M14 完成**。
 - **M18b dxx 主题迁 CSS + 收官** ✅ 已完成：`dxx_theme_create` 迁移为 `my_theme_load_css` 字符串（站点色值不变，type/class 选择器示范）；页脚 label 加 `muted` class（站点 #999 灰字真实命中）、分享按钮加 `danger` class（颜色改走主题，fallback 保持站点色 → 首屏迁移前后逐像素 diff=0）；loader `<style>` 按 `{` 路由 CSS/旧文本格式（可并存）；demo_mvvm XML 加 `class="accent"` + CSS 块示范；docs/css.md 迁移示例节。
 - **M18 完成**。
+- **M19b 节点编辑器控件** ✅ 已完成：`my_node`（类别色标题栏 + 左右接口行 + kappa 贝塞尔圆点 + 标题栏拖动）+ `my_node_view`（模型/贝塞尔连线/拖线预览/拾起重连/选中+Del 删/pan）；连线模型输入槽唯一（Blender 语义）；主题新 API `my_theme_get_part`/`my_widget_part_color`（虚拟部件含自身的后代锚点），CSS 六类部件命中单测固化；过程中发现并修复：子类工厂忘设 widget_type（node/node_view）导致类型选择器不命中。
 - **M19a vgcanvas 三次贝塞尔** ✅ 已完成（节点编辑器前置，spec: docs/superpowers/specs/2026-08-14-node-editor-design.md）：vtable 末尾 curve_to 槽（NULL 安全）；共享 de Casteljau 自适应细分 my_bezier（弦距容差 0.25px、深度帽 16）；soft 复用条带化 AA、gles2 复用三角化批提交；测试 4000+ 断言（细分单测/soft 像素等价/gles2 mock/EGL 读回）+ golden scene_bezier 目检 + bench 100 曲线 5.30ms/帧（AA level 2）。
 
 
