@@ -2,6 +2,9 @@
  * @file my_widgets_test.c
  * @brief Unit tests for the built-in button and label widgets.
  */
+#include "mypal/dummy/my_pal_dummy.h"
+#include "myui/my_window.h"
+#include "myui/my_window_manager.h"
 #include "myui/widgets/my_button.h"
 #include "myui/widgets/my_label.h"
 
@@ -154,12 +157,46 @@ static void test_no_leak_with_debug_allocator(void) {
   my_allocator_debug_destroy(dbg);
 }
 
+static void test_button_min_press_display(void) {
+  /* M16: a quick click keeps the pressed visual until the 120ms minimum,
+   * driven by the loop timer; framework-level regression for frame
+   * coalescing eating the pressed frame */
+  my_pal_t* pal = my_pal_dummy_create(NULL);
+  my_pal_main_loop_t* loop = my_pal_main_loop_create(pal);
+  my_window_manager_t* wm = my_window_manager_create(NULL, pal, loop);
+  my_window_t* win = my_window_create(NULL, pal, 200, 100, "t");
+  my_widget_t* b = my_button_create(NULL, "OK");
+  my_button_t* btn = (my_button_t*)b;
+  my_event_t e;
+  my_widget_set_rect(b, &(my_rect_t){10, 10, 80, 30});
+  my_widget_add_child(my_window_widget(win), b);
+  my_widget_unref(b);
+  my_window_manager_open(wm, win); /* sets win->loop (min-press timer) */
+
+  e = pointer_ev(MY_EVENT_POINTER_DOWN, 20, 20);
+  my_window_on_pal_event(win, &e);
+  TEST_ASSERT(btn->pressed);
+  e = pointer_ev(MY_EVENT_POINTER_UP, 20, 20);
+  my_window_on_pal_event(win, &e);
+  TEST_ASSERT(btn->pressed); /* still pressed: min display time */
+
+  my_pal_dummy_set_now_ms(pal, 200);
+  my_pal_main_loop_run(loop);
+  TEST_ASSERT(!btn->pressed); /* released after the delay */
+
+  my_widget_unref(my_window_widget(win));
+  my_window_manager_destroy(wm);
+  my_pal_main_loop_destroy(loop);
+  my_pal_destroy(pal);
+}
+
 MYTEST_MAIN_BEGIN()
   MYTEST_RUN(test_button_press_release_click);
   MYTEST_RUN(test_button_release_outside_no_click);
   MYTEST_RUN(test_button_up_without_down_ignored);
   MYTEST_RUN(test_button_paint_states);
   MYTEST_RUN(test_button_set_text);
+  MYTEST_RUN(test_button_min_press_display);
   MYTEST_RUN(test_label_paint);
   MYTEST_RUN(test_label_no_text);
   MYTEST_RUN(test_no_leak_with_debug_allocator);

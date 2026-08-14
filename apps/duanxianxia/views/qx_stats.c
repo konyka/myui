@@ -15,6 +15,7 @@
 #include "../dxx_data.h"
 #include "../dxx_theme.h"
 #include "myr/my_font.h"
+#include "myui/my_window.h"
 #include "qx_chart.h"
 #include "views.h"
 
@@ -34,7 +35,36 @@ typedef struct stat_btn_t {
   int index;
   bool active;
   bool pressed;
+  uint64_t down_ms;          /**< press time (min display time) */
+  uint32_t release_timer;    /**< pending delayed release (0 = none) */
 } stat_btn_t;
+
+/* keep the pressed visual on screen for at least this long (ms); with
+ * 30fps frame coalescing a quick click would otherwise never paint it */
+#define STAT_PRESS_MIN_MS 120
+
+static my_ret_t stat_release_cb(void* ctx) {
+  stat_btn_t* b = (stat_btn_t*)ctx;
+  b->release_timer = 0;
+  b->pressed = false;
+  my_widget_invalidate((my_widget_t*)b, NULL);
+  return MY_RET_FAIL; /* one-shot */
+}
+
+static void stat_release(stat_btn_t* b) {
+  my_pal_t* pal = my_window_pal_of_widget((my_widget_t*)b);
+  my_pal_main_loop_t* loop = my_window_loop_of_widget((my_widget_t*)b);
+  uint64_t now = pal != NULL ? my_pal_time_now_ms(pal) : 0;
+  if (loop != NULL && pal != NULL && now - b->down_ms < STAT_PRESS_MIN_MS) {
+    if (b->release_timer == 0) {
+      b->release_timer = my_pal_main_loop_add_timer(
+          loop, stat_release_cb, b,
+          (uint32_t)(STAT_PRESS_MIN_MS - (now - b->down_ms)));
+    }
+    return;
+  }
+  b->pressed = false;
+}
 
 struct qx_card_t {
   my_widget_t base;
@@ -63,7 +93,7 @@ static uint32_t darken_hover(uint32_t c) {
 static void stat_btn_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
   stat_btn_t* b = (stat_btn_t*)widget;
   const dxx_stat_t* s = b->stat;
-  uint32_t bg = b->active ? darken(s->bg) : s->bg;
+  uint32_t bg;
   bool white_bg;
   int32_t tw = 0, th = 0;
   int32_t vw = 0;
@@ -71,9 +101,14 @@ static void stat_btn_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
   float y = ((float)widget->rect.h - 13.0f) / 2.0f;
   my_font_t* wfont = NULL;
   int32_t ascent = 0;
-  if (b->pressed) {
-    bg = darken(darken(bg)); /* held down: deepest (bootstrap active look) */
-  } else if (!b->active && widget->hovered) {
+  if (b->active) {
+    bg = darken(s->bg); /* active wins over the transient press frame */
+  } else if (b->pressed) {
+    bg = darken(darken(s->bg)); /* held down: deepest (bootstrap active) */
+  } else {
+    bg = s->bg;
+  }
+  if (!b->active && !b->pressed && widget->hovered) {
     bg = darken_hover(bg); /* hover feedback (M16) */
   }
   white_bg = s->bg == DXX_COLOR_WHITE; /* border decision uses base color */
@@ -133,9 +168,32 @@ static void stat_set_active(stat_btn_t* b, bool active) {
   my_widget_invalidate((my_widget_t*)b, NULL);
 }
 
+static void stat_btn_destroy(my_object_t* obj) {
+  stat_btn_t* b = (stat_btn_t*)obj;
+  if (b->release_timer != 0) {
+    my_pal_main_loop_t* loop = my_window_loop_of_widget((my_widget_t*)b);
+    if (loop != NULL) {
+      my_pal_main_loop_remove_timer(loop, b->release_timer);
+    }
+    b->release_timer = 0;
+  }
+  my_widget_destroy((my_widget_t*)b);
+  my_object_destroy(obj);
+}
+
 static my_ret_t stat_btn_event(my_widget_t* widget, const my_event_t* event) {
   stat_btn_t* b = (stat_btn_t*)widget;
   if (event->type == MY_EVENT_POINTER_DOWN) {
+    my_pal_t* pal;
+    if (b->release_timer != 0) { /* a fresh press cancels a pending release */
+      my_pal_main_loop_t* loop = my_window_loop_of_widget(widget);
+      if (loop != NULL) {
+        my_pal_main_loop_remove_timer(loop, b->release_timer);
+      }
+      b->release_timer = 0;
+    }
+    pal = my_window_pal_of_widget(widget);
+    b->down_ms = pal != NULL ? my_pal_time_now_ms(pal) : 0;
     b->pressed = true;
     my_widget_invalidate(widget, NULL); /* pressed visual (M16) */
     return MY_RET_OK;
@@ -146,7 +204,7 @@ static my_ret_t stat_btn_event(my_widget_t* widget, const my_event_t* event) {
     if (!b->pressed) {
       return MY_RET_FAIL;
     }
-    b->pressed = false;
+    stat_release(b); /* pressed stays until min display time elapsed */
     my_widget_invalidate(widget, NULL);
     my_widget_global_to_local(widget, &lx, &ly);
     inside = lx >= 0 && ly >= 0 && lx < widget->rect.w && ly < widget->rect.h;
@@ -242,6 +300,7 @@ my_widget_t* dxx_build_emotion_card(my_widget_t* parent, int32_t x, int32_t y,
     b->stat = &DXX_STATS[i];
     b->card = card;
     b->index = i;
+    ((my_object_t*)b)->destroy = stat_btn_destroy;
     b->active = i == 0; /* 情绪指标 selected by default */
     my_widget_set_rect((my_widget_t*)b,
                        &(my_rect_t){8 + col * (cw + 10),

@@ -60,11 +60,23 @@ static void menu_item_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
   my_vgcanvas_fill_rect(vg, &(my_rectf_t){0, 0, (float)widget->rect.w,
                                           (float)widget->rect.h});
   my_vgcanvas_set_fill_color(vg, my_color_from_rgba32(fg));
-  my_vgcanvas_draw_text(vg, iw->item->text, 8,
-                        ((float)widget->rect.h - 8) / 2.0f);
-  if (iw->item->sub != NULL) {
-    my_vgcanvas_draw_text(vg, ">", (float)widget->rect.w - 14,
-                          ((float)widget->rect.h - 8) / 2.0f);
+  {
+    /* 13px menu font, optically centered: baseline at h/2 + 0.25*ascent
+     * (the old (h-8)/2 assumed an 8px line and clipped 16px text) */
+    my_font_t* f = NULL;
+    int32_t ascent = 0;
+    float ty;
+    my_vgcanvas_set_font(vg, NULL, 13);
+    my_window_font_of_widget(widget, &f, NULL);
+    if (f != NULL) {
+      ascent = my_font_ascent(f, 13);
+    }
+    ty = ascent > 0 ? (float)widget->rect.h / 2.0f - 0.75f * (float)ascent
+                    : ((float)widget->rect.h - 13.0f) / 2.0f;
+    my_vgcanvas_draw_text(vg, iw->item->text, 8, ty);
+    if (iw->item->sub != NULL) {
+      my_vgcanvas_draw_text(vg, ">", (float)widget->rect.w - 14, ty);
+    }
   }
 }
 
@@ -141,7 +153,22 @@ static int32_t menu_box_width(my_menu_t* m) {
   int32_t w = 80;
   for (i = 0; i < n; i++) {
     menu_item_t* it = (menu_item_t*)my_darray_get(m->items, i);
-    int32_t tw = (int32_t)strlen(it->text) * 8 + 28;
+    int32_t tw;
+    if (m->win != NULL && m->win->font != NULL) {
+      /* real measure at the 13px menu font */
+      my_font_measure(m->win->font, it->text, 13, &tw, NULL);
+    } else {
+      const char* p;
+      tw = 0; /* codepoint-aware fallback (CJK != 1 byte) */
+      for (p = it->text; *p != '\0';) {
+        uint32_t cp = my_utf8_next(&p);
+        tw += cp < 0x80 ? 7 : 13;
+      }
+    }
+    tw += 28;
+    if (it->sub != NULL) {
+      tw += 12; /* submenu arrow */
+    }
     if (tw > w) {
       w = tw;
     }
