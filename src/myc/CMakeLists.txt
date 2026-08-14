@@ -6,6 +6,9 @@ add_library(myc STATIC
   my_emitter.c
   my_value.c
   my_object.c
+  myconf/my_conf.c
+  myconf/my_conf_json.c
+  myconf/my_conf_bson.c
 )
 
 target_include_directories(myc PUBLIC ${CMAKE_SOURCE_DIR}/src)

@@ -278,8 +278,13 @@ PAL port 矩阵：
 - **tooltip（窗口级悬停浮层）**：widget 新 owned `tooltip` 字符串（set/get，destroy 释放；XML 通用属性 `tooltip="..."`）；my_window 在事件分发**前**做 hover 跟踪（POINTER_MOVE hit_test 后沿祖先找带 tooltip 者，排除 tip 自身）：目标变更→取消 500ms one-shot 定时器（win->loop，回调返回 FAIL 即单次）并隐藏旧 tip，到时→在光标 +(12,16) 处弹 floating "tooltip" 小控件（越界钳进窗口、底部越界翻到光标上方）；POINTER_DOWN/KEY_DOWN 立即取消+隐藏；目标子树被移除经 removed_hook 清态（tip_hide 先清指针再 remove 防重入）；窗口 destroy 取消定时器并收 tip（window/tree 各持一引用，平衡释放）。
 - **主题默认色**：menu_box/menu_item（hover 高亮）/dialog_content/tooltip 四组键入 `my_theme_default_create`；demo_widgets 增 Dialog/Menu 按钮、各按钮 tooltip，dummy dump 出 scrim/dialog/menu/tooltip 四张目检图。级联深度>3、菜单鼠标悬停开级联（现要点/Enter）、dialog 拖拽移动为 TODO。
 
-## 客户端装饰（CSD）标题栏（M16）
+## myconf 配置文档树（M17a）
 
+- `src/myc/myconf/`（并入 myc）：`my_conf_node_t` 七型树（NULL/BOOL/INT64/DOUBLE/STR/OBJECT/ARRAY，OBJECT 保插入序，children=darray，父持子所有权）+ 点路径查询（数字段在 ARRAY 上是下标、OBJECT 上是字面键）+ 类型严格带默认值的 getter（INT64↛DOUBLE 不互转）+ load/save_file（JSON）。
+- **JSON 全集**（RFC 8259 自研递归下降）：全转义 + \uXXXX 代理对、整数→INT64（strtoll ERANGE 溢出回落 DOUBLE）/小数指数→DOUBLE、错误带 1 基行列；序列化紧凑/pretty(2) 两式，整数值 DOUBLE 打 %.1f 保类型往返；畸形输入 14 种向量全部明确拒绝。
+- **BSON**：严格小端读（长度自洽校验、零越界、嵌套上顶 64、任意前缀截断 fuzz 不崩）；映射 0x01/02/03/04/07(24 hex)/08/09(datetime→INT64 毫秒)/0A/10→INT64/12，**其余类型一律报错**（完整性优先）；写侧 INT64 按范围选 0x10/0x12。TOML/YAML 子集为 M17b（docs/conf.md）。
+
+## 客户端装饰（CSD）标题栏（M16）
 - **动机（实测）**：GNOME/mutter 的 wayland 会话对 plain xdg-shell 客户端**不提供 SSD**（registry 不广告 zxdg_decoration_manager_v1）——窗口无标题栏、无法拖动。结论：必须由客户端自绘装饰。
 - **PAL 能力槽**：pal vtable 新 `needs_client_decoration`（wayland=true；x11/dummy/linux_fb=false；NULL 槽安全返回 false，`my_pal_needs_client_decoration` 包装）；window vtable 新 `begin_move`（wayland = `xdg_toplevel_move(toplevel, seat, last_button_serial)`，serial 在 on_pointer_button 里记录；x11 由 WM 管移动为 noop；dummy 记录次数供测试）。
 - **my_window 结构**：`my_pal_needs_client_decoration(pal)` 为真时，root 挂垂直 linear 布局，下挂 `csd_bar`（h:36：#3C4043 深灰底、居中白色 13px 标题——窗口新增 owned `title` 副本、右侧 32px "×" 关闭钮，on_layout 里贴右缘）+ `csd_content`（h:1f 普通容器）。**`my_window_widget(win)` 在 CSD 模式返回内容容器**（非 CSD 返回 root，行为不变）；paint/hit/dispatch 仍走 root。tooltip/menu 浮层是 `floating`，linear 布局跳过它们，挂哪层都安全。
