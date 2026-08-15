@@ -15,6 +15,15 @@
 
 struct my_window_manager_t;
 
+/** @brief GPU backends selectable through my_window_enable_gpu (M25a). */
+typedef enum my_gpu_backend_t {
+  MY_GPU_AUTO = 0, /**< try GLES2 -> OPENGL -> VULKAN, else stay soft */
+  MY_GPU_SOFT,     /**< CPU rasterizer (always available) */
+  MY_GPU_GLES2,    /**< OpenGL ES 2.0 (most mature GL path) */
+  MY_GPU_OPENGL,   /**< desktop OpenGL (compat profile, GLSL 1.20) */
+  MY_GPU_VULKAN    /**< reserved (M25b; currently NOT_SUPPORTED) */
+} my_gpu_backend_t;
+
 /** @brief Top-level window (IS-A widget: embed as first member). */
 typedef struct my_window_t {
   my_widget_t base;                  /**< root widget of the window */
@@ -49,6 +58,7 @@ typedef struct my_window_t {
   bool csd;                 /**< client-side decoration active (M16) */
   my_widget_t* csd_content; /**< CSD content container (weak; the root
                              * holds the tree ref) */
+  my_gpu_backend_t gpu_backend; /**< active backend (M25a/b; SOFT init) */
 } my_window_t;
 
 /** @brief Create a window (hidden) of w x h with the given title. */
@@ -114,15 +124,6 @@ void my_window_set_vgcanvas(my_window_t* win, my_vgcanvas_t* vg);
  * backend creation fails (the window keeps the soft path then).
  */
 my_ret_t my_window_enable_gl(my_window_t* win);
-
-/** @brief GPU backends selectable through my_window_enable_gpu (M25a). */
-typedef enum my_gpu_backend_t {
-  MY_GPU_AUTO = 0, /**< try GLES2 -> OPENGL -> VULKAN, else stay soft */
-  MY_GPU_SOFT,     /**< CPU rasterizer (always available) */
-  MY_GPU_GLES2,    /**< OpenGL ES 2.0 (most mature GL path) */
-  MY_GPU_OPENGL,   /**< desktop OpenGL (compat profile, GLSL 1.20) */
-  MY_GPU_VULKAN    /**< reserved (M25b; currently NOT_SUPPORTED) */
-} my_gpu_backend_t;
 
 /**
  * @brief Unified GPU backend selection (M25a). GLES2/OPENGL mount the

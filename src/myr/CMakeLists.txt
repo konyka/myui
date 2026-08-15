@@ -5,6 +5,8 @@ add_library(myr STATIC
   my_lcd_mem.c
   my_vgcanvas_soft.c
   my_vgcanvas_gles2.c
+  my_vgcanvas_vulkan.c
+  my_vggeometry.c
   my_gl_real.c
   my_gl_desktop.c
   my_font.c
@@ -93,4 +95,26 @@ if(OPENGL_FOUND)
   message(STATUS "myui: desktop OpenGL backend enabled")
 else()
   message(STATUS "myui: desktop OpenGL backend stubbed (gl not found)")
+endif()
+
+# optional Vulkan backend support (M25b). The SPIR-V .inc files under
+# vulkan_shaders/ are checked in; regenerate them explicitly with
+# `cmake --build . --target vulkan_shaders_regen` (needs glslangValidator).
+if(PkgConfig_FOUND)
+  pkg_check_modules(VULKAN QUIET vulkan)
+endif()
+if(VULKAN_FOUND)
+  target_compile_definitions(myr PUBLIC MYUI_HAS_VULKAN)
+  target_include_directories(myr PUBLIC ${VULKAN_INCLUDE_DIRS})
+  target_link_libraries(myr PUBLIC ${VULKAN_LIBRARIES})
+  message(STATUS "myui: Vulkan backend enabled")
+else()
+  message(STATUS "myui: Vulkan backend stubbed (vulkan not found)")
+endif()
+find_program(GLSLANG_VALIDATOR glslangValidator)
+if(GLSLANG_VALIDATOR)
+  add_custom_target(vulkan_shaders_regen
+    COMMAND python3 ${CMAKE_SOURCE_DIR}/tools/gen_vulkan_shaders.py
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    COMMENT "Regenerating Vulkan SPIR-V .inc files")
 endif()

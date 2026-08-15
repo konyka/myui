@@ -11,6 +11,7 @@
 #include "myc/my_mem.h"
 #include "myr/my_bezier.h"
 #include "myr/my_text_layout.h"
+#include "myr/my_vggeometry.h"
 
 /* ---------------- shaders ---------------- */
 
@@ -86,17 +87,6 @@ typedef struct gles_img_tex_entry_t {
   uint64_t last_used;
 } gles_img_tex_entry_t;
 
-typedef struct path_point_t {
-  float x;
-  float y;
-} path_point_t;
-
-typedef struct contour_t {
-  size_t start;
-  size_t count;
-  bool closed;
-} contour_t;
-
 typedef struct my_vgcanvas_gles2_t {
   my_vgcanvas_t base;
   const my_allocator_t* allocator;
@@ -115,13 +105,7 @@ typedef struct my_vgcanvas_gles2_t {
   gles_state_t* stack;
   size_t stack_count, stack_cap;
 
-  path_point_t* points;
-  size_t point_count, point_cap;
-  contour_t* contours;
-  size_t contour_count, contour_cap;
-
-  float* verts; /* growable interleaved xy buffer */
-  size_t vert_cap; /* in floats */
+  my_vggeometry_t geo; /**< CPU triangulation (M25b, shared) */
 } my_vgcanvas_gles2_t;
 
 /**
@@ -189,46 +173,18 @@ static void gles_draw(my_vgcanvas_gles2_t* s, const float* xy, int32_t count,
   s->gl.draw_arrays_triangles(s->gl.ctx, s->program, xy, count);
 }
 
-/** @brief Growable vertex writer. */
-typedef struct vbuf_t {
-  my_vgcanvas_gles2_t* s;
-  size_t count; /* floats written */
-} vbuf_t;
-
-static void vbuf_reset(vbuf_t* b, my_vgcanvas_gles2_t* s) {
-  b->s = s;
-  b->count = 0;
+/** @brief Reset the triangle output and apply the current state transform
+ * (M25b: the writer moved into the shared my_vggeometry). */
+static void gles_geo_setup(my_vgcanvas_gles2_t* s) {
+  my_vggeometry_set_transform(&s->geo, s->state.tx, s->state.ty,
+                              s->state.scale);
+  my_vggeometry_begin_verts(&s->geo);
 }
 
-static void vbuf_push(vbuf_t* b, float x, float y) {
-  my_vgcanvas_gles2_t* s = b->s;
-  if (gles_grow(s->allocator, (void**)&s->verts, &s->vert_cap, b->count + 2,
-                sizeof(float)) == MY_RET_OK) {
-    s->verts[b->count++] = (x + s->state.tx) * s->state.scale;
-    s->verts[b->count++] = (y + s->state.ty) * s->state.scale;
-  }
-}
-
-static void vbuf_rect(vbuf_t* b, float x0, float y0, float x1, float y1) {
-  if (x1 <= x0 || y1 <= y0) {
-    return;
-  }
-  vbuf_push(b, x0, y0);
-  vbuf_push(b, x1, y0);
-  vbuf_push(b, x1, y1);
-  vbuf_push(b, x0, y0);
-  vbuf_push(b, x1, y1);
-  vbuf_push(b, x0, y1);
-}
-
-static void vbuf_circle_fan(vbuf_t* b, float cx, float cy, float r, int segments) {
-  int i;
-  for (i = 0; i < segments; i++) {
-    float a0 = (float)i * 6.2831853f / (float)segments;
-    float a1 = (float)(i + 1) * 6.2831853f / (float)segments;
-    vbuf_push(b, cx, cy);
-    vbuf_push(b, cx + r * cosf(a0), cy + r * sinf(a0));
-    vbuf_push(b, cx + r * cosf(a1), cy + r * sinf(a1));
+/** @brief Submit the accumulated triangles with `color` (skip when empty). */
+static void gles_draw_geo(my_vgcanvas_gles2_t* s, my_color_t color) {
+  if (s->geo.vert_count > 0) {
+    gles_draw(s, s->geo.verts, (int32_t)(s->geo.vert_count / 2), color);
   }
 }
 
@@ -318,150 +274,65 @@ static my_ret_t gles_set_line_width(my_vgcanvas_t* vg, float width) {
 
 static my_ret_t gles_fill_rect(my_vgcanvas_t* vg, const my_rectf_t* rect) {
   my_vgcanvas_gles2_t* s = (my_vgcanvas_gles2_t*)vg;
-  vbuf_t b;
   if (rect == NULL) {
     return MY_RET_INVALID_PARAMS;
   }
-  vbuf_reset(&b, s);
-  vbuf_rect(&b, rect->x, rect->y, rect->x + rect->w, rect->y + rect->h);
-  if (b.count > 0) {
-    gles_draw(s, s->verts, (int32_t)(b.count / 2), s->state.fill_color);
-  }
+  gles_geo_setup(s);
+  my_vggeometry_rect(&s->geo, rect->x, rect->y, rect->x + rect->w,
+                     rect->y + rect->h);
+  gles_draw_geo(s, s->state.fill_color);
   return MY_RET_OK;
 }
 
 static my_ret_t gles_stroke_rect(my_vgcanvas_t* vg, const my_rectf_t* rect) {
   my_vgcanvas_gles2_t* s = (my_vgcanvas_gles2_t*)vg;
-  float lw, x0, y0, x1, y1;
-  vbuf_t b;
   if (rect == NULL) {
     return MY_RET_INVALID_PARAMS;
   }
-  lw = s->state.line_width < 1.0f ? 1.0f : s->state.line_width;
-  x0 = rect->x;
-  y0 = rect->y;
-  x1 = rect->x + rect->w;
-  y1 = rect->y + rect->h;
-  vbuf_reset(&b, s);
-  vbuf_rect(&b, x0, y0, x1, y0 + lw);
-  vbuf_rect(&b, x0, y1 - lw, x1, y1);
-  vbuf_rect(&b, x0, y0 + lw, x0 + lw, y1 - lw);
-  vbuf_rect(&b, x1 - lw, y0 + lw, x1, y1 - lw);
-  if (b.count > 0) {
-    gles_draw(s, s->verts, (int32_t)(b.count / 2), s->state.stroke_color);
-  }
+  gles_geo_setup(s);
+  my_vggeometry_stroke_rect(&s->geo, rect->x, rect->y, rect->w, rect->h,
+                            s->state.line_width);
+  gles_draw_geo(s, s->state.stroke_color);
   return MY_RET_OK;
 }
 
 static my_ret_t gles_fill_rounded_rect(my_vgcanvas_t* vg, const my_rectf_t* rect,
                                        float radius) {
   my_vgcanvas_gles2_t* s = (my_vgcanvas_gles2_t*)vg;
-  float r, x0, y0, x1, y1;
-  vbuf_t b;
   if (rect == NULL) {
     return MY_RET_INVALID_PARAMS;
   }
-  x0 = rect->x;
-  y0 = rect->y;
-  x1 = rect->x + rect->w;
-  y1 = rect->y + rect->h;
-  r = radius;
-  if (r > rect->w / 2.0f) {
-    r = rect->w / 2.0f;
-  }
-  if (r > rect->h / 2.0f) {
-    r = rect->h / 2.0f;
-  }
-  vbuf_reset(&b, s);
-  if (r <= 0.5f) {
-    vbuf_rect(&b, x0, y0, x1, y1);
-  } else {
-    vbuf_rect(&b, x0 + r, y0, x1 - r, y1);
-    vbuf_rect(&b, x0, y0 + r, x0 + r, y1 - r);
-    vbuf_rect(&b, x1 - r, y0 + r, x1, y1 - r);
-    vbuf_circle_fan(&b, x0 + r, y0 + r, r, 8);
-    vbuf_circle_fan(&b, x1 - r, y0 + r, r, 8);
-    vbuf_circle_fan(&b, x0 + r, y1 - r, r, 8);
-    vbuf_circle_fan(&b, x1 - r, y1 - r, r, 8);
-  }
-  if (b.count > 0) {
-    gles_draw(s, s->verts, (int32_t)(b.count / 2), s->state.fill_color);
-  }
+  gles_geo_setup(s);
+  my_vggeometry_fill_rounded_rect(&s->geo, rect->x, rect->y, rect->w,
+                                  rect->h, radius);
+  gles_draw_geo(s, s->state.fill_color);
   return MY_RET_OK;
 }
 
-/* ---------------- path ---------------- */
+/* ---------------- path (delegated to my_vggeometry, M25b) ---------------- */
 
 static my_ret_t gles_begin_path(my_vgcanvas_t* vg) {
-  my_vgcanvas_gles2_t* s = (my_vgcanvas_gles2_t*)vg;
-  s->point_count = 0;
-  s->contour_count = 0;
-  return MY_RET_OK;
+  return my_vggeometry_begin_path(&((my_vgcanvas_gles2_t*)vg)->geo);
 }
 
 static my_ret_t gles_move_to(my_vgcanvas_t* vg, float x, float y) {
-  my_vgcanvas_gles2_t* s = (my_vgcanvas_gles2_t*)vg;
-  if (gles_grow(s->allocator, (void**)&s->contours, &s->contour_cap,
-                s->contour_count + 1, sizeof(contour_t)) != MY_RET_OK) {
-    return MY_RET_OOM;
-  }
-  s->contours[s->contour_count].start = s->point_count;
-  s->contours[s->contour_count].count = 0;
-  s->contours[s->contour_count].closed = false;
-  s->contour_count++;
-  return my_vgcanvas_line_to(vg, x, y);
+  return my_vggeometry_move_to(&((my_vgcanvas_gles2_t*)vg)->geo, x, y);
 }
 
 static my_ret_t gles_line_to(my_vgcanvas_t* vg, float x, float y) {
-  my_vgcanvas_gles2_t* s = (my_vgcanvas_gles2_t*)vg;
-  if (s->contour_count == 0) {
-    return gles_move_to(vg, x, y);
-  }
-  if (gles_grow(s->allocator, (void**)&s->points, &s->point_cap,
-                s->point_count + 1, sizeof(path_point_t)) != MY_RET_OK) {
-    return MY_RET_OOM;
-  }
-  s->points[s->point_count].x = x;
-  s->points[s->point_count].y = y;
-  s->point_count++;
-  s->contours[s->contour_count - 1].count++;
-  return MY_RET_OK;
+  return my_vggeometry_line_to(&((my_vgcanvas_gles2_t*)vg)->geo, x, y);
 }
 
 static my_ret_t gles_close_path(my_vgcanvas_t* vg) {
-  my_vgcanvas_gles2_t* s = (my_vgcanvas_gles2_t*)vg;
-  if (s->contour_count > 0) {
-    s->contours[s->contour_count - 1].closed = true;
-  }
-  return MY_RET_OK;
-}
-
-static int float_cmp(const void* a, const void* b) {
-  float fa = *(const float*)a;
-  float fb = *(const float*)b;
-  return fa < fb ? -1 : fa > fb ? 1 : 0;
+  return my_vggeometry_close_path(&((my_vgcanvas_gles2_t*)vg)->geo);
 }
 
 /* ---------------- vtable: curve_to (M19a) ---------------- */
 
-/** @brief Emit one subdivision endpoint as a line_to. */
-static my_ret_t gles_bezier_emit(void* ctx, float x, float y) {
-  return my_vgcanvas_line_to((my_vgcanvas_t*)ctx, x, y);
-}
-
 static my_ret_t gles_curve_to(my_vgcanvas_t* vg, float cx1, float cy1,
                               float cx2, float cy2, float x, float y) {
-  my_vgcanvas_gles2_t* s = (my_vgcanvas_gles2_t*)vg;
-  float x0 = 0.0f, y0 = 0.0f;
-  if (s->contour_count == 0 || s->contours[s->contour_count - 1].count == 0) {
-    return MY_RET_FAIL; /* no current point (move first, canvas
-                         * convention; documented) */
-  }
-  x0 = s->points[s->point_count - 1].x;
-  y0 = s->points[s->point_count - 1].y;
-  /* same adaptive subdivision as the soft backend -> batched verts */
-  return my_bezier_cubic_to_lines(x0, y0, cx1, cy1, cx2, cy2, x, y, 0.25f,
-                                  16, gles_bezier_emit, vg, NULL);
+  return my_vggeometry_curve_to(&((my_vgcanvas_gles2_t*)vg)->geo, cx1, cy1,
+                                cx2, cy2, x, y);
 }
 
 /**
@@ -470,151 +341,20 @@ static my_ret_t gles_curve_to(my_vgcanvas_t* vg, float cx1, float cy1,
  */
 static my_ret_t gles_fill(my_vgcanvas_t* vg) {
   my_vgcanvas_gles2_t* s = (my_vgcanvas_gles2_t*)vg;
-  const my_rect_t* clip = &s->state.clip;
-  float* xs;
-  size_t xs_cap;
-  int32_t y;
-  vbuf_t b;
-
-  if (s->point_count < 2) {
-    return MY_RET_OK;
-  }
-  xs_cap = s->point_count;
-  xs = (float*)my_mem_alloc(s->allocator, xs_cap * sizeof(float));
-  if (xs == NULL) {
+  gles_geo_setup(s);
+  if (my_vggeometry_fill(&s->geo, &s->state.clip) == MY_RET_OOM) {
     return MY_RET_OOM;
   }
-  vbuf_reset(&b, s);
-
-  for (y = clip->y; y < clip->y + clip->h; y++) {
-    float yc = (float)y + 0.5f;
-    size_t nxs = 0, ci, i, k;
-    for (ci = 0; ci < s->contour_count; ci++) {
-      const contour_t* c = &s->contours[ci];
-      for (i = 0; i < c->count; i++) {
-        size_t j = i + 1;
-        float x0, y0, x1, y1;
-        if (j == c->count) {
-          if (!c->closed) {
-            break;
-          }
-          j = 0;
-        }
-        x0 = s->points[c->start + i].x + s->state.tx;
-        y0 = s->points[c->start + i].y + s->state.ty;
-        x1 = s->points[c->start + j].x + s->state.tx;
-        y1 = s->points[c->start + j].y + s->state.ty;
-        if ((y0 <= yc) != (y1 <= yc) && nxs < xs_cap) {
-          xs[nxs++] = x0 + (yc - y0) * (x1 - x0) / (y1 - y0);
-        }
-      }
-    }
-    if (nxs > 1) {
-      qsort(xs, nxs, sizeof(float), float_cmp);
-      for (k = 0; k + 1 < nxs; k += 2) {
-        /* spans are emitted in DEVICE space: undo translate for vbuf */
-        float xa = ceilf(xs[k] - 0.5f) - s->state.tx;
-        float xb = ceilf(xs[k + 1] - 0.5f) - s->state.tx;
-        vbuf_rect(&b, xa, (float)y - s->state.ty, xb,
-                  (float)y + 1.0f - s->state.ty);
-      }
-    }
-  }
-
-  my_mem_free(s->allocator, xs);
-  if (b.count > 0) {
-    gles_draw(s, s->verts, (int32_t)(b.count / 2), s->state.fill_color);
-  }
+  gles_draw_geo(s, s->state.fill_color);
   return MY_RET_OK;
-}
-
-/** @brief One segment as a quad expanded along its normal. */
-static void vbuf_segment(vbuf_t* b, float x0, float y0, float x1, float y1,
-                         float half_w) {
-  float dx = x1 - x0;
-  float dy = y1 - y0;
-  float len = sqrtf(dx * dx + dy * dy);
-  float nx, ny;
-  if (len < 0.001f) {
-    vbuf_rect(b, x0 - half_w, y0 - half_w, x0 + half_w, y0 + half_w);
-    return;
-  }
-  nx = -dy / len * half_w;
-  ny = dx / len * half_w;
-  vbuf_push(b, x0 + nx, y0 + ny);
-  vbuf_push(b, x1 + nx, y1 + ny);
-  vbuf_push(b, x1 - nx, y1 - ny);
-  vbuf_push(b, x0 + nx, y0 + ny);
-  vbuf_push(b, x1 - nx, y1 - ny);
-  vbuf_push(b, x0 - nx, y0 - ny);
-}
-
-/** @brief Semicircle fan (round cap): 8 triangles sweeping pi from a0. */
-static void vbuf_semicircle_fan(vbuf_t* b, float cx, float cy, float r,
-                                float a0) {
-  int i;
-  for (i = 0; i < 8; i++) {
-    float t0 = a0 + (float)i * 3.14159265f / 8.0f;
-    float t1 = a0 + (float)(i + 1) * 3.14159265f / 8.0f;
-    vbuf_push(b, cx, cy);
-    vbuf_push(b, cx + r * cosf(t0), cy + r * sinf(t0));
-    vbuf_push(b, cx + r * cosf(t1), cy + r * sinf(t1));
-  }
-}
-
-/** @brief Round cap at an open-contour endpoint: semicircle fan bulging
- * outward along the endpoint tangent (full disk for degenerate segments).
- * dx/dy = segment direction at the endpoint (need not be normalized). */
-static void vbuf_round_cap(vbuf_t* b, float cx, float cy, float dx, float dy,
-                           float half_w) {
-  float len = sqrtf(dx * dx + dy * dy);
-  if (len < 0.001f) {
-    vbuf_circle_fan(b, cx, cy, half_w, 8);
-    return;
-  }
-  /* the semicircle is centered on the outward direction (+dx/+dy) */
-  vbuf_semicircle_fan(b, cx, cy, half_w, atan2f(dy, dx) - 3.14159265f / 2.0f);
 }
 
 static my_ret_t gles_stroke(my_vgcanvas_t* vg) {
   my_vgcanvas_gles2_t* s = (my_vgcanvas_gles2_t*)vg;
-  float half_w = s->state.line_width / 2.0f;
-  size_t ci, i;
-  vbuf_t b;
-  if (half_w < 0.5f) {
-    half_w = 0.5f;
-  }
-  vbuf_reset(&b, s);
-  for (ci = 0; ci < s->contour_count; ci++) {
-    const contour_t* c = &s->contours[ci];
-    size_t edges = c->count > 1 ? (c->closed ? c->count : c->count - 1) : 0;
-    if (c->count > 1 && !c->closed &&
-        s->state.line_cap == MY_LINE_CAP_ROUND) {
-      /* round caps on the two endpoints (aligned with soft, M9c) */
-      size_t last = c->start + c->count - 1;
-      vbuf_round_cap(&b, s->points[c->start].x, s->points[c->start].y,
-                     s->points[c->start].x - s->points[c->start + 1].x,
-                     s->points[c->start].y - s->points[c->start + 1].y, half_w);
-      vbuf_round_cap(&b, s->points[last].x, s->points[last].y,
-                     s->points[last].x - s->points[last - 1].x,
-                     s->points[last].y - s->points[last - 1].y, half_w);
-    }
-    for (i = 0; i < edges; i++) {
-      size_t j = (i + 1) % c->count;
-      vbuf_segment(&b, s->points[c->start + i].x, s->points[c->start + i].y,
-                   s->points[c->start + j].x, s->points[c->start + j].y,
-                   half_w);
-      /* round joins: half-lw disk at each interior vertex (same coverage
-       * rule as soft: not at vertex 0 of closed contours) */
-      if (s->state.line_join == MY_LINE_JOIN_ROUND && i + 1 < c->count) {
-        vbuf_circle_fan(&b, s->points[c->start + j].x,
-                        s->points[c->start + j].y, half_w, 8);
-      }
-    }
-  }
-  if (b.count > 0) {
-    gles_draw(s, s->verts, (int32_t)(b.count / 2), s->state.stroke_color);
-  }
+  gles_geo_setup(s);
+  my_vggeometry_stroke(&s->geo, s->state.line_width, s->state.line_cap,
+                       s->state.line_join);
+  gles_draw_geo(s, s->state.stroke_color);
   return MY_RET_OK;
 }
 
@@ -784,12 +524,10 @@ static my_ret_t gles_draw_image(my_vgcanvas_t* vg, const uint8_t* rgba,
   }
   /* bg compositing: paint bg rect first, then blend the textured quad */
   if (bg != NULL && bg->a > 0) {
-    vbuf_t b;
-    vbuf_reset(&b, s);
-    vbuf_rect(&b, dst->x, dst->y, dst->x + dst->w, dst->y + dst->h);
-    if (b.count > 0) {
-      gles_draw(s, s->verts, (int32_t)(b.count / 2), *bg);
-    }
+    gles_geo_setup(s);
+    my_vggeometry_rect(&s->geo, dst->x, dst->y, dst->x + dst->w,
+                       dst->y + dst->h);
+    gles_draw_geo(s, *bg);
   }
   if (s->img_program == 0) {
     s->img_program = gles_make_program(s, VS_TEXT_SRC, FS_IMG_SRC);
@@ -876,9 +614,7 @@ static void gles_destroy(my_vgcanvas_t* vg) {
       s->gl.delete_program(s->gl.ctx, s->program);
     }
     my_mem_free(s->allocator, s->stack);
-    my_mem_free(s->allocator, s->points);
-    my_mem_free(s->allocator, s->contours);
-    my_mem_free(s->allocator, s->verts);
+    my_vggeometry_destroy(&s->geo);
     my_mem_free(s->allocator, s);
   }
 }
@@ -910,6 +646,7 @@ my_vgcanvas_t* my_vgcanvas_gles2_create_with_gl(const my_allocator_t* allocator,
   s->gl = *gl;
   s->fb_w = width;
   s->fb_h = height;
+  my_vggeometry_init(&s->geo, allocator);
   s->program = gles_make_program(s, VS_SRC, FS_SRC);
   if (s->program == 0) {
     my_mem_free(allocator, s);

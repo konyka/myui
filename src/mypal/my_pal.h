@@ -105,6 +105,13 @@ typedef struct my_pal_window_vtable_t {
    * gl_enable for MY_PAL_GL_API_GLES2 and fails (NULL) otherwise.
    */
   my_pal_gl_t* (*gl_enable_api)(my_pal_window_t* win, int api);
+  /**
+   * @brief Create a Vulkan surface for this window (M25b). vk_instance
+   * is a VkInstance and the return a VkSurfaceKHR — both as void* so
+   * this header stays free of Vulkan types. NULL slot or NULL return =
+   * the port has no Vulkan support (dummy, linux_fb).
+   */
+  void* (*vk_create_surface)(my_pal_window_t* win, void* vk_instance);
 } my_pal_window_vtable_t;
 
 /** @brief GL APIs selectable through the gl_enable_api slot (M25a). */
@@ -204,6 +211,18 @@ static inline my_pal_gl_t* my_pal_window_gl_enable_api(my_pal_window_t* win,
     return win->vtable->gl_enable_api(win, api);
   }
   return api == MY_PAL_GL_API_GLES2 ? win->vtable->gl_enable(win) : NULL;
+}
+
+/**
+ * @brief Create a Vulkan surface (VkSurfaceKHR as void*) for this window
+ * on the given instance (VkInstance as void*), NULL when unsupported
+ * (M25b; ownership passes to the caller).
+ */
+static inline void* my_pal_window_vk_create_surface(my_pal_window_t* win,
+                                                    void* vk_instance) {
+  return win->vtable->vk_create_surface != NULL
+             ? win->vtable->vk_create_surface(win, vk_instance)
+             : NULL;
 }
 
 static inline void my_pal_window_ime_set_spot(my_pal_window_t* win, int32_t x,

@@ -10,6 +10,7 @@
 #include "myr/my_gl_desktop.h"
 #include "myr/my_vgcanvas_gles2.h"
 #include "myr/my_vgcanvas_soft.h"
+#include "myr/my_vgcanvas_vulkan.h"
 #include "myui/my_animator.h"
 #include "myui/my_layout.h"
 #include "myui/my_window_manager.h"
@@ -346,6 +347,8 @@ static my_ret_t window_enable_gpu_gl(my_window_t* win, int api,
   win->vg_owned = true;
   win->gl = gl;
   win->gl_owned = true;
+  win->gpu_backend = api == MY_PAL_GL_API_OPENGL ? MY_GPU_OPENGL
+                                                 : MY_GPU_GLES2;
   if (win->font != NULL) {
     my_vgcanvas_set_font(win->vg, win->font, win->font_size);
   }
@@ -368,6 +371,96 @@ static my_ret_t window_enable_gpu_soft(my_window_t* win) {
   }
   /* an injected (not owned) vgcanvas — my_window_set_vgcanvas test hook —
    * is kept as-is */
+  win->gpu_backend = MY_GPU_SOFT;
+  return MY_RET_OK;
+}
+
+/* ---------------- vulkan present adapter (M25b) ----------------
+ * Mounts my_vgcanvas_vulkan_present() as the GL-adapter swap_buffers so
+ * the window's present protocol (make_current -> paint -> swap) works
+ * unchanged. */
+
+typedef struct vk_present_adapter_t {
+  my_pal_gl_t base;
+  my_vgcanvas_t* vg;    /**< borrowed (owned by the window) */
+  my_pal_window_t* win; /**< borrowed (for get_size) */
+  const my_allocator_t* allocator;
+} vk_present_adapter_t;
+
+static my_ret_t vk_adapter_make_current(my_pal_gl_t* gl) {
+  (void)gl; /* no-op: the vulkan backend needs no current context */
+  return MY_RET_OK;
+}
+
+static my_ret_t vk_adapter_swap(my_pal_gl_t* gl) {
+  return my_vgcanvas_vulkan_present(((vk_present_adapter_t*)gl)->vg);
+}
+
+static my_ret_t vk_adapter_get_size(my_pal_gl_t* gl, int32_t* w, int32_t* h) {
+  return my_pal_window_get_size(((vk_present_adapter_t*)gl)->win, w, h);
+}
+
+static bool vk_adapter_has_multisample(my_pal_gl_t* gl) {
+  (void)gl;
+  return true; /* the backend prefers MSAA4 with single-sample fallback */
+}
+
+static void vk_adapter_destroy(my_pal_gl_t* gl) {
+  vk_present_adapter_t* a = (vk_present_adapter_t*)gl;
+  if (a != NULL) {
+    my_mem_free(a->allocator, a); /* the vgcanvas is NOT ours */
+  }
+}
+
+static const my_pal_gl_vtable_t VK_ADAPTER_VTABLE = {
+    vk_adapter_make_current, vk_adapter_swap, vk_adapter_get_size,
+    vk_adapter_has_multisample, vk_adapter_destroy};
+
+static my_ret_t window_enable_gpu_vulkan(my_window_t* win) {
+  void* inst;
+  void* surf;
+  my_vgcanvas_t* vg;
+  vk_present_adapter_t* ad;
+  int32_t w = 0, h = 0;
+  if (win->gl != NULL) {
+    return MY_RET_OK; /* already enabled */
+  }
+  inst = my_vgcanvas_vulkan_instance();
+  if (inst == NULL) {
+    return MY_RET_NOT_SUPPORTED;
+  }
+  surf = my_pal_window_vk_create_surface(win->pal_window, inst);
+  if (surf == NULL) {
+    return MY_RET_NOT_SUPPORTED;
+  }
+  my_pal_window_get_size(win->pal_window, &w, &h);
+  vg = my_vgcanvas_vulkan_create(win->allocator, surf, w > 0 ? w : 1,
+                                 h > 0 ? h : 1);
+  if (vg == NULL) {
+    my_vgcanvas_vulkan_destroy_surface(surf);
+    return MY_RET_FAIL;
+  }
+  ad = (vk_present_adapter_t*)my_mem_calloc(win->allocator, 1,
+                                            sizeof(vk_present_adapter_t));
+  if (ad == NULL) {
+    my_vgcanvas_destroy(vg); /* destroys the surface with it */
+    return MY_RET_OOM;
+  }
+  ad->base.vtable = &VK_ADAPTER_VTABLE;
+  ad->vg = vg;
+  ad->win = win->pal_window;
+  ad->allocator = win->allocator;
+  if (win->vg_owned) {
+    my_vgcanvas_destroy(win->vg);
+  }
+  win->vg = vg;
+  win->vg_owned = true;
+  win->gl = (my_pal_gl_t*)ad;
+  win->gl_owned = true;
+  win->gpu_backend = MY_GPU_VULKAN;
+  if (win->font != NULL) {
+    my_vgcanvas_set_font(win->vg, win->font, win->font_size);
+  }
   return MY_RET_OK;
 }
 
@@ -385,7 +478,7 @@ my_ret_t my_window_enable_gpu(my_window_t* win, my_gpu_backend_t backend) {
       return window_enable_gpu_gl(win, MY_PAL_GL_API_OPENGL,
                                   my_gl_desktop_default());
     case MY_GPU_VULKAN:
-      return MY_RET_NOT_SUPPORTED; /* M25b */
+      return window_enable_gpu_vulkan(win);
     case MY_GPU_AUTO:
     default:
       /* priority: GLES2 (most mature) -> OPENGL -> VULKAN; all failed =
@@ -394,6 +487,9 @@ my_ret_t my_window_enable_gpu(my_window_t* win, my_gpu_backend_t backend) {
         return MY_RET_OK;
       }
       if (my_window_enable_gpu(win, MY_GPU_OPENGL) == MY_RET_OK) {
+        return MY_RET_OK;
+      }
+      if (my_window_enable_gpu(win, MY_GPU_VULKAN) == MY_RET_OK) {
         return MY_RET_OK;
       }
       return MY_RET_OK;
@@ -720,9 +816,14 @@ my_ret_t my_window_on_pal_event(my_window_t* win, const my_event_t* event) {
       root->rect.h = event->u.resize.h;
       root->need_layout = true;
       if (win->gl != NULL && win->vg != NULL) {
-        my_pal_gl_make_current(win->gl);
-        my_vgcanvas_gles2_resize(win->vg, event->u.resize.w,
-                                 event->u.resize.h);
+        if (win->gpu_backend == MY_GPU_VULKAN) {
+          my_vgcanvas_vulkan_resize(win->vg, event->u.resize.w,
+                                    event->u.resize.h);
+        } else {
+          my_pal_gl_make_current(win->gl);
+          my_vgcanvas_gles2_resize(win->vg, event->u.resize.w,
+                                   event->u.resize.h);
+        }
       }
       my_widget_invalidate(root, NULL);
       break;

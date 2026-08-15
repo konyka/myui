@@ -1404,6 +1404,36 @@ static my_pal_gl_t* wl_win_gl_enable_api(my_pal_window_t* win, int api) {
 
 #endif /* MYUI_PAL_GL_EGL */
 
+/* ---------------- Vulkan surface (M25b) ---------------- */
+
+#if defined(MYUI_HAS_VULKAN)
+#define VK_USE_PLATFORM_WAYLAND_KHR
+#include <vulkan/vulkan.h>
+
+static void* wl_win_vk_create_surface(my_pal_window_t* win,
+                                      void* vk_instance) {
+  wl_window_t* w = (wl_window_t*)win;
+  VkWaylandSurfaceCreateInfoKHR ci;
+  VkSurfaceKHR surf = VK_NULL_HANDLE;
+  memset(&ci, 0, sizeof(ci));
+  ci.sType = VK_STRUCTURE_TYPE_WAYLAND_SURFACE_CREATE_INFO_KHR;
+  ci.display = w->pal->display;
+  ci.surface = w->surface;
+  if (vkCreateWaylandSurfaceKHR((VkInstance)vk_instance, &ci, NULL,
+                                &surf) != VK_SUCCESS) {
+    return NULL;
+  }
+  return (void*)surf;
+}
+#else
+static void* wl_win_vk_create_surface(my_pal_window_t* win,
+                                      void* vk_instance) {
+  (void)win;
+  (void)vk_instance;
+  return NULL; /* built without Vulkan */
+}
+#endif /* MYUI_HAS_VULKAN */
+
 static void wl_win_ime_noop(my_pal_window_t* win, int32_t x, int32_t y) {
   /* text-input-v3 cursor rectangle: candidate window follows the caret.
    * Always cache: reports made before ti enter would otherwise be lost. */
@@ -1466,7 +1496,8 @@ static const my_pal_window_vtable_t s_wl_window_vtable = {
     wl_win_get_size,  wl_win_get_lcd, wl_win_destroy,
     wl_win_gl_enable, wl_win_ime_noop,
     wl_win_move,      wl_win_begin_move,
-    wl_win_set_cursor, wl_win_gl_enable_api};
+    wl_win_set_cursor, wl_win_gl_enable_api,
+    wl_win_vk_create_surface};
 
 static my_pal_window_t* wl_window_create(my_pal_t* pal, int32_t w, int32_t h,
                                          const char* title) {

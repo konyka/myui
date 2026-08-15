@@ -402,6 +402,7 @@ static my_pal_gl_t* x11_win_gl_enable(my_pal_window_t* win) {
   return x11_win_gl_enable_api(win, MY_PAL_GL_API_GLES2);
 }
 
+
 #else /* !MYUI_PAL_GL_EGL */
 
 static my_pal_gl_t* x11_win_gl_enable(my_pal_window_t* win) {
@@ -416,6 +417,36 @@ static my_pal_gl_t* x11_win_gl_enable_api(my_pal_window_t* win, int api) {
 }
 
 #endif /* MYUI_PAL_GL_EGL */
+
+/* ---------------- Vulkan surface (M25b) ---------------- */
+
+#if defined(MYUI_HAS_VULKAN)
+#define VK_USE_PLATFORM_XLIB_KHR
+#include <vulkan/vulkan.h>
+
+static void* x11_win_vk_create_surface(my_pal_window_t* win,
+                                       void* vk_instance) {
+  x11_window_t* w = (x11_window_t*)win;
+  VkXlibSurfaceCreateInfoKHR ci;
+  VkSurfaceKHR surf = VK_NULL_HANDLE;
+  memset(&ci, 0, sizeof(ci));
+  ci.sType = VK_STRUCTURE_TYPE_XLIB_SURFACE_CREATE_INFO_KHR;
+  ci.dpy = w->pal->display;
+  ci.window = w->xwin;
+  if (vkCreateXlibSurfaceKHR((VkInstance)vk_instance, &ci, NULL, &surf) !=
+      VK_SUCCESS) {
+    return NULL;
+  }
+  return (void*)surf;
+}
+#else
+static void* x11_win_vk_create_surface(my_pal_window_t* win,
+                                       void* vk_instance) {
+  (void)win;
+  (void)vk_instance;
+  return NULL; /* built without Vulkan */
+}
+#endif /* MYUI_HAS_VULKAN */
 
 static void x11_win_ime_set_spot(my_pal_window_t* win, int32_t x,
                                  int32_t y) {
@@ -470,7 +501,8 @@ static const my_pal_window_vtable_t s_x11_window_vtable = {
     x11_win_get_size,  x11_win_get_lcd, x11_win_destroy,
     x11_win_gl_enable, x11_win_ime_set_spot,
     x11_win_move,      x11_win_begin_move,
-    x11_win_set_cursor, x11_win_gl_enable_api};
+    x11_win_set_cursor, x11_win_gl_enable_api,
+    x11_win_vk_create_surface};
 
 static my_pal_window_t* x11_window_create(my_pal_t* pal, int32_t w, int32_t h,
                                           const char* title) {
