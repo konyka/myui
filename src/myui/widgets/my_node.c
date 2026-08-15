@@ -22,8 +22,6 @@ typedef struct my_node_t {
   char* id;          /**< owned */
   char* title;       /**< owned */
   my_darray_t* sockets; /**< node_socket_t* (inputs then outputs) */
-  bool dragging;
-  int32_t drag_x, drag_y; /**< grab point (canvas coords) */
 } my_node_t;
 
 /* circle/rounded-rect via 4 cubic arcs (kappa = 0.5523; vgcanvas has no
@@ -31,7 +29,7 @@ typedef struct my_node_t {
 #define MY_KAPPA 0.5523f
 
 /** @brief Append a circle path (does NOT begin_path). */
-static void node_path_circle(my_vgcanvas_t* vg, float cx, float cy, float r) {
+void my_node_path_circle(my_vgcanvas_t* vg, float cx, float cy, float r) {
   float k = MY_KAPPA * r;
   my_vgcanvas_move_to(vg, cx + r, cy);
   my_vgcanvas_curve_to(vg, cx + r, cy + k, cx + k, cy + r, cx, cy + r);
@@ -115,10 +113,10 @@ static void node_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
           MY_STATE_NORMAL, "bg_color", s->color);
       my_vgcanvas_set_fill_color(vg, my_color_from_rgba32(sc));
       my_vgcanvas_begin_path(vg);
-      node_path_circle(vg, (float)cx, (float)cy, MY_NODE_SOCKET_R);
+      my_node_path_circle(vg, (float)cx, (float)cy, MY_NODE_SOCKET_R);
       my_vgcanvas_fill(vg);
       my_vgcanvas_begin_path(vg);
-      node_path_circle(vg, (float)cx, (float)cy, MY_NODE_SOCKET_R);
+      my_node_path_circle(vg, (float)cx, (float)cy, MY_NODE_SOCKET_R);
       my_vgcanvas_set_stroke_color(vg, my_color_from_rgba32(0x1E1E1EFFu));
       my_vgcanvas_set_line_width(vg, 1);
       my_vgcanvas_stroke(vg);
@@ -142,44 +140,11 @@ static void node_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
 }
 
 static my_ret_t node_event(my_widget_t* widget, const my_event_t* event) {
-  my_node_t* n = (my_node_t*)widget;
-  switch (event->type) {
-    case MY_EVENT_POINTER_DOWN: {
-      int32_t lx = event->u.pointer.x, ly = event->u.pointer.y;
-      my_widget_global_to_local(widget, &lx, &ly);
-      if (ly < MY_NODE_HEADER_H) {
-        /* title bar drag */
-        n->dragging = true;
-        n->drag_x = event->u.pointer.x;
-        n->drag_y = event->u.pointer.y;
-        return MY_RET_OK;
-      }
-      return MY_RET_FAIL; /* socket zone / body: bubble to the view */
-    }
-    case MY_EVENT_POINTER_MOVE:
-      if (n->dragging) {
-        int32_t dx = event->u.pointer.x - n->drag_x;
-        int32_t dy = event->u.pointer.y - n->drag_y;
-        n->drag_x = event->u.pointer.x;
-        n->drag_y = event->u.pointer.y;
-        widget->rect.x += dx;
-        widget->rect.y += dy;
-        if (n->view != NULL) {
-          my_widget_invalidate(n->view, NULL); /* links follow */
-        }
-        my_widget_invalidate(widget, NULL);
-        return MY_RET_OK;
-      }
-      return MY_RET_FAIL;
-    case MY_EVENT_POINTER_UP:
-      if (n->dragging) {
-        n->dragging = false;
-        return MY_RET_OK;
-      }
-      return MY_RET_FAIL;
-    default:
-      return MY_RET_FAIL;
-  }
+  /* M20a: the node is pure paint — ALL pointer logic lives in the view
+   * (single canvas/screen transform point); bubble everything. */
+  (void)widget;
+  (void)event;
+  return MY_RET_FAIL;
 }
 
 static void node_destroy_chain(my_object_t* obj) {

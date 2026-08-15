@@ -46,4 +46,9 @@ bool my_node_socket_center(const my_widget_t* node, my_socket_dir_t dir,
 /** @brief The node's id (static after create). */
 const char* my_node_get_id(const my_widget_t* node);
 
+/** @brief Append a circle path via 4 cubic arcs (kappa = 0.5523;
+ * vgcanvas has no arc primitive — M19a curve_to). Caller does
+ * begin_path/fill or stroke. */
+void my_node_path_circle(my_vgcanvas_t* vg, float cx, float cy, float r);
+
 #endif /* MY_NODE_H */

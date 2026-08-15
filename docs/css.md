@@ -66,6 +66,7 @@ node_view { background-color: #101010 }       /* 画布底色 */
 node { background-color: #202020 }            /* 节点主体 */
 node.shader .header { background-color: #663300 }  /* 标题栏：类别 class + 后代 */
 node_socket.output { background-color: #00FF00 }   /* 接口圆点（虚拟部件） */
+node_socket.magnet { background-color: #FFD050 }   /* 磁吸高亮环（M20a） */
 node_link { color: #FF00FF }                  /* 连线 */
 node_link.selected { color: #E0A030 }         /* 选中态 */
 node_link.preview { color: #70C0E8 }          /* 拖线预览态 */

@@ -140,6 +140,13 @@ PAL port 矩阵：
 - 测试 39 断言：模型/预览/拾起重连/选中删除/拖动跟随/pan/CSS 各部件命中/泄漏。缩放/框选/多选/小地图为 TODO。
 - **demo_nodes（M19c）**：demos/demo_nodes——参考图局部复刻（Principled BSDF 大节点 + Mapping/Color/Environment 小节点 + 内嵌 my_slider + Color→BaseColor/Mapping→Metallic 连线 + Environment 悬空输出），全套部件配色一条 CSS 字符串（注释逐条标视觉对应）；dummy dump 两帧（默认 + 选中连线橙）目检通过。
 
+### 增强第一批（M20a）
+
+- **连线磁吸**：预览态 MOVE 连续扫描最近输入接口（画布坐标 ≤20px），吸附端点到圆心 + 候选接口画 `node_socket.magnet` 高亮环（回退 #FFD050）；松手有吸附→连接该接口，无→socket 命中或空白取消。只扫 MOVE 不扫 DOWN（修掉 DOWN 即吸附导致"点按自连/拾起即还原"的错误）；目标恒为输入接口（模型只有输出源预览，类型过滤=天然排除输出接口）。
+- **AA 固化**：nv_paint 显式幂等 `my_vgcanvas_soft_set_antialias_level(vg, 2)`（不依赖调用方状态；soft 默认本已是 2，gles 端 MSAA 路径注释）。
+- **画布缩放**：`screen = canvas*zoom + pan_off`（pan_off 为屏幕 px；M19b 的"移 rect"pan 改为视图偏移）；绘制时 CTM = translate(pan/(base*zoom)) + scale(base*zoom)（base=window HiDPI scale，save/restore 还原），**事件统一在 view 层逆变换**——node 纯绘制化（M19b 的 node 内拖动逻辑上移到 view，单一坐标变换点）。`set_zoom`（钳 0.25–2.0）、`zoom_at`（锚点画布坐标不动）、滚轮以光标为锚（±10%/格，Blender 惯例）。
+- **级联删除**：`my_node_view_remove_node(id)`（节点 widget + 全部引用连线 + changed）；Del 键分派：选中节点→级联删，选中连线→删线（节点点击选中新增）。
+
 ## 三次贝塞尔曲线（M19a）
 - **接口**：vgcanvas vtable 末尾追加 `curve_to(cx1,cy1,cx2,cy2,x,y)`（冻结式扩展；NULL 槽 = NOT_SUPPORTED，inline 包装判定）。路径级操作，与 line_to 同类，save/restore 无涉；无当前点（未 move_to）返回 FAIL（canvas 惯例，注释注明）。
 - **共享细分**（src/myr/my_bezier.{h,c}）：de Casteljau 自适应细分，平坦度 = 两控制点到弦的**最大垂直距离**（t=0.5 二分），容差 0.25px，递归深度上限 16 防爆；两后端路径模型同构（点+轮廓数组），各自 curve_to 只把细分端点喂回 line_to——soft 的条带化/覆盖率 AA 与 gles2 的三角化批提交原样复用。fill 开放贝塞尔（弦闭合填充）为 TODO。

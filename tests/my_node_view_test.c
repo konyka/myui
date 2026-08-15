@@ -11,6 +11,8 @@
 #include "myui/my_layout.h"
 #include "myui/my_theme.h"
 
+#include <math.h>
+
 #include "mytest.h"
 #include "rec_vgcanvas.h"
 
@@ -189,15 +191,23 @@ static void test_node_drag_moves_link(void) {
 
 static void test_pan_moves_nodes(void) {
   fx_t f;
+  float sx0 = 0, sy0 = 0, sx1 = 0, sy1 = 0;
+  int32_t cx0 = 0, cy0 = 0;
   fx_init(&f);
   my_node_view_connect(f.view, f.na, 0, f.nb, 0);
+  /* M20a model: pan is a view offset — node rects stay, canvas->screen
+   * mapping shifts */
+  my_node_socket_center(f.na, MY_SOCKET_OUT, 0, &cx0, &cy0);
+  my_node_view_canvas_to_screen(f.view, (float)cx0, (float)cy0, &sx0, &sy0);
   /* drag empty space (700, 500) by (+20, -10) */
   ev(&f, MY_EVENT_POINTER_DOWN, 700, 500);
   ev(&f, MY_EVENT_POINTER_MOVE, 720, 490);
   ev(&f, MY_EVENT_POINTER_UP, 720, 490);
-  TEST_ASSERT_EQ_INT(f.na->rect.x, 120);
-  TEST_ASSERT_EQ_INT(f.na->rect.y, 90);
-  TEST_ASSERT_EQ_INT(f.nb->rect.x, 420);
+  TEST_ASSERT_EQ_INT(f.na->rect.x, 100); /* canvas coords unchanged */
+  TEST_ASSERT_EQ_INT(f.na->rect.y, 100);
+  my_node_view_canvas_to_screen(f.view, (float)cx0, (float)cy0, &sx1, &sy1);
+  TEST_ASSERT_EQ_INT((int)sx1, (int)sx0 + 20); /* screen shifts by the pan */
+  TEST_ASSERT_EQ_INT((int)sy1, (int)sy0 - 10);
   fx_destroy(&f);
 }
 
@@ -242,6 +252,132 @@ static void test_node_view_no_leak(void) {
   my_allocator_debug_destroy(dbg);
 }
 
+static void test_magnet_snap_and_connect(void) {
+  fx_t f;
+  rec_vg_t rec;
+  fx_init(&f);
+  /* drag from na's out socket; hover 15px off nb's input (within 20px
+   * magnet range): preview snaps, ring drawn, UP connects */
+  ev(&f, MY_EVENT_POINTER_DOWN, OUT_X, OUT_Y);
+  ev(&f, MY_EVENT_POINTER_MOVE, IN_X - 15, IN_Y);
+  rec_vg_init(&rec);
+  my_widget_paint(f.view, (my_vgcanvas_t*)&rec);
+  TEST_ASSERT(rec_has(&rec, "stroke_circle") == false); /* circles are
+                                                          * path curves */
+  ev(&f, MY_EVENT_POINTER_UP, IN_X - 15, IN_Y); /* release off-center */
+  TEST_ASSERT_EQ_INT((int)my_node_view_link_count(f.view), 1);
+  fx_destroy(&f);
+}
+
+static void test_magnet_respects_type_and_distance(void) {
+  fx_t f;
+  my_widget_t* nc;
+  fx_init(&f);
+  /* another output socket nearby (type filter: preview from OUT must
+   * not magnet to OUTPUT sockets) */
+  nc = my_node_view_add_node(f.view, "c", "C", NULL, 340, 210, 160, 80);
+  my_node_add_socket(nc, MY_SOCKET_OUT, "o", 0xFFFFFFFFu);
+  ev(&f, MY_EVENT_POINTER_DOWN, OUT_X, OUT_Y);
+  /* hover right at nc's OUTPUT socket (500? -> nc at (340,210): out at
+   * (500, 244)); within 20px of IT but 70px from nb's input */
+  ev(&f, MY_EVENT_POINTER_MOVE, 500, 244);
+  ev(&f, MY_EVENT_POINTER_UP, 500, 244);
+  TEST_ASSERT_EQ_INT((int)my_node_view_link_count(f.view), 0); /* no
+                                                                 * connect */
+  /* far from everything (nearest input 70+ px): no snap, cancel */
+  ev(&f, MY_EVENT_POINTER_DOWN, OUT_X, OUT_Y);
+  ev(&f, MY_EVENT_POINTER_MOVE, 320, 300);
+  ev(&f, MY_EVENT_POINTER_UP, 320, 300);
+  TEST_ASSERT_EQ_INT((int)my_node_view_link_count(f.view), 0);
+  fx_destroy(&f);
+}
+
+static void test_zoom_clamp_and_anchor(void) {
+  fx_t f;
+  float cx0 = 0, cy0 = 0, cx1 = 0, cy1 = 0;
+  fx_init(&f);
+  /* clamp */
+  my_node_view_set_zoom(f.view, 0.1f);
+  TEST_ASSERT(my_node_view_get_zoom(f.view) >= 0.24f);
+  TEST_ASSERT(my_node_view_get_zoom(f.view) <= 0.26f);
+  my_node_view_set_zoom(f.view, 5.0f);
+  TEST_ASSERT(my_node_view_get_zoom(f.view) >= 1.99f);
+  /* anchor invariance: zoom_at keeps the anchor's canvas coordinate */
+  my_node_view_set_zoom(f.view, 1.0f);
+  my_node_view_screen_to_canvas(f.view, 300, 200, &cx0, &cy0);
+  my_node_view_zoom_at(f.view, 300, 200, 1.5f);
+  my_node_view_screen_to_canvas(f.view, 300, 200, &cx1, &cy1);
+  TEST_ASSERT(fabsf(cx1 - cx0) < 0.01f);
+  TEST_ASSERT(fabsf(cy1 - cy0) < 0.01f);
+  TEST_ASSERT(my_node_view_get_zoom(f.view) > 1.49f);
+  /* round trip screen->canvas->screen */
+  {
+    float sx = 0, sy = 0;
+    my_node_view_canvas_to_screen(f.view, cx1, cy1, &sx, &sy);
+    TEST_ASSERT(fabsf(sx - 300.0f) < 0.01f);
+    TEST_ASSERT(fabsf(sy - 200.0f) < 0.01f);
+  }
+  fx_destroy(&f);
+}
+
+static void test_zoomed_interaction_uses_canvas_coords(void) {
+  fx_t f;
+  int32_t cx0 = 0, cy0 = 0;
+  float sx = 0, sy = 0;
+  fx_init(&f);
+  my_node_view_set_zoom(f.view, 2.0f);
+  my_node_view_set_zoom(f.view, 2.0f); /* idempotent */
+  /* na out socket in canvas = (260,134) -> screen at zoom 2 */
+  my_node_socket_center(f.na, MY_SOCKET_OUT, 0, &cx0, &cy0);
+  my_node_view_canvas_to_screen(f.view, (float)cx0, (float)cy0, &sx, &sy);
+  ev(&f, MY_EVENT_POINTER_DOWN, (int32_t)sx, (int32_t)sy);
+  {
+    float ix = 0, iy = 0, isx = 0, isy = 0;
+    my_node_socket_center(f.nb, MY_SOCKET_IN, 0, &cx0, &cy0);
+    my_node_view_canvas_to_screen(f.view, (float)cx0, (float)cy0, &isx,
+                                  &isy);
+    (void)ix;
+    (void)iy;
+    ev(&f, MY_EVENT_POINTER_UP, (int32_t)isx, (int32_t)isy);
+  }
+  TEST_ASSERT_EQ_INT((int)my_node_view_link_count(f.view), 1);
+  /* link endpoints drawn at canvas positions: find_link in canvas
+   * coords still works under zoom (endpoint = canvas (310,164)+ ...) */
+  fx_destroy(&f);
+}
+
+static void test_remove_node_cascade(void) {
+  fx_t f;
+  fx_init(&f);
+  my_node_view_connect(f.view, f.na, 0, f.nb, 0);
+  {
+    my_widget_t* nc = my_node_view_add_node(f.view, "c", "C", NULL, 100,
+                                            300, 160, 80);
+    my_node_add_socket(nc, MY_SOCKET_OUT, "o", 0xFFFFFFFFu);
+    my_node_add_socket(nc, MY_SOCKET_IN, "i", 0xFFFFFFFFu);
+    my_node_add_socket(f.nb, MY_SOCKET_IN, "输入2", 0xFFFFFFFFu); /* slot 1 */
+    my_node_view_connect(f.view, nc, 0, f.nb, 1); /* nb slot 1 */
+    my_node_view_connect(f.view, f.na, 0, nc, 0);
+  }
+  TEST_ASSERT_EQ_INT((int)my_node_view_link_count(f.view), 3);
+  g_changed = 0;
+  TEST_ASSERT_EQ_INT(my_node_view_remove_node(f.view, "c"), MY_RET_OK);
+  /* the two links touching c are gone; na->nb survives */
+  TEST_ASSERT_EQ_INT((int)my_node_view_link_count(f.view), 1);
+  TEST_ASSERT_EQ_INT(g_changed, 1);
+  TEST_ASSERT_EQ_INT(my_node_view_remove_node(f.view, "c"),
+                     MY_RET_NOT_FOUND);
+  /* Del on a selected node cascades too */
+  ev(&f, MY_EVENT_POINTER_DOWN, 140, 110); /* title bar of na */
+  ev(&f, MY_EVENT_POINTER_UP, 140, 110);
+  g_changed = 0;
+  key(&f, MY_KEY_DELETE);
+  TEST_ASSERT_EQ_INT((int)my_node_view_link_count(f.view), 0);
+  TEST_ASSERT_EQ_INT(g_changed, 1);
+  TEST_ASSERT_EQ_INT((int)my_widget_child_count(f.view), 1); /* only nb */
+  fx_destroy(&f);
+}
+
 MYTEST_MAIN_BEGIN()
   MYTEST_RUN(test_model_connect_replace_disconnect);
   MYTEST_RUN(test_drag_preview_connect);
@@ -251,4 +387,9 @@ MYTEST_MAIN_BEGIN()
   MYTEST_RUN(test_pan_moves_nodes);
   MYTEST_RUN(test_css_part_colors);
   MYTEST_RUN(test_node_view_no_leak);
+  MYTEST_RUN(test_magnet_snap_and_connect);
+  MYTEST_RUN(test_magnet_respects_type_and_distance);
+  MYTEST_RUN(test_zoom_clamp_and_anchor);
+  MYTEST_RUN(test_zoomed_interaction_uses_canvas_coords);
+  MYTEST_RUN(test_remove_node_cascade);
 MYTEST_MAIN_END()

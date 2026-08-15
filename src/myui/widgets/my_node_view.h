@@ -29,6 +29,27 @@ my_widget_t* my_node_view_add_node(my_widget_t* view, const char* id,
                                    int32_t x, int32_t y, int32_t w,
                                    int32_t h);
 
+/** @brief Remove node by id together with ALL its links (cascade;
+ * emits "changed"). NOT_FOUND when the id is unknown. */
+my_ret_t my_node_view_remove_node(my_widget_t* view, const char* node_id);
+
+/** @brief Set zoom, clamped to [0.25, 2.0]. */
+void my_node_view_set_zoom(my_widget_t* view, float zoom);
+
+/** @brief Current zoom. */
+float my_node_view_get_zoom(const my_widget_t* view);
+
+/** @brief Zoom by factor around the screen anchor (view-local px):
+ * the anchor's canvas coordinate is preserved. */
+void my_node_view_zoom_at(my_widget_t* view, int32_t sx, int32_t sy,
+                          float factor);
+
+/** @brief Screen (view-local px) <-> canvas coordinate conversion. */
+void my_node_view_screen_to_canvas(const my_widget_t* view, int32_t sx,
+                                   int32_t sy, float* cx, float* cy);
+void my_node_view_canvas_to_screen(const my_widget_t* view, float cx,
+                                   float cy, float* sx, float* sy);
+
 /** @brief Connect out(out_node, out_slot) -> in(in_node, in_slot); a
  * link already feeding that input is replaced (Blender semantics).
  * Emits "changed". */
