@@ -37,6 +37,13 @@ my_dialog_t* my_dialog_create(const my_allocator_t* allocator, my_pal_t* pal,
 /** @brief Content container (vertical linear): add app widgets here. */
 my_widget_t* my_dialog_content(my_dialog_t* dlg);
 
+/**
+ * @brief The dialog's root widget (M24c uniform accessor). The named
+ * slots inside it: "dialog_content" (content area) and "dialog_buttons"
+ * (button row) — reach them with my_widget_find_descendant().
+ */
+my_widget_t* my_dialog_widget(my_dialog_t* dlg);
+
 /** @brief Append a button reporting `result` when clicked. */
 my_ret_t my_dialog_add_button(my_dialog_t* dlg, const char* text,
                               int32_t result);

@@ -770,7 +770,7 @@ static void edit_on_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
 }
 
 static const my_widget_vtable_t s_edit_vtable = {edit_on_paint, edit_on_event,
-                                                 NULL};
+                                                 NULL, NULL};
 
 static void edit_destroy_chain(my_object_t* obj) {
   my_edit_t* e = (my_edit_t*)obj;

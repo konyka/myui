@@ -114,7 +114,7 @@ static my_ret_t menu_item_event(my_widget_t* widget, const my_event_t* event) {
 }
 
 static const my_widget_vtable_t s_menu_item_vtable = {menu_item_paint,
-                                                      menu_item_event, NULL};
+                                                      menu_item_event, NULL, NULL};
 
 /* ---------------- overlay / box ---------------- */
 
@@ -144,7 +144,7 @@ static my_ret_t menu_box_event(my_widget_t* widget, const my_event_t* event) {
 }
 
 static const my_widget_vtable_t s_menu_box_vtable = {menu_box_paint,
-                                                     menu_box_event, NULL};
+                                                     menu_box_event, NULL, NULL};
 
 /* ---------------- popup plumbing ---------------- */
 
@@ -196,6 +196,10 @@ void my_menu_dismiss(my_menu_t* menu) {
     menu->open_sub = NULL;
   }
   menu_close_overlay(menu);
+}
+
+my_widget_t* my_menu_widget(my_menu_t* menu) {
+  return menu != NULL ? menu->overlay : NULL;
 }
 
 static my_ret_t menu_popup_at(my_menu_t* m, int32_t x, int32_t y);
@@ -250,7 +254,7 @@ static my_ret_t menu_overlay_on_event(my_widget_t* widget,
 }
 
 static const my_widget_vtable_t s_menu_overlay_vtable = {
-    menu_overlay_paint, menu_overlay_on_event, NULL};
+    menu_overlay_paint, menu_overlay_on_event, NULL, NULL};
 
 static my_ret_t menu_key_event(my_widget_t* widget, const my_event_t* event) {
   my_widget_t* box = my_widget_get_child(widget, 0);
@@ -330,11 +334,11 @@ static my_ret_t menu_popup_at(my_menu_t* m, int32_t x, int32_t y) {
     }
     return MY_RET_OOM;
   }
-  ov->vtable = &s_menu_overlay_vtable;
+  my_widget_subclass_init(ov, &s_menu_overlay_vtable);
   ov->floating = true;
   ov->focusable = true;
   my_widget_set_rect(ov, &(my_rect_t){0, 0, root->rect.w, root->rect.h});
-  box->vtable = &s_menu_box_vtable;
+  my_widget_subclass_init(box, &s_menu_box_vtable);
   my_widget_set_rect(box, &(my_rect_t){x, y, bw, bh});
   my_widget_set_user_data(box, m);
 

@@ -329,7 +329,15 @@ static void node_destroy_chain(my_object_t* obj) {
   my_object_destroy(obj);
 }
 
-static const my_widget_vtable_t s_node_vtable = {node_paint, node_event, NULL};
+/** @brief M24c: content-driven measurement hook — same logic as the
+ * paint-time lazy fallback (kept in node_paint), triggered earlier via
+ * my_widget_relayout so auto-sized nodes settle before layout. */
+static void node_on_measure(my_widget_t* widget) {
+  my_node_auto_size(widget); /* no-op unless auto_w/auto_h (M21b) */
+}
+
+static const my_widget_vtable_t s_node_vtable = {node_paint, node_event, NULL,
+                                                 node_on_measure};
 
 my_widget_t* my_node_create(const my_allocator_t* allocator,
                             my_widget_t* view, const char* id,

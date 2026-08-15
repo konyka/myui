@@ -51,7 +51,7 @@ static void label_on_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
   }
 }
 
-static const my_widget_vtable_t s_label_vtable = {label_on_paint, NULL, NULL};
+static const my_widget_vtable_t s_label_vtable = {label_on_paint, NULL, NULL, NULL};
 
 static void label_destroy_chain(my_object_t* obj) {
   my_label_t* label = (my_label_t*)obj;

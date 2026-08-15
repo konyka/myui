@@ -65,6 +65,18 @@ ports：
 - **动画** `my_animator.h`：管理器由 window_manager 创建（绑定 pal 时钟 + 主循环）；仅在有活动动画时挂 16ms 周期 timer，空闲即摘除。属性 "x"/"y"/"w"/"h"/"xy" 插值，duration/delay/easing（linear/ease_in/ease_out/ease_in_out 或自定义函数指针）/repeat_count（额外次数，-1 无限）/yoyo，on_update/on_done 回调；`my_animator_move_to` 从根控件找到管理器直接使用。每帧对旧+新位置 invalidate（经 dirty_sink 合并）。
 - **生命周期安全**（M3a 遗留修复）：根控件的 `removed_hook`——子树移出树时窗口清掉 dispatcher 的 grab/focus（`my_event_dispatcher_forget`，含后代判断）并取消其动画（`my_animator_stop_widget`）；窗口销毁时同样取消其全部动画。
 
+## 组件模型（M24）
+
+**一个控件 = 一处声明，多处消费。** 核心是给每个控件登记一张"类描述表"，XML 加载器、ui2c 编译器、MVVM 绑定、主题系统全部从同一份数据驱动——新增控件或属性只需要加一行声明（M24a 之前要同步维护 ui_loader 的 make_*、ui2c 的 emit_*、my_widget_target 的 if-else 三处手工映射）。
+
+- **类注册表** `my_widget_class.h/.c`（M24a）：`my_widget_class_t` = 类型名 + `create` + 属性表 `my_prop_desc_t{name, type(STRING/INT/FLOAT/BOOL/COLOR), set, get}`（NULL set/get = 只读/只写）+ 事件名表（文档性）。`my_widget_class_find` 惰性注册内建类；应用可 `my_widget_class_register` 注册自定义控件（同名覆盖）。`my_widget_set_prop/get_prop` 是统一属性出入口：先分发基类通用属性（visible/enable/x/y/w/h），再按 `widget->widget_type` 查类表；另有 str/int/float/bool 四个 typed 便捷封装（ui2c 生成代码直接用）。
+- **内建类表唯一来源** `my_widget_class_builtin.inc`：X-macro 纯数据（无代码），`X(tag, create_fn, create_str, PROPS, EVENTS)` 一行一个控件、`P(name, type, set_fn, get_fn)` 一行一个属性（行顺序 = XML 属性应用顺序）。两个消费者各自定义回调宏展开它：库侧 `my_widget_class_builtin.c`（展开成静态 `my_widget_class_t` 表 + 静态适配器，适配器调用控件既有公开 setter/getter）；工具侧 `tools/ui2c.c`（展开成生成代码用的 create 调用串 + 有序属性清单）。第三条消费路径是 `mymvvm_myui/my_widget_target.c`（绑定属性路由 = `my_widget_set_prop` 薄壳 + "value" 通用存储回退）。
+- **样式键常量** `my_style_keys.h`（M24b）：`MY_STYLE_BG_COLOR` 等六个宏（值即原裸字符串，ABI 不变），经 `my_style.h` 统一可见；控件/主题/CSS 映射表全部使用常量。状态推导单点化 `my_widget_current_state(widget, pressed)`：disabled > pressed > hover > normal（edit/text_area 的 focused 借 HOVER 槽是显式例外）。兜底色归默认主题/同值 fallback；虚拟部件（node header/socket/link、minimap、rubber_band）经 `my_widget_part_color` 走同一套 CSS 级联（注意 M23b：part_class 与 owner 同型时跳过裸类型规则防泄漏）。
+- **vtable 四槽**（M24c）：`on_paint` / `on_event` / `on_layout` / `on_measure`。`on_measure` 由 `my_widget_relayout` 在 layouter 之前自顶向下调用，供内容自适应控件（node auto-size、scroll_view re-clamp）先 settle 自身 rect/状态，`on_layout` 回归纯布局职责。
+- **子类化两种形态**：正式工厂（嵌入 my_widget_t 首成员 + 析构链，见 my_widget.h 头注释）与轻量匿名子类 `my_widget_subclass_init`（受控替换 vtable + 契约注释，适用无自有资源、无需自有析构的定制绘制/事件——dialog 内容面板、menu overlay/box、tooltip、node_view overlay 均此形态）。
+- **复合控件组合协议**：子控件经 `my_widget_add_child` 组合，内部容器按命名 slot 约定命名（scroll_view 的 "scroll_view"、dialog 的 "dialog_content"/"dialog_buttons"、menu 的 "menu_overlay"/"menu_box"），查找用递归版 `my_widget_find_descendant`；非 `my_widget_t*` 返回值的 create（scroll_view/dialog/menu）配统一取用器 `my_scroll_view_widget`/`my_dialog_widget`/`my_menu_widget`。
+- **自定义控件接入清单**（M24a 后）：写控件（工厂 + vtable）→ 在类表加一行 `X(...)`（或运行时 `my_widget_class_register`）→ 完成。XML/ui2c/MVVM/属性系统即时可用；样式键用常量、状态推导用 `my_widget_current_state`、内容自适应挂 `on_measure`、需要定制绘制但无资源时用 `my_widget_subclass_init`。
+
 ## mymvvm MVVM 层（M4a 现状）
 
 GUI 无关核心（`src/mymvvm/`，只链接 myc）：

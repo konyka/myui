@@ -30,6 +30,11 @@ my_ret_t my_scroll_view_set_content(my_scroll_view_t* sv,
 /** @brief The content widget (borrowed, NULL when none). */
 my_widget_t* my_scroll_view_get_content(my_scroll_view_t* sv);
 
+/** @brief The scroll view AS a widget (M24c uniform accessor; the type
+ * is opaque, so this is the sanctioned way to mix it into widget-typed
+ * APIs). The internal container is named "scroll_view". */
+my_widget_t* my_scroll_view_widget(my_scroll_view_t* sv);
+
 /** @brief Explicit content height in px; 0 = auto (flow measure /
  * content rect height). Triggers relayout. */
 void my_scroll_view_set_content_height(my_scroll_view_t* sv, int32_t height);

@@ -110,15 +110,21 @@ static my_ret_t sv_on_event(my_widget_t* widget, const my_event_t* event) {
   return MY_RET_FAIL;
 }
 
-static void sv_on_layout(my_widget_t* widget) {
+/** @brief M24c: measurement-phase duties — re-clamp the offset after a
+ * resize and sync the linked bar. Runs before the layouter (relayout). */
+static void sv_on_measure(my_widget_t* widget) {
   my_scroll_view_t* sv = (my_scroll_view_t*)widget;
   my_scroll_view_set_offset(sv, sv->offset); /* re-clamp after resize */
-  sv_layout_content(sv);
   sv_sync_bar(sv);
 }
 
-static const my_widget_vtable_t s_sv_vtable = {NULL, sv_on_event,
-                                               sv_on_layout};
+/** @brief Layout-phase duty: position the content child. */
+static void sv_on_layout(my_widget_t* widget) {
+  sv_layout_content((my_scroll_view_t*)widget);
+}
+
+static const my_widget_vtable_t s_sv_vtable = {NULL, sv_on_event, sv_on_layout,
+                                               sv_on_measure};
 
 my_scroll_view_t* my_scroll_view_create(const my_allocator_t* allocator) {
   my_scroll_view_t* sv =
@@ -158,6 +164,10 @@ my_ret_t my_scroll_view_set_content(my_scroll_view_t* sv,
 
 my_widget_t* my_scroll_view_get_content(my_scroll_view_t* sv) {
   return sv != NULL ? sv->content : NULL;
+}
+
+my_widget_t* my_scroll_view_widget(my_scroll_view_t* sv) {
+  return (my_widget_t*)sv; /* IS-A widget; NULL-safe like any cast */
 }
 
 /** @brief scroll_bar "changed" -> offset. */

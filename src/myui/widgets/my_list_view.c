@@ -317,7 +317,7 @@ static void lv_on_layout(my_widget_t* widget) {
 }
 
 static const my_widget_vtable_t s_lv_vtable = {lv_on_paint, lv_on_event,
-                                               lv_on_layout};
+                                               lv_on_layout, NULL};
 
 static void lv_destroy_chain(my_object_t* obj) {
   my_list_view_t* lv = (my_list_view_t*)obj;

@@ -75,7 +75,7 @@ static void cell_on_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
   }
 }
 
-static const my_widget_vtable_t s_cell_vtable = {cell_on_paint, NULL, NULL};
+static const my_widget_vtable_t s_cell_vtable = {cell_on_paint, NULL, NULL, NULL};
 
 static my_widget_t* cell_create(const char* text, uint32_t color,
                                 int32_t font_size, bool bold, bool center) {
@@ -239,7 +239,7 @@ static my_ret_t share_btn_event(my_widget_t* widget, const my_event_t* event) {
 }
 
 static const my_widget_vtable_t s_share_vtable = {share_btn_paint,
-                                                  share_btn_event, NULL};
+                                                  share_btn_event, NULL, NULL};
 
 /* ---------------- table ---------------- */
 

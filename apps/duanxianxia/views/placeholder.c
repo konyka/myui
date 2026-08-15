@@ -32,7 +32,7 @@ static void ph_on_back_click(void* ctx, const char* event, void* data) {
   }
 }
 
-static const my_widget_vtable_t s_ph_vtable = {ph_on_paint, NULL, NULL};
+static const my_widget_vtable_t s_ph_vtable = {ph_on_paint, NULL, NULL, NULL};
 
 my_widget_t* dxx_placeholder_create(const my_allocator_t* allocator,
                                     void (*on_back)(void* ctx), void* ctx) {

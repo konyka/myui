@@ -489,9 +489,8 @@ int main(void) {
       my_event_t e;
       /* layout + first paint so widgets have real rects, then simulate */
       my_window_paint(app.win);
-      click_widget(app.win, my_widget_find_child(
-                                my_widget_get_child(my_window_widget(app.win), 1),
-                                "toggle"));
+      click_widget(app.win, my_widget_find_descendant(
+                                my_window_widget(app.win), "toggle"));
       click_widget(app.win, app.anim_btn);
       /* drag the slider (row2: checkbox x0..120, slider x132..372, y~164..196)
        * to ~2/3: volume -> progress bar via MVVM */

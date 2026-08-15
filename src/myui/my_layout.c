@@ -404,6 +404,14 @@ void my_widget_relayout(my_widget_t* widget) {
   if (widget == NULL) {
     return;
   }
+  /* M24c: content-driven measurement runs first, so an on_measure hook
+   * (node auto-size, scroll_view re-clamp) settles the widget's own
+   * rect/state before its layouter arranges the children. Single call
+   * site: every relayout pass (window paint or manual) hits exactly
+   * this function, top-down. */
+  if (widget->vtable != NULL && widget->vtable->on_measure != NULL) {
+    widget->vtable->on_measure(widget);
+  }
   if (widget->layouter != NULL && widget->layouter->layout != NULL) {
     widget->layouter->layout(widget->layouter, widget);
   }

@@ -177,7 +177,7 @@ static void image_on_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
   image_on_paint_blit(widget, vg, &img, dx, dy, dw, dh);
 }
 
-static const my_widget_vtable_t s_image_vtable = {image_on_paint, NULL, NULL};
+static const my_widget_vtable_t s_image_vtable = {image_on_paint, NULL, NULL, NULL};
 
 static void image_destroy_chain(my_object_t* obj) {
   my_image_t* im = (my_image_t*)obj;

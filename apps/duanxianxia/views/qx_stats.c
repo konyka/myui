@@ -231,7 +231,7 @@ static my_ret_t stat_btn_event(my_widget_t* widget, const my_event_t* event) {
 }
 
 static const my_widget_vtable_t s_stat_btn_vtable = {stat_btn_paint,
-                                                     stat_btn_event, NULL};
+                                                     stat_btn_event, NULL, NULL};
 
 /* ---------------- card assembly ---------------- */
 
@@ -265,7 +265,7 @@ static void qx_card_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
                         ((float)widget->rect.w - (float)tw) / 2.0f + 1.0f, 40);
 }
 
-static const my_widget_vtable_t s_qx_card_vtable = {qx_card_paint, NULL, NULL};
+static const my_widget_vtable_t s_qx_card_vtable = {qx_card_paint, NULL, NULL, NULL};
 
 my_widget_t* dxx_build_emotion_card(my_widget_t* parent, int32_t x, int32_t y,
                                     int32_t w, int32_t h) {

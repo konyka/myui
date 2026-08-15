@@ -71,9 +71,9 @@ static void strip_on_layout(my_widget_t* widget) {
   }
 }
 
-static const my_widget_vtable_t s_col_vtable = {col_on_paint, NULL, NULL};
+static const my_widget_vtable_t s_col_vtable = {col_on_paint, NULL, NULL, NULL};
 static const my_widget_vtable_t s_strip_vtable = {strip_on_paint, NULL,
-                                                  strip_on_layout};
+                                                  strip_on_layout, NULL};
 
 my_widget_t* dxx_build_index_strip(my_widget_t* parent) {
   my_widget_t* strip = my_widget_create(NULL, "dxx_index_strip");

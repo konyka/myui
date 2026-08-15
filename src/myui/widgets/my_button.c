@@ -133,7 +133,7 @@ static my_ret_t button_on_event(my_widget_t* widget, const my_event_t* event) {
 }
 
 static const my_widget_vtable_t s_button_vtable = {button_on_paint,
-                                                   button_on_event, NULL};
+                                                   button_on_event, NULL, NULL};
 
 static void button_destroy_chain(my_object_t* obj) {
   my_button_t* b = (my_button_t*)obj;

@@ -36,9 +36,9 @@ static void divider_on_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
 }
 
 static const my_widget_vtable_t s_topbar_vtable = {topbar_on_paint, NULL,
-                                                   NULL};
+                                                   NULL, NULL};
 static const my_widget_vtable_t s_divider_vtable = {divider_on_paint, NULL,
-                                                    NULL};
+                                                    NULL, NULL};
 
 static const char* const MENU_JINGJIA[] = {"竞价异动", "竞价强度"};
 static const char* const MENU_WAJUE[] = {"个股挖掘", "概念检索", "研报检索"};

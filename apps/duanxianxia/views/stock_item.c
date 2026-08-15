@@ -193,7 +193,7 @@ static my_ret_t stock_item_event(my_widget_t* widget, const my_event_t* event) {
 }
 
 static const my_widget_vtable_t s_stock_item_vtable = {stock_item_paint,
-                                                       stock_item_event, NULL};
+                                                       stock_item_event, NULL, NULL};
 
 my_widget_t* dxx_stock_item_create(const my_allocator_t* allocator,
                                    const dxx_stock_t* stock,

@@ -187,7 +187,7 @@ static void chart_on_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
   }
 }
 
-static const my_widget_vtable_t s_chart_vtable = {chart_on_paint, NULL, NULL};
+static const my_widget_vtable_t s_chart_vtable = {chart_on_paint, NULL, NULL, NULL};
 
 my_widget_t* dxx_chart_create(const my_allocator_t* allocator,
                               dxx_chart_mode_t mode) {

@@ -32,7 +32,7 @@ static void dialog_content_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
 }
 
 static const my_widget_vtable_t s_dialog_content_vtable = {
-    dialog_content_paint, NULL, NULL};
+    dialog_content_paint, NULL, NULL, NULL};
 
 static void dialog_report(my_dialog_t* dlg, int32_t result) {
   my_dialog_result_cb cb = dlg->on_result;
@@ -147,7 +147,8 @@ my_dialog_t* my_dialog_create(const my_allocator_t* allocator, my_pal_t* pal,
   my_widget_set_layouter(root, my_layouter_linear_create(allocator, false, 0));
 
   dlg->content = my_widget_create(allocator, "dialog_content");
-  ((my_widget_t*)dlg->content)->vtable = &s_dialog_content_vtable;
+  my_widget_subclass_init((my_widget_t*)dlg->content,
+                          &s_dialog_content_vtable);
   ((my_widget_t*)dlg->content)->focusable = true; /* ESC target */
   my_widget_set_layouter(dlg->content,
                          my_layouter_linear_create(allocator, false, 8));
@@ -169,6 +170,10 @@ my_dialog_t* my_dialog_create(const my_allocator_t* allocator, my_pal_t* pal,
 
 my_widget_t* my_dialog_content(my_dialog_t* dlg) {
   return dlg != NULL ? dlg->content : NULL;
+}
+
+my_widget_t* my_dialog_widget(my_dialog_t* dlg) {
+  return dlg != NULL ? my_window_widget(dlg->win) : NULL;
 }
 
 my_ret_t my_dialog_add_button(my_dialog_t* dlg, const char* text,

@@ -60,6 +60,13 @@ typedef struct my_widget_vtable_t {
   my_ret_t (*on_event)(my_widget_t* widget, const my_event_t* event);
   /** @brief Optional custom layout hook (layouters usually suffice). */
   void (*on_layout)(my_widget_t* widget);
+  /**
+   * @brief Optional content-driven measurement (M24c). Called by
+   * my_widget_relayout() BEFORE the layouter/on_layout of the same
+   * widget, so auto-sizing widgets (node auto-size, scroll_view
+   * re-clamp) settle their own rect/state first. NULL = keep as is.
+   */
+  void (*on_measure)(my_widget_t* widget);
 } my_widget_vtable_t;
 
 struct my_layouter_t;
@@ -103,6 +110,17 @@ struct my_widget_t {
 my_ret_t my_widget_init(my_widget_t* widget, const my_allocator_t* allocator,
                         const my_widget_vtable_t* vtable, const char* name);
 
+/**
+ * @brief Lightweight anonymous subclassing (M24c): replace the vtable of
+ * an already-created widget. Contract: only for subclasses with NO own
+ * resources that merely customize paint/event — the destroy chain stays
+ * the plain widget one (a subclass needing its own destructor must use
+ * the full factory pattern described at the top of this file). Replaces
+ * the former ad-hoc `w->vtable = &vt;` overrides.
+ */
+my_ret_t my_widget_subclass_init(my_widget_t* widget,
+                                 const my_widget_vtable_t* vtable);
+
 /** @brief Create a plain container widget. */
 my_widget_t* my_widget_create(const my_allocator_t* allocator, const char* name);
 
@@ -130,6 +148,12 @@ my_ret_t my_widget_add_child(my_widget_t* parent, my_widget_t* child);
 my_ret_t my_widget_remove_child(my_widget_t* parent, my_widget_t* child);
 /** @brief Find a direct child by name (NULL when absent). */
 my_widget_t* my_widget_find_child(my_widget_t* parent, const char* name);
+/**
+ * @brief Find any descendant by name (depth-first, direct children
+ * first; the widget itself is not matched). NULL when absent. Plain
+ * recursion — the widget tree is acyclic by construction (M24c).
+ */
+my_widget_t* my_widget_find_descendant(my_widget_t* parent, const char* name);
 /** @brief Number of direct children. */
 size_t my_widget_child_count(my_widget_t* parent);
 /** @brief Get the i-th direct child (borrowed). */

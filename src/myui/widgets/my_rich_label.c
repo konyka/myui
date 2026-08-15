@@ -77,7 +77,7 @@ static void rich_label_destroy_chain(my_object_t* obj) {
 }
 
 static const my_widget_vtable_t s_rich_label_vtable = {rich_label_on_paint,
-                                                       NULL, NULL};
+                                                       NULL, NULL, NULL};
 
 my_widget_t* my_rich_label_create(const my_allocator_t* allocator) {
   my_rich_label_t* rl =

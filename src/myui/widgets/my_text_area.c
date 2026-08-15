@@ -1352,7 +1352,7 @@ static void ta_on_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
   my_vgcanvas_restore(vg);
 }
 
-static const my_widget_vtable_t s_ta_vtable = {ta_on_paint, ta_on_event, NULL};
+static const my_widget_vtable_t s_ta_vtable = {ta_on_paint, ta_on_event, NULL, NULL};
 
 /* ---------------- focus / blink / lifecycle ---------------- */
 

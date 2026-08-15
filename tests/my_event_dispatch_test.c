@@ -54,7 +54,7 @@ static my_ret_t on_event_probe(my_widget_t* widget, const my_event_t* event) {
   return p->consume;
 }
 
-static const my_widget_vtable_t PROBE_VTABLE = {NULL, on_event_probe, NULL};
+static const my_widget_vtable_t PROBE_VTABLE = {NULL, on_event_probe, NULL, NULL};
 
 static my_widget_t* probe_widget(my_widget_t* parent, probe_t* probe, int32_t x,
                                  int32_t y, int32_t w, int32_t h) {

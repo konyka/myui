@@ -36,4 +36,12 @@ my_ret_t my_menu_popup(my_window_t* win, my_menu_t* menu, int32_t x,
 /** @brief Dismiss the popup (and cascaded children). */
 void my_menu_dismiss(my_menu_t* menu);
 
+/**
+ * @brief The popup's overlay widget while open, NULL while closed (M24c
+ * uniform accessor). A menu is a data model, not a widget — this is the
+ * semantically equivalent handle: the in-window overlay (named
+ * "menu_overlay") that owns the "menu_box" subtree while popped up.
+ */
+my_widget_t* my_menu_widget(my_menu_t* menu);
+
 #endif /* MY_MENU_H */

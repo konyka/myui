@@ -28,7 +28,7 @@ static void window_on_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
                                           (float)widget->rect.h});
 }
 
-static const my_widget_vtable_t s_window_vtable = {window_on_paint, NULL, NULL};
+static const my_widget_vtable_t s_window_vtable = {window_on_paint, NULL, NULL, NULL};
 
 /* ---------------- CSD title bar (M16) ---------------- */
 
@@ -131,9 +131,9 @@ static my_ret_t csd_close_event(my_widget_t* widget, const my_event_t* event) {
 
 static const my_widget_vtable_t s_csd_bar_vtable = {csd_bar_paint,
                                                     csd_bar_event,
-                                                    csd_bar_layout};
+                                                    csd_bar_layout, NULL};
 static const my_widget_vtable_t s_csd_close_vtable = {csd_close_paint,
-                                                      csd_close_event, NULL};
+                                                      csd_close_event, NULL, NULL};
 
 /** @brief Keep the close button glued to the bar's right edge. */
 static void csd_bar_layout(my_widget_t* widget) {
@@ -457,7 +457,7 @@ static void tip_on_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
   }
 }
 
-static const my_widget_vtable_t s_tip_vtable = {tip_on_paint, NULL, NULL};
+static const my_widget_vtable_t s_tip_vtable = {tip_on_paint, NULL, NULL, NULL};
 
 /** @brief Remove the visible tip (reentrancy-safe via early NULL). */
 static void tip_hide(my_window_t* win) {
@@ -512,7 +512,7 @@ static my_ret_t tip_on_timer(void* ctx) {
   if (tip == NULL) {
     return MY_RET_FAIL;
   }
-  tip->vtable = &s_tip_vtable;
+  my_widget_subclass_init(tip, &s_tip_vtable);
   tip->floating = true;
   my_widget_set_tooltip(tip, text);
   my_widget_set_rect(tip, &(my_rect_t){x, y, w, h});

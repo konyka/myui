@@ -98,7 +98,7 @@ static void nav_item_destroy_chain(my_object_t* obj) {
 }
 
 static const my_widget_vtable_t s_nav_item_vtable = {nav_item_paint,
-                                                     nav_item_event, NULL};
+                                                     nav_item_event, NULL, NULL};
 
 my_widget_t* dxx_nav_item_create(const my_allocator_t* allocator,
                                  const char* text, uint32_t rgba_color,

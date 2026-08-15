@@ -1063,7 +1063,7 @@ static void nv_overlay_paint(my_widget_t* ov, my_vgcanvas_t* vg) {
 }
 
 static const my_widget_vtable_t s_overlay_vtable = {nv_overlay_paint, NULL,
-                                                    NULL};
+                                                    NULL, NULL};
 
 /** @brief Jump the viewport center to a canvas point (minimap click). */
 static void nv_center_on(my_node_view_t* v, float cx, float cy) {
@@ -1499,7 +1499,7 @@ static void nv_destroy_chain(my_object_t* obj) {
   my_object_destroy(obj);
 }
 
-static const my_widget_vtable_t s_nv_vtable = {nv_paint, nv_event, NULL};
+static const my_widget_vtable_t s_nv_vtable = {nv_paint, nv_event, NULL, NULL};
 
 my_widget_t* my_node_view_create(const my_allocator_t* allocator) {
   my_node_view_t* v =
@@ -1527,7 +1527,7 @@ my_widget_t* my_node_view_create(const my_allocator_t* allocator) {
   /* overlay child (floating, painted LAST: minimap + rubber band) */
   overlay = my_widget_create(allocator, "nv_overlay");
   if (overlay != NULL) {
-    overlay->vtable = &s_overlay_vtable;
+    my_widget_subclass_init(overlay, &s_overlay_vtable);
     overlay->floating = true;
     my_widget_set_user_data(overlay, v);
     v->minimap = overlay;

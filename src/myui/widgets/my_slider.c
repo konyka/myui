@@ -117,7 +117,7 @@ static my_ret_t slider_on_event(my_widget_t* widget, const my_event_t* event) {
 }
 
 static const my_widget_vtable_t s_slider_vtable = {slider_on_paint,
-                                                   slider_on_event, NULL};
+                                                   slider_on_event, NULL, NULL};
 
 my_widget_t* my_slider_create(const my_allocator_t* allocator) {
   my_slider_t* s = (my_slider_t*)my_mem_calloc(allocator, 1, sizeof(my_slider_t));

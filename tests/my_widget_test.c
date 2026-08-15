@@ -4,6 +4,7 @@
  */
 #include "myui/my_widget.h"
 
+#include "myui/my_layout.h"
 #include "myui/my_style_keys.h"
 
 #include "mytest.h"
@@ -86,7 +87,7 @@ static void on_paint_fill(my_widget_t* widget, my_vgcanvas_t* vg) {
   (void)widget;
 }
 
-static const my_widget_vtable_t FILL_VTABLE = {on_paint_fill, NULL, NULL};
+static const my_widget_vtable_t FILL_VTABLE = {on_paint_fill, NULL, NULL, NULL};
 
 static void test_paint_recursion_transform_and_clip(void) {
   my_widget_t* root = make("root", 10, 20, 100, 100);
@@ -220,6 +221,74 @@ static void test_style_key_constants(void) {
   TEST_ASSERT_EQ_STR(MY_STYLE_BORDER_WIDTH, "border_width");
 }
 
+/* M24c: on_measure runs exactly once per my_widget_relayout */
+static int g_measure_calls;
+static void measure_count_cb(my_widget_t* widget) {
+  (void)widget;
+  g_measure_calls++;
+}
+
+static const my_widget_vtable_t MEASURE_VTABLE = {NULL, NULL, NULL,
+                                                  measure_count_cb};
+
+static void test_on_measure_called_on_relayout(void) {
+  my_widget_t* root = make("root", 0, 0, 100, 100);
+  my_widget_t* child = add(root, make("c", 0, 0, 10, 10));
+  TEST_ASSERT_EQ_INT(my_widget_subclass_init(child, &MEASURE_VTABLE),
+                     MY_RET_OK);
+  g_measure_calls = 0;
+  my_widget_relayout(root);
+  TEST_ASSERT_EQ_INT(g_measure_calls, 1);
+  my_widget_relayout(root);
+  TEST_ASSERT_EQ_INT(g_measure_calls, 2); /* once per pass, not more */
+  my_widget_unref(root);
+}
+
+/* M24c: anonymous subclassing via my_widget_subclass_init */
+static bool g_sub_painted;
+static void sub_paint_cb(my_widget_t* widget, my_vgcanvas_t* vg) {
+  (void)widget;
+  (void)vg;
+  g_sub_painted = true;
+}
+
+static const my_widget_vtable_t SUB_VTABLE = {sub_paint_cb, NULL, NULL, NULL};
+
+static void test_subclass_init_lifecycle(void) {
+  my_allocator_t* dbg = my_allocator_debug_create(NULL);
+  my_widget_t* w = my_widget_create(dbg, "anon");
+  rec_vg_t rec;
+  TEST_ASSERT_NOT_NULL(w);
+  TEST_ASSERT_EQ_INT(my_widget_subclass_init(NULL, &SUB_VTABLE),
+                     MY_RET_INVALID_PARAMS);
+  TEST_ASSERT_EQ_INT(my_widget_subclass_init(w, NULL), MY_RET_INVALID_PARAMS);
+  TEST_ASSERT_EQ_INT(my_widget_subclass_init(w, &SUB_VTABLE), MY_RET_OK);
+  TEST_ASSERT(w->vtable == &SUB_VTABLE);
+  g_sub_painted = false;
+  rec_vg_init(&rec);
+  my_widget_paint(w, (my_vgcanvas_t*)&rec);
+  TEST_ASSERT(g_sub_painted); /* custom vtable in effect */
+  my_widget_unref(w); /* plain-widget destroy chain stays complete */
+  TEST_ASSERT_EQ_INT(my_allocator_debug_leak_count(dbg), 0);
+  my_allocator_debug_destroy(dbg);
+}
+
+/* M24c: recursive descendant lookup by name */
+static void test_find_descendant(void) {
+  my_widget_t* root = make("root", 0, 0, 100, 100);
+  my_widget_t* a = add(root, make("a", 0, 0, 50, 50));
+  my_widget_t* b = add(a, make("b", 0, 0, 20, 20));
+  my_widget_t* deep = add(b, make("deep", 1, 1, 5, 5));
+  TEST_ASSERT(my_widget_find_descendant(root, "deep") == deep);
+  TEST_ASSERT(my_widget_find_descendant(root, "b") == b);
+  TEST_ASSERT(my_widget_find_descendant(a, "deep") == deep);
+  TEST_ASSERT_NULL(my_widget_find_descendant(root, "root")); /* self excluded */
+  TEST_ASSERT_NULL(my_widget_find_descendant(root, "nope"));
+  TEST_ASSERT_NULL(my_widget_find_descendant(NULL, "deep"));
+  TEST_ASSERT_NULL(my_widget_find_descendant(root, NULL));
+  my_widget_unref(root);
+}
+
 static void test_no_leak_with_debug_allocator(void) {
   my_allocator_t* dbg = my_allocator_debug_create(NULL);
   my_widget_t* root = my_widget_create(dbg, "root");
@@ -254,5 +323,8 @@ MYTEST_MAIN_BEGIN()
   MYTEST_RUN(test_null_params);
   MYTEST_RUN(test_current_state_derivation);
   MYTEST_RUN(test_style_key_constants);
+  MYTEST_RUN(test_on_measure_called_on_relayout);
+  MYTEST_RUN(test_subclass_init_lifecycle);
+  MYTEST_RUN(test_find_descendant);
   MYTEST_RUN(test_no_leak_with_debug_allocator);
 MYTEST_MAIN_END()

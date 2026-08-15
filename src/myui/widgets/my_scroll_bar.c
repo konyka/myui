@@ -135,7 +135,7 @@ static void sb_on_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
                                 (float)widget->rect.w / 2.0f - 1.0f);
 }
 
-static const my_widget_vtable_t s_sb_vtable = {sb_on_paint, sb_on_event, NULL};
+static const my_widget_vtable_t s_sb_vtable = {sb_on_paint, sb_on_event, NULL, NULL};
 
 my_widget_t* my_scroll_bar_create(const my_allocator_t* allocator) {
   my_scroll_bar_t* b =

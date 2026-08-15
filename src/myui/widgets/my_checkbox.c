@@ -77,7 +77,7 @@ static my_ret_t checkbox_on_event(my_widget_t* widget, const my_event_t* event) 
 }
 
 static const my_widget_vtable_t s_checkbox_vtable = {checkbox_on_paint,
-                                                     checkbox_on_event, NULL};
+                                                     checkbox_on_event, NULL, NULL};
 
 static void checkbox_destroy_chain(my_object_t* obj) {
   my_checkbox_t* c = (my_checkbox_t*)obj;

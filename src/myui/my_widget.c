@@ -54,6 +54,15 @@ my_ret_t my_widget_init(my_widget_t* widget, const my_allocator_t* allocator,
   return MY_RET_OK;
 }
 
+my_ret_t my_widget_subclass_init(my_widget_t* widget,
+                                 const my_widget_vtable_t* vtable) {
+  if (widget == NULL || vtable == NULL) {
+    return MY_RET_INVALID_PARAMS;
+  }
+  widget->vtable = vtable;
+  return MY_RET_OK;
+}
+
 my_widget_t* my_widget_create(const my_allocator_t* allocator, const char* name) {
   my_widget_t* widget =
       (my_widget_t*)my_mem_calloc(allocator, 1, sizeof(my_widget_t));
@@ -144,6 +153,26 @@ my_widget_t* my_widget_find_child(my_widget_t* parent, const char* name) {
     my_widget_t* child = (my_widget_t*)my_darray_get(parent->children, i);
     if (my_str_eq(child->base.name, name)) {
       return child;
+    }
+  }
+  return NULL;
+}
+
+my_widget_t* my_widget_find_descendant(my_widget_t* parent, const char* name) {
+  size_t i, n;
+  my_widget_t* hit;
+  if (parent == NULL || name == NULL) {
+    return NULL;
+  }
+  hit = my_widget_find_child(parent, name);
+  if (hit != NULL) {
+    return hit;
+  }
+  n = my_widget_child_count(parent);
+  for (i = 0; i < n; i++) {
+    hit = my_widget_find_descendant(my_widget_get_child(parent, i), name);
+    if (hit != NULL) {
+      return hit;
     }
   }
   return NULL;

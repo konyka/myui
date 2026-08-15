@@ -36,7 +36,7 @@ static void progress_on_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
 }
 
 static const my_widget_vtable_t s_progress_vtable = {progress_on_paint, NULL,
-                                                     NULL};
+                                                     NULL, NULL};
 
 my_widget_t* my_progress_bar_create(const my_allocator_t* allocator) {
   my_progress_bar_t* b =

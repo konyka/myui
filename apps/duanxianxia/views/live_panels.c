@@ -59,9 +59,9 @@ static void feed_row_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
   my_vgcanvas_draw_text(vg, r->time, 0, ((float)widget->rect.h - 12.0f) / 2.0f);
 }
 
-static const my_widget_vtable_t s_card_vtable = {card_on_paint, NULL, NULL};
+static const my_widget_vtable_t s_card_vtable = {card_on_paint, NULL, NULL, NULL};
 static const my_widget_vtable_t s_feed_row_vtable = {feed_row_paint, NULL,
-                                                     NULL};
+                                                     NULL, NULL};
 
 /* red keywords / green keywords for the feed text highlight */
 static const char* const KW_UP[] = {"涨停", "触板", "封板", "回封",
@@ -231,7 +231,7 @@ static void watch_row_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
 }
 
 static const my_widget_vtable_t s_watch_row_vtable = {watch_row_paint, NULL,
-                                                      NULL};
+                                                      NULL, NULL};
 
 static my_widget_t* watch_card(my_widget_t* parent, int32_t x, int32_t y,
                                int32_t w, int32_t h) {
@@ -294,7 +294,7 @@ static void amount_on_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
 }
 
 static const my_widget_vtable_t s_amount_vtable = {amount_on_paint, NULL,
-                                                   NULL};
+                                                   NULL, NULL};
 
 static my_widget_t* amount_card(my_widget_t* parent, int32_t x, int32_t y,
                                 int32_t w, int32_t h) {
