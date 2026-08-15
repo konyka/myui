@@ -98,7 +98,18 @@ typedef struct my_pal_window_vtable_t {
    * wl_pointer enter, with that enter's serial).
    */
   my_ret_t (*set_cursor)(my_pal_window_t* win, my_cursor_t cursor);
+  /**
+   * @brief Enable GL rendering with an explicit API (M25a): api is one
+   * of MY_PAL_GL_API_*. Same ownership rules as gl_enable. NULL slot =
+   * the port cannot select APIs; the inline wrapper then falls back to
+   * gl_enable for MY_PAL_GL_API_GLES2 and fails (NULL) otherwise.
+   */
+  my_pal_gl_t* (*gl_enable_api)(my_pal_window_t* win, int api);
 } my_pal_window_vtable_t;
+
+/** @brief GL APIs selectable through the gl_enable_api slot (M25a). */
+#define MY_PAL_GL_API_GLES2 0
+#define MY_PAL_GL_API_OPENGL 1
 
 /** @brief Window base "class". */
 struct my_pal_window_t {
@@ -181,6 +192,18 @@ static inline void my_pal_gl_destroy(my_pal_gl_t* gl) {
 
 static inline my_pal_gl_t* my_pal_window_gl_enable(my_pal_window_t* win) {
   return win->vtable->gl_enable(win);
+}
+
+/**
+ * @brief Enable GL with an explicit API (M25a). Ports without the
+ * gl_enable_api slot can only do the legacy GLES2 mount.
+ */
+static inline my_pal_gl_t* my_pal_window_gl_enable_api(my_pal_window_t* win,
+                                                       int api) {
+  if (win->vtable->gl_enable_api != NULL) {
+    return win->vtable->gl_enable_api(win, api);
+  }
+  return api == MY_PAL_GL_API_GLES2 ? win->vtable->gl_enable(win) : NULL;
 }
 
 static inline void my_pal_window_ime_set_spot(my_pal_window_t* win, int32_t x,

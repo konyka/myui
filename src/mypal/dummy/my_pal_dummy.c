@@ -150,7 +150,7 @@ static const my_pal_window_vtable_t s_dummy_window_vtable = {
     dummy_win_get_size,  dummy_win_get_lcd, dummy_win_destroy,
     dummy_win_gl_enable, dummy_win_ime_set_spot,
     dummy_win_move,      dummy_win_begin_move,
-    dummy_win_set_cursor};
+    dummy_win_set_cursor, NULL /* gl_enable_api: dummy has no GL (M25a) */};
 
 static my_pal_window_t* dummy_window_create(my_pal_t* pal, int32_t w, int32_t h,
                                             const char* title) {

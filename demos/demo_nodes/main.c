@@ -95,6 +95,34 @@ int main(void) {
     return 1;
   }
   win = my_window_create(NULL, pal, 960, 640, "myui demo_nodes");
+#ifndef MYUI_PAL_DUMMY
+  /* MYUI_GPU_BACKEND=soft|gles2|opengl|vulkan (M25a); legacy
+   * MYUI_DEMO_GLES=1 is equivalent to gles2 */
+  {
+    const char* be = getenv("MYUI_GPU_BACKEND");
+    my_gpu_backend_t backend = MY_GPU_AUTO;
+    if (be == NULL && getenv("MYUI_DEMO_GLES") != NULL) {
+      be = "gles2";
+    }
+    if (be != NULL) {
+      if (strcmp(be, "soft") == 0) {
+        backend = MY_GPU_SOFT;
+      } else if (strcmp(be, "gles2") == 0) {
+        backend = MY_GPU_GLES2;
+      } else if (strcmp(be, "opengl") == 0) {
+        backend = MY_GPU_OPENGL;
+      } else if (strcmp(be, "vulkan") == 0) {
+        backend = MY_GPU_VULKAN;
+      }
+      if (my_window_enable_gpu(win, backend) == MY_RET_OK) {
+        printf("demo_nodes: GPU backend '%s' enabled\n", be);
+      } else {
+        fprintf(stderr, "demo_nodes: backend '%s' unavailable, soft path\n",
+                be);
+      }
+    }
+  }
+#endif
   theme = my_theme_default_create(NULL);
   my_theme_load_css(theme, NODES_CSS);
   my_window_set_theme(win, theme, true);

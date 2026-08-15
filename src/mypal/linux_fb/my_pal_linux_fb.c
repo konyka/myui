@@ -187,7 +187,7 @@ static const my_pal_window_vtable_t s_fb_window_vtable = {
     fb_win_get_size,  fb_win_get_lcd, fb_win_destroy,
     fb_win_gl_enable, fb_win_ime_noop,
     fb_win_move_noop, fb_win_begin_move_noop,
-    fb_win_set_cursor_noop};
+    fb_win_set_cursor_noop, NULL /* gl_enable_api: fb has no GL (M25a) */};
 
 static my_pal_window_t* fb_window_create(my_pal_t* pal, int32_t w, int32_t h,
                                          const char* title) {

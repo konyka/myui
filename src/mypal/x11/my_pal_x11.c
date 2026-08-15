@@ -258,6 +258,7 @@ static void x11_win_destroy(my_pal_window_t* win) {
 typedef struct x11_gl_t {
   my_pal_gl_t base;
   x11_window_t* win; /**< borrowed (the window owns this handle) */
+  int api;           /**< MY_PAL_GL_API_* (M25a) */
   EGLContext ctx;
   EGLSurface surf;
 } x11_gl_t;
@@ -265,39 +266,46 @@ typedef struct x11_gl_t {
 /** @brief Lazy one-time EGL display/config init (shared by all windows;
  * never eglTerminate'd -- the EGL display outlives individual windows
  * and is reclaimed at process exit). Config negotiation (M11c): prefer
- * EGL_SAMPLES=4 (MSAA), fall back to a plain config when unavailable. */
-static bool x11_egl_init(x11_pal_t* p) {
+ * EGL_SAMPLES=4 (MSAA), fall back to a plain config when unavailable.
+ * M25a: config/state are per-API (GLES2 vs desktop OpenGL). */
+static bool x11_egl_init(x11_pal_t* p, int api) {
   EGLint major = 0, minor = 0, n = 0;
+  EGLint renderable = api == MY_PAL_GL_API_OPENGL ? EGL_OPENGL_BIT
+                                                  : EGL_OPENGL_ES2_BIT;
   EGLint cfg_msaa_attrs[] = {EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
-                             EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
+                             EGL_RENDERABLE_TYPE, renderable,
                              EGL_RED_SIZE, 8, EGL_GREEN_SIZE, 8, EGL_BLUE_SIZE,
                              8, EGL_SAMPLE_BUFFERS, 1, EGL_SAMPLES, 4,
                              EGL_NONE};
   EGLint cfg_attrs[] = {EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
-                        EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
+                        EGL_RENDERABLE_TYPE, renderable,
                         EGL_RED_SIZE, 8, EGL_GREEN_SIZE, 8, EGL_BLUE_SIZE, 8,
                         EGL_NONE};
-  if (p->egl_state != 0) {
-    return p->egl_state > 0;
+  if (api != MY_PAL_GL_API_GLES2 && api != MY_PAL_GL_API_OPENGL) {
+    return false;
+  }
+  if (p->egl_state[api] != 0) {
+    return p->egl_state[api] > 0;
   }
   p->egl_dpy = eglGetDisplay((EGLNativeDisplayType)p->display);
   if (p->egl_dpy == EGL_NO_DISPLAY ||
       !eglInitialize(p->egl_dpy, &major, &minor) ||
-      !eglBindAPI(EGL_OPENGL_ES_API)) {
-    p->egl_state = -1;
+      !eglBindAPI(api == MY_PAL_GL_API_OPENGL ? EGL_OPENGL_API
+                                              : EGL_OPENGL_ES_API)) {
+    p->egl_state[api] = -1;
     return false;
   }
-  if (eglChooseConfig(p->egl_dpy, cfg_msaa_attrs, &p->egl_cfg, 1, &n) &&
+  if (eglChooseConfig(p->egl_dpy, cfg_msaa_attrs, &p->egl_cfg[api], 1, &n) &&
       n > 0) {
-    p->egl_msaa = true;
-  } else if (eglChooseConfig(p->egl_dpy, cfg_attrs, &p->egl_cfg, 1, &n) &&
+    p->egl_msaa[api] = true;
+  } else if (eglChooseConfig(p->egl_dpy, cfg_attrs, &p->egl_cfg[api], 1, &n) &&
              n > 0) {
-    p->egl_msaa = false; /* no MSAA config: documented fallback */
+    p->egl_msaa[api] = false; /* no MSAA config: documented fallback */
   } else {
-    p->egl_state = -1;
+    p->egl_state[api] = -1;
     return false;
   }
-  p->egl_state = 1;
+  p->egl_state[api] = 1;
   return true;
 }
 
@@ -326,7 +334,8 @@ static my_ret_t x11_gl_get_size(my_pal_gl_t* gl, int32_t* w, int32_t* h) {
 }
 
 static bool x11_gl_has_multisample(my_pal_gl_t* gl) {
-  return ((x11_gl_t*)gl)->win->pal->egl_msaa;
+  x11_gl_t* g = (x11_gl_t*)gl;
+  return g->win->pal->egl_msaa[g->api];
 }
 
 static void x11_gl_destroy(my_pal_gl_t* gl) {
@@ -345,15 +354,18 @@ static const my_pal_gl_vtable_t s_x11_gl_vtable = {
     x11_gl_make_current, x11_gl_swap, x11_gl_get_size,
     x11_gl_has_multisample, x11_gl_destroy};
 
-static my_pal_gl_t* x11_win_gl_enable(my_pal_window_t* win) {
+static my_pal_gl_t* x11_win_gl_enable_api(my_pal_window_t* win, int api) {
   x11_window_t* w = (x11_window_t*)win;
   x11_pal_t* p = w->pal;
   x11_gl_t* g;
-  EGLint ctx_attrs[] = {EGL_CONTEXT_CLIENT_VERSION, 2, EGL_NONE};
+  /* ES needs EGL_CONTEXT_CLIENT_VERSION=2; desktop GL must NOT carry it
+   * (it is an ES attribute; a desktop context defaults to compat) */
+  EGLint ctx_es_attrs[] = {EGL_CONTEXT_CLIENT_VERSION, 2, EGL_NONE};
+  EGLint ctx_gl_attrs[] = {EGL_NONE};
   if (w->gl != NULL) {
     return w->gl;
   }
-  if (!x11_egl_init(p)) {
+  if (!x11_egl_init(p, api)) {
     return NULL;
   }
   g = (x11_gl_t*)my_mem_calloc(w->allocator, 1, sizeof(x11_gl_t));
@@ -362,12 +374,15 @@ static my_pal_gl_t* x11_win_gl_enable(my_pal_window_t* win) {
   }
   g->base.vtable = &s_x11_gl_vtable;
   g->win = w;
-  g->ctx = eglCreateContext(p->egl_dpy, p->egl_cfg, EGL_NO_CONTEXT, ctx_attrs);
+  g->api = api;
+  g->ctx = eglCreateContext(p->egl_dpy, p->egl_cfg[api], EGL_NO_CONTEXT,
+                            api == MY_PAL_GL_API_OPENGL ? ctx_gl_attrs
+                                                        : ctx_es_attrs);
   if (g->ctx == EGL_NO_CONTEXT) {
     my_mem_free(w->allocator, g);
     return NULL;
   }
-  g->surf = eglCreateWindowSurface(p->egl_dpy, p->egl_cfg,
+  g->surf = eglCreateWindowSurface(p->egl_dpy, p->egl_cfg[api],
                                    (EGLNativeWindowType)w->xwin, NULL);
   if (g->surf == EGL_NO_SURFACE) {
     eglDestroyContext(p->egl_dpy, g->ctx);
@@ -377,16 +392,26 @@ static my_pal_gl_t* x11_win_gl_enable(my_pal_window_t* win) {
   w->gl = (my_pal_gl_t*)g;
   if (x11_gl_make_current(w->gl) == MY_RET_OK) {
     eglSwapInterval(p->egl_dpy, 1); /* vsync */
-    /* MSAA (M11c) is surface-driven on ES2 (no core toggle); the config
-     * already carries EGL_SAMPLES=4 when egl_msaa is true */
+    /* MSAA (M11c) is surface-driven (the config already carries
+     * EGL_SAMPLES=4 when egl_msaa[api] is true) */
   }
   return w->gl;
+}
+
+static my_pal_gl_t* x11_win_gl_enable(my_pal_window_t* win) {
+  return x11_win_gl_enable_api(win, MY_PAL_GL_API_GLES2);
 }
 
 #else /* !MYUI_PAL_GL_EGL */
 
 static my_pal_gl_t* x11_win_gl_enable(my_pal_window_t* win) {
   (void)win;
+  return NULL; /* built without EGL */
+}
+
+static my_pal_gl_t* x11_win_gl_enable_api(my_pal_window_t* win, int api) {
+  (void)win;
+  (void)api;
   return NULL; /* built without EGL */
 }
 
@@ -445,7 +470,7 @@ static const my_pal_window_vtable_t s_x11_window_vtable = {
     x11_win_get_size,  x11_win_get_lcd, x11_win_destroy,
     x11_win_gl_enable, x11_win_ime_set_spot,
     x11_win_move,      x11_win_begin_move,
-    x11_win_set_cursor};
+    x11_win_set_cursor, x11_win_gl_enable_api};
 
 static my_pal_window_t* x11_window_create(my_pal_t* pal, int32_t w, int32_t h,
                                           const char* title) {

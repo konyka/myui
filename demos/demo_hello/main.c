@@ -9,8 +9,10 @@
  */
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "mypal/my_pal.h"
+#include "myr/my_gl_desktop.h"
 #include "myr/my_lcd_mem.h"
 #include "myr/my_vgcanvas_gles2.h"
 #include "myr/my_vgcanvas_soft.h"
@@ -41,7 +43,7 @@ typedef struct app_t {
   my_pal_t* pal;
   my_pal_window_t* window;
   my_pal_main_loop_t* loop;
-  my_pal_gl_t* gl;   /**< GL mount when MYUI_DEMO_GLES worked (M10c) */
+  my_pal_gl_t* gl;   /**< GL mount when MYUI_GPU_BACKEND worked (M25a) */
   my_vgcanvas_t* vg; /**< gles2 backend when gl != NULL */
 } app_t;
 
@@ -186,22 +188,43 @@ int main(void) {
   my_pal_set_event_handler(app.pal, on_event, &app);
   my_pal_window_show(app.window);
 
-  /* MYUI_DEMO_GLES=1: render through the GLES2 backend on a real GL
-   * window (M10c); falls back to the soft path when unavailable */
-  if (getenv("MYUI_DEMO_GLES") != NULL) {
-    app.gl = my_pal_window_gl_enable(app.window);
-    if (app.gl != NULL &&
-        my_pal_gl_make_current(app.gl) == MY_RET_OK) {
-      int32_t gw = 0, gh = 0;
-      my_pal_gl_get_size(app.gl, &gw, &gh);
-      app.vg = my_vgcanvas_gles2_create(NULL, gw, gh);
+  /* MYUI_GPU_BACKEND=gles2|opengl|vulkan|soft (M25a): render through
+   * the gles2 backend on a real GL window of that API; legacy
+   * MYUI_DEMO_GLES=1 is equivalent to gles2. Unknown/unavailable values
+   * fall back to the soft path. demo_hello drives the PAL window
+   * directly (no my_window), so it selects via gl_enable_api. */
+  {
+    const char* be = getenv("MYUI_GPU_BACKEND");
+    int api = -1;
+    const my_gl_t* table = NULL;
+    if (be == NULL && getenv("MYUI_DEMO_GLES") != NULL) {
+      be = "gles2";
     }
-    if (app.vg != NULL) {
-      printf("demo_hello: GLES rendering enabled\n");
-    } else {
-      fprintf(stderr, "demo_hello: GLES unavailable, using soft path\n");
-      my_pal_gl_destroy(app.gl);
-      app.gl = NULL;
+    if (be != NULL && strcmp(be, "gles2") == 0) {
+      api = MY_PAL_GL_API_GLES2;
+      table = my_gl_real_default();
+    } else if (be != NULL && strcmp(be, "opengl") == 0) {
+      api = MY_PAL_GL_API_OPENGL;
+      table = my_gl_desktop_default();
+    }
+    if (be != NULL && strcmp(be, "soft") != 0) {
+      if (api >= 0 && table != NULL) {
+        app.gl = my_pal_window_gl_enable_api(app.window, api);
+        if (app.gl != NULL &&
+            my_pal_gl_make_current(app.gl) == MY_RET_OK) {
+          int32_t gw = 0, gh = 0;
+          my_pal_gl_get_size(app.gl, &gw, &gh);
+          app.vg = my_vgcanvas_gles2_create_with_gl(NULL, gw, gh, table);
+        }
+      }
+      if (app.vg != NULL) {
+        printf("demo_hello: GPU backend '%s' enabled\n", be);
+      } else {
+        fprintf(stderr, "demo_hello: backend '%s' unavailable, soft path\n",
+                be);
+        my_pal_gl_destroy(app.gl);
+        app.gl = NULL;
+      }
     }
   }
 

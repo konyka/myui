@@ -6,6 +6,7 @@ add_library(myr STATIC
   my_vgcanvas_soft.c
   my_vgcanvas_gles2.c
   my_gl_real.c
+  my_gl_desktop.c
   my_font.c
   my_font_stb.c
   my_font_ft.c
@@ -73,6 +74,7 @@ endif()
 find_package(PkgConfig QUIET)
 if(PkgConfig_FOUND)
   pkg_check_modules(GLESV2 QUIET glesv2)
+  pkg_check_modules(OPENGL QUIET gl)
 endif()
 if(GLESV2_FOUND)
   target_compile_definitions(myr PUBLIC MYUI_HAS_GLES2)
@@ -81,4 +83,14 @@ if(GLESV2_FOUND)
   message(STATUS "myui: GLES2 backend enabled")
 else()
   message(STATUS "myui: GLES2 backend stubbed (glesv2 not found)")
+endif()
+
+# optional desktop OpenGL backend support (M25a)
+if(OPENGL_FOUND)
+  target_compile_definitions(myr PUBLIC MYUI_HAS_GL_DESKTOP)
+  target_include_directories(myr PUBLIC ${OPENGL_INCLUDE_DIRS})
+  target_link_libraries(myr PUBLIC ${OPENGL_LIBRARIES})
+  message(STATUS "myui: desktop OpenGL backend enabled")
+else()
+  message(STATUS "myui: desktop OpenGL backend stubbed (gl not found)")
 endif()

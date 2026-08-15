@@ -1,0 +1,175 @@
+/**
+ * @file gl_desktop_smoke_test.c
+ * @brief Real-context desktop OpenGL smoke test (M25a): EGL surfaceless
+ * (Mesa) pbuffer context with eglBindAPI(EGL_OPENGL_API), render through
+ * the gles2 vgcanvas backend driven by my_gl_desktop_default() (desktop
+ * GLSL 1.20 via the shader header seam), glReadPixels verification.
+ * Skips (exit 0) when no usable EGL context can be created, so headless
+ * CI still passes. Registered only when EGL + desktop GL are available.
+ */
+#include <stdio.h>
+
+#include <EGL/egl.h>
+#include <EGL/eglext.h>
+#include <GL/gl.h>
+
+#include "myr/my_gl_desktop.h"
+#include "myr/my_vgcanvas_gles2.h"
+
+#include "mytest.h"
+
+#ifndef EGL_PLATFORM_SURFACELESS_MESA
+#define EGL_PLATFORM_SURFACELESS_MESA 0x31DD
+#endif
+
+static EGLDisplay g_dpy = EGL_NO_DISPLAY;
+static EGLContext g_ctx = EGL_NO_CONTEXT;
+static EGLSurface g_surf = EGL_NO_SURFACE;
+
+static int egl_setup(void) {
+  EGLint major, minor, n;
+  EGLConfig cfg;
+  EGLint cfg_plain[] = {EGL_SURFACE_TYPE, EGL_PBUFFER_BIT,
+                        EGL_RENDERABLE_TYPE, EGL_OPENGL_BIT,
+                        EGL_RED_SIZE, 8, EGL_GREEN_SIZE, 8, EGL_BLUE_SIZE, 8,
+                        EGL_NONE};
+  EGLint surf_attrs[] = {EGL_WIDTH, 64, EGL_HEIGHT, 64, EGL_NONE};
+  /* desktop GL via EGL: NO EGL_CONTEXT_CLIENT_VERSION (that attribute is
+   * ES-specific; a desktop context defaults to a compatibility profile) */
+  EGLint ctx_attrs[] = {EGL_NONE};
+
+  g_dpy = eglGetPlatformDisplay(EGL_PLATFORM_SURFACELESS_MESA,
+                                EGL_DEFAULT_DISPLAY, NULL);
+  if (g_dpy == EGL_NO_DISPLAY) {
+    g_dpy = eglGetDisplay(EGL_DEFAULT_DISPLAY);
+  }
+  if (g_dpy == EGL_NO_DISPLAY || !eglInitialize(g_dpy, &major, &minor)) {
+    return -1;
+  }
+  if (!eglBindAPI(EGL_OPENGL_API)) {
+    return -1;
+  }
+  if (!eglChooseConfig(g_dpy, cfg_plain, &cfg, 1, &n) || n < 1) {
+    return -1;
+  }
+  g_ctx = eglCreateContext(g_dpy, cfg, EGL_NO_CONTEXT, ctx_attrs);
+  if (g_ctx == EGL_NO_CONTEXT) {
+    return -1;
+  }
+  g_surf = eglCreatePbufferSurface(g_dpy, cfg, surf_attrs);
+  if (g_surf == EGL_NO_SURFACE) {
+    if (!eglMakeCurrent(g_dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, g_ctx)) {
+      return -1;
+    }
+    return 0;
+  }
+  if (!eglMakeCurrent(g_dpy, g_surf, g_surf, g_ctx)) {
+    return -1;
+  }
+  return 0;
+}
+
+static void egl_teardown(void) {
+  if (g_dpy != EGL_NO_DISPLAY) {
+    eglMakeCurrent(g_dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+    if (g_surf != EGL_NO_SURFACE) {
+      eglDestroySurface(g_dpy, g_surf);
+    }
+    if (g_ctx != EGL_NO_CONTEXT) {
+      eglDestroyContext(g_dpy, g_ctx);
+    }
+    eglTerminate(g_dpy);
+  }
+}
+
+static void test_gl_desktop_real_render(void) {
+  my_vgcanvas_t* vg;
+  GLubyte px[4];
+
+  vg = my_vgcanvas_gles2_create_with_gl(NULL, 64, 64,
+                                        my_gl_desktop_default());
+  TEST_ASSERT_NOT_NULL(vg);
+  if (vg == NULL) {
+    return;
+  }
+
+  /* rect fill */
+  glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+  glClear(GL_COLOR_BUFFER_BIT);
+  my_vgcanvas_begin_frame(vg, NULL);
+  my_vgcanvas_set_fill_color(vg, my_color_rgb(255, 0, 0));
+  my_vgcanvas_fill_rect(vg, &(my_rectf_t){8, 8, 48, 48});
+  my_vgcanvas_end_frame(vg);
+  glFinish();
+  glReadPixels(32, 32, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, px);
+  TEST_ASSERT(px[0] > 200); /* red inside the rect */
+  glReadPixels(2, 2, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, px);
+  TEST_ASSERT(px[0] < 60); /* dark outside */
+
+  /* alpha blend: translucent red over white -> ~(255,128,128) */
+  glClearColor(1.0f, 1.0f, 1.0f, 1.0f);
+  glClear(GL_COLOR_BUFFER_BIT);
+  my_vgcanvas_begin_frame(vg, NULL);
+  my_vgcanvas_set_fill_color(vg, my_color_rgba(255, 0, 0, 128));
+  my_vgcanvas_fill_rect(vg, &(my_rectf_t){8, 8, 48, 48});
+  my_vgcanvas_end_frame(vg);
+  glFinish();
+  glReadPixels(32, 32, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, px);
+  TEST_ASSERT(px[0] > 200 && px[1] > 100 && px[1] < 160);
+
+  /* text via the backend (bitmap font, alpha texture quads) */
+  {
+    my_font_t* font = my_font_bitmap_create(NULL);
+    int lit = 0, x, y;
+    GLubyte row[16 * 4];
+    TEST_ASSERT_NOT_NULL(font);
+    my_vgcanvas_set_font(vg, font, 8);
+    my_vgcanvas_set_fill_color(vg, my_color_rgb(0, 255, 0));
+    TEST_ASSERT_EQ_INT(my_vgcanvas_draw_text(vg, "A", 10, 8), MY_RET_OK);
+    glFinish();
+    for (y = 8; y < 16 && lit == 0; y++) {
+      glReadPixels(10, 64 - 1 - y, 8, 1, GL_RGBA, GL_UNSIGNED_BYTE, row);
+      for (x = 0; x < 8; x++) {
+        if (row[x * 4 + 1] > 100) {
+          lit = 1;
+        }
+      }
+    }
+    TEST_ASSERT(lit > 0); /* some green glyph pixels rendered */
+    my_font_destroy(font);
+  }
+
+  /* draw_image: 2x2 four-quadrant image scaled up 16x */
+  {
+    static const uint8_t quad_img[2 * 2 * 4] = {
+        255, 0, 0, 255,   0, 255, 0, 255,
+        0, 0, 255, 255,   255, 255, 0, 255};
+    my_vgcanvas_begin_frame(vg, NULL);
+    TEST_ASSERT_EQ_INT(my_vgcanvas_draw_image(vg, quad_img, 2, 2,
+                                              &(my_rectf_t){0, 0, 32, 32},
+                                              NULL),
+                       MY_RET_OK);
+    my_vgcanvas_end_frame(vg);
+    glFinish();
+    glReadPixels(8, 64 - 1 - 8, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, px);
+    TEST_ASSERT(px[0] > 200 && px[1] < 60); /* top-left: red */
+    glReadPixels(24, 64 - 1 - 8, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, px);
+    TEST_ASSERT(px[1] > 200 && px[0] < 60); /* top-right: green */
+    glReadPixels(8, 64 - 1 - 24, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, px);
+    TEST_ASSERT(px[2] > 200); /* bottom-left: blue */
+    glReadPixels(24, 64 - 1 - 24, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, px);
+    TEST_ASSERT(px[0] > 200 && px[1] > 200 && px[2] < 60); /* yellow */
+    TEST_ASSERT(glGetError() == GL_NO_ERROR);
+  }
+
+  my_vgcanvas_destroy(vg);
+}
+
+MYTEST_MAIN_BEGIN()
+  if (egl_setup() != 0) {
+    fprintf(stdout, "SKIP: no usable desktop-GL EGL context\n");
+  } else {
+    MYTEST_RUN(test_gl_desktop_real_render);
+    egl_teardown();
+  }
+MYTEST_MAIN_END()

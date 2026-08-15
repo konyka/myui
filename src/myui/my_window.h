@@ -115,6 +115,27 @@ void my_window_set_vgcanvas(my_window_t* win, my_vgcanvas_t* vg);
  */
 my_ret_t my_window_enable_gl(my_window_t* win);
 
+/** @brief GPU backends selectable through my_window_enable_gpu (M25a). */
+typedef enum my_gpu_backend_t {
+  MY_GPU_AUTO = 0, /**< try GLES2 -> OPENGL -> VULKAN, else stay soft */
+  MY_GPU_SOFT,     /**< CPU rasterizer (always available) */
+  MY_GPU_GLES2,    /**< OpenGL ES 2.0 (most mature GL path) */
+  MY_GPU_OPENGL,   /**< desktop OpenGL (compat profile, GLSL 1.20) */
+  MY_GPU_VULKAN    /**< reserved (M25b; currently NOT_SUPPORTED) */
+} my_gpu_backend_t;
+
+/**
+ * @brief Unified GPU backend selection (M25a). GLES2/OPENGL mount the
+ * PAL window's GL context for that API and switch the vgcanvas to the
+ * GLES2 backend (the desktop path adapts the shaders via the my_gl_t
+ * header seam). SOFT tears down any GL mount and returns to the CPU
+ * rasterizer. AUTO tries GLES2 first (the most mature path), then
+ * OPENGL, then VULKAN, and stays soft (returning OK) when all fail.
+ * Returns MY_RET_NOT_SUPPORTED when the requested backend is unavailable
+ * on this port/build, MY_RET_FAIL when context/backend creation fails
+ * (the window keeps the soft path then).
+ */
+my_ret_t my_window_enable_gpu(my_window_t* win, my_gpu_backend_t backend);
 /**
  * @brief Set the window's default font (borrowed ref; the caller keeps
  * and eventually destroys it). Applied to the window's vgcanvas.

@@ -12,6 +12,10 @@ set(MYUI_X11_TESTS
 set(MYUI_GLES2_TESTS
   "${CMAKE_CURRENT_SOURCE_DIR}/gles2_smoke_test.c"
 )
+# desktop OpenGL smoke test needs EGL+desktop GL dev libraries (M25a)
+set(MYUI_GL_DESKTOP_TESTS
+  "${CMAKE_CURRENT_SOURCE_DIR}/gl_desktop_smoke_test.c"
+)
 # real-window GL smoke needs the resolved port's GL mount (M10c)
 set(MYUI_GL_WINDOW_TESTS
   "${CMAKE_CURRENT_SOURCE_DIR}/gl_window_smoke_test.c"
@@ -29,7 +33,8 @@ set(MYUI_LINUX_FB_TESTS
   "${CMAKE_CURRENT_SOURCE_DIR}/my_pal_linux_fb_test.c"
 )
 list(REMOVE_ITEM MYUI_TEST_SOURCES ${MYUI_X11_TESTS} ${MYUI_GLES2_TESTS}
-     ${MYUI_GL_WINDOW_TESTS} ${MYUI_WAYLAND_TESTS} ${MYUI_LINUX_FB_TESTS})
+     ${MYUI_GL_DESKTOP_TESTS} ${MYUI_GL_WINDOW_TESTS} ${MYUI_WAYLAND_TESTS}
+     ${MYUI_LINUX_FB_TESTS})
 
 foreach(test_src ${MYUI_TEST_SOURCES})
   get_filename_component(test_name ${test_src} NAME_WE)
@@ -55,6 +60,7 @@ find_package(PkgConfig QUIET)
 if(PkgConfig_FOUND)
   pkg_check_modules(MYUI_EGL QUIET egl)
   pkg_check_modules(MYUI_GLESV2 QUIET glesv2)
+  pkg_check_modules(MYUI_OPENGL QUIET gl)
 endif()
 if(MYUI_GLESV2_FOUND AND MYUI_EGL_FOUND)
   foreach(test_src ${MYUI_GLES2_TESTS})
@@ -63,6 +69,20 @@ if(MYUI_GLESV2_FOUND AND MYUI_EGL_FOUND)
     target_link_libraries(${test_name} PRIVATE myc myr ${MYUI_EGL_LIBRARIES})
     target_include_directories(${test_name}
       PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${MYUI_EGL_INCLUDE_DIRS})
+    add_test(NAME ${test_name} COMMAND ${test_name})
+  endforeach()
+endif()
+
+# real-context desktop OpenGL smoke (M25a; skips gracefully without EGL)
+if(MYUI_OPENGL_FOUND AND MYUI_EGL_FOUND)
+  foreach(test_src ${MYUI_GL_DESKTOP_TESTS})
+    get_filename_component(test_name ${test_src} NAME_WE)
+    add_executable(${test_name} ${test_src})
+    target_link_libraries(${test_name}
+      PRIVATE myc myr ${MYUI_EGL_LIBRARIES} ${MYUI_OPENGL_LIBRARIES})
+    target_include_directories(${test_name}
+      PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${MYUI_EGL_INCLUDE_DIRS}
+              ${MYUI_OPENGL_INCLUDE_DIRS})
     add_test(NAME ${test_name} COMMAND ${test_name})
   endforeach()
 endif()

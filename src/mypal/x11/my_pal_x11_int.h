@@ -47,9 +47,10 @@ typedef struct x11_pal_t {
   bool cursors_init;
 #if defined(MYUI_PAL_GL_EGL)
   EGLDisplay egl_dpy; /**< shared EGL display (lazy, EGL_NO_DISPLAY off) */
-  EGLConfig egl_cfg;
-  int egl_state; /**< 0 = untried, 1 = ready, -1 = unavailable */
-  bool egl_msaa; /**< the shared config carries EGL_SAMPLES=4 (M11c) */
+  /* per-API config/state (M25a): index = MY_PAL_GL_API_* */
+  EGLConfig egl_cfg[2];
+  int egl_state[2]; /**< 0 = untried, 1 = ready, -1 = unavailable */
+  bool egl_msaa[2]; /**< the shared config carries EGL_SAMPLES=4 (M11c) */
 #endif
 } x11_pal_t;
 

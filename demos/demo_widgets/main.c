@@ -447,13 +447,31 @@ int main(void) {
   app.win = my_window_create(NULL, app.pal, 800, 560, "myui demo_widgets");
   my_window_set_theme(app.win, app.light, false);
 #ifndef MYUI_PAL_DUMMY
-  /* MYUI_DEMO_GLES=1: render through the GLES2 backend on a real GL
-   * window (M10c); falls back to the soft path when unavailable */
-  if (getenv("MYUI_DEMO_GLES") != NULL) {
-    if (my_window_enable_gl(app.win) == MY_RET_OK) {
-      printf("demo_widgets: GLES rendering enabled\n");
-    } else {
-      fprintf(stderr, "demo_widgets: GLES unavailable, using soft path\n");
+  /* MYUI_GPU_BACKEND=soft|gles2|opengl|vulkan (M25a); legacy
+   * MYUI_DEMO_GLES=1 is equivalent to gles2. Unknown/unavailable values
+   * fall back to the soft path. */
+  {
+    const char* be = getenv("MYUI_GPU_BACKEND");
+    my_gpu_backend_t backend = MY_GPU_AUTO;
+    if (be == NULL && getenv("MYUI_DEMO_GLES") != NULL) {
+      be = "gles2";
+    }
+    if (be != NULL) {
+      if (strcmp(be, "soft") == 0) {
+        backend = MY_GPU_SOFT;
+      } else if (strcmp(be, "gles2") == 0) {
+        backend = MY_GPU_GLES2;
+      } else if (strcmp(be, "opengl") == 0) {
+        backend = MY_GPU_OPENGL;
+      } else if (strcmp(be, "vulkan") == 0) {
+        backend = MY_GPU_VULKAN;
+      }
+      if (my_window_enable_gpu(app.win, backend) == MY_RET_OK) {
+        printf("demo_widgets: GPU backend '%s' enabled\n", be);
+      } else {
+        fprintf(stderr, "demo_widgets: backend '%s' unavailable, soft path\n",
+                be);
+      }
     }
   }
 #endif

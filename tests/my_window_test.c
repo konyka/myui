@@ -163,8 +163,34 @@ static void test_pointer_event_reaches_button(void) {
   my_pal_destroy(pal);
 }
 
-static void test_app_run_starved_loop_returns(void) {
+/* M25a: unified GPU backend selection on a GL-less port (dummy) */
+static void test_window_enable_gpu_backends(void) {
   my_pal_t* pal = my_pal_dummy_create(NULL);
+  my_window_t* win = make_window(pal, 80, 60);
+
+  TEST_ASSERT_EQ_INT(my_window_enable_gpu(NULL, MY_GPU_AUTO),
+                     MY_RET_INVALID_PARAMS);
+  TEST_ASSERT_EQ_INT(my_window_enable_gpu(win, MY_GPU_VULKAN),
+                     MY_RET_NOT_SUPPORTED);
+  /* dummy port has no GL mount: both real backends are NOT_SUPPORTED */
+  TEST_ASSERT_EQ_INT(my_window_enable_gpu(win, MY_GPU_GLES2),
+                     MY_RET_NOT_SUPPORTED);
+  TEST_ASSERT_EQ_INT(my_window_enable_gpu(win, MY_GPU_OPENGL),
+                     MY_RET_NOT_SUPPORTED);
+  /* legacy API is the GLES2 alias */
+  TEST_ASSERT_EQ_INT(my_window_enable_gl(win), MY_RET_NOT_SUPPORTED);
+  /* AUTO tries the backends, then stays on the soft path (still OK) */
+  TEST_ASSERT_EQ_INT(my_window_enable_gpu(win, MY_GPU_AUTO), MY_RET_OK);
+  TEST_ASSERT(win->gl == NULL);
+  /* SOFT is always available and idempotent */
+  TEST_ASSERT_EQ_INT(my_window_enable_gpu(win, MY_GPU_SOFT), MY_RET_OK);
+  TEST_ASSERT(win->gl == NULL);
+
+  my_widget_unref(my_window_widget(win));
+  my_pal_destroy(pal);
+}
+
+static void test_app_run_starved_loop_returns(void) {  my_pal_t* pal = my_pal_dummy_create(NULL);
   /* dummy loop starves immediately: my_app_run must return cleanly */
   TEST_ASSERT_EQ_INT(my_app_run(pal, NULL, NULL), MY_RET_INVALID_PARAMS);
   my_pal_destroy(pal);
@@ -208,5 +234,6 @@ MYTEST_MAIN_BEGIN()
   MYTEST_RUN(test_manager_routes_quit_event);
   MYTEST_RUN(test_pointer_event_reaches_button);
   MYTEST_RUN(test_app_run_starved_loop_returns);
+  MYTEST_RUN(test_window_enable_gpu_backends);
   MYTEST_RUN(test_no_leak_with_debug_allocator);
 MYTEST_MAIN_END()

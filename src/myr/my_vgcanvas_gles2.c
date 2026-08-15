@@ -23,7 +23,6 @@ static const char* VS_SRC =
     "}\n";
 
 static const char* FS_SRC =
-    "precision mediump float;\n"
     "uniform vec4 u_color;\n"
     "void main(void) { gl_FragColor = u_color; }\n";
 
@@ -39,13 +38,11 @@ static const char* VS_TEXT_SRC =
     "}\n";
 
 static const char* FS_IMG_SRC =
-    "precision mediump float;\n"
     "uniform sampler2D u_tex;\n"
     "varying vec2 v_uv;\n"
     "void main(void) { gl_FragColor = texture2D(u_tex, v_uv); }\n";
 
 static const char* FS_TEXT_SRC =
-    "precision mediump float;\n"
     "uniform vec4 u_color;\n"
     "uniform sampler2D u_tex;\n"
     "varying vec2 v_uv;\n"
@@ -126,6 +123,35 @@ typedef struct my_vgcanvas_gles2_t {
   float* verts; /* growable interleaved xy buffer */
   size_t vert_cap; /* in floats */
 } my_vgcanvas_gles2_t;
+
+/**
+ * @brief create_program with the GL table's shader headers applied
+ * (M25a): the bodies above are API-neutral; the header seam adapts them
+ * (ES2 prepends the precision line, desktop GL "#version 120"). Bodies
+ * are compile-time constants that always fit the buffers.
+ */
+static uint32_t gles_make_program(my_vgcanvas_gles2_t* s, const char* vs_body,
+                                  const char* fs_body) {
+  char vs[1024];
+  char fs[1024];
+  size_t vh =
+      s->gl.shader_header_vs != NULL ? strlen(s->gl.shader_header_vs) : 0;
+  size_t fh =
+      s->gl.shader_header_fs != NULL ? strlen(s->gl.shader_header_fs) : 0;
+  if (vh + strlen(vs_body) >= sizeof(vs) ||
+      fh + strlen(fs_body) >= sizeof(fs)) {
+    return 0; /* defensive: the built-in sources always fit */
+  }
+  if (vh > 0) {
+    memcpy(vs, s->gl.shader_header_vs, vh);
+  }
+  strcpy(vs + vh, vs_body);
+  if (fh > 0) {
+    memcpy(fs, s->gl.shader_header_fs, fh);
+  }
+  strcpy(fs + fh, fs_body);
+  return s->gl.create_program(s->gl.ctx, vs, fs);
+}
 
 /* ---------------- helpers ---------------- */
 
@@ -667,7 +693,7 @@ static my_ret_t gles_draw_text(my_vgcanvas_t* vg, const char* text, float x,
   }
   if (s->text_program == 0) {
     s->text_program =
-        s->gl.create_program(s->gl.ctx, VS_TEXT_SRC, FS_TEXT_SRC);
+        gles_make_program(s, VS_TEXT_SRC, FS_TEXT_SRC);
     if (s->text_program == 0) {
       return MY_RET_FAIL;
     }
@@ -766,7 +792,7 @@ static my_ret_t gles_draw_image(my_vgcanvas_t* vg, const uint8_t* rgba,
     }
   }
   if (s->img_program == 0) {
-    s->img_program = s->gl.create_program(s->gl.ctx, VS_TEXT_SRC, FS_IMG_SRC);
+    s->img_program = gles_make_program(s, VS_TEXT_SRC, FS_IMG_SRC);
     if (s->img_program == 0) {
       return MY_RET_FAIL;
     }
@@ -884,7 +910,7 @@ my_vgcanvas_t* my_vgcanvas_gles2_create_with_gl(const my_allocator_t* allocator,
   s->gl = *gl;
   s->fb_w = width;
   s->fb_h = height;
-  s->program = gl->create_program(gl->ctx, VS_SRC, FS_SRC);
+  s->program = gles_make_program(s, VS_SRC, FS_SRC);
   if (s->program == 0) {
     my_mem_free(allocator, s);
     return NULL;

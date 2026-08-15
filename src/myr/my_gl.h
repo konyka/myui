@@ -51,6 +51,14 @@ typedef struct my_gl_t {
    */
   void (*set_multisample)(void* ctx, bool on);
   void* ctx;
+  /**
+   * @brief Shader source prefix for the backend's programs (M25a): when
+   * non-NULL the vgcanvas prepends it to the vertex/fragment shader
+   * bodies it passes to create_program. ES2: fs = "precision mediump
+   * float;\n", vs = NULL; desktop GL: both "#version 120\n".
+   */
+  const char* shader_header_vs;
+  const char* shader_header_fs;
 } my_gl_t;
 
 /**

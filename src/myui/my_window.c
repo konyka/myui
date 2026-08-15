@@ -7,6 +7,7 @@
 #include <string.h>
 
 #include "myc/my_str.h"
+#include "myr/my_gl_desktop.h"
 #include "myr/my_vgcanvas_gles2.h"
 #include "myr/my_vgcanvas_soft.h"
 #include "myui/my_animator.h"
@@ -307,17 +308,21 @@ void my_window_set_vgcanvas(my_window_t* win, my_vgcanvas_t* vg) {
   win->vg_owned = false;
 }
 
-my_ret_t my_window_enable_gl(my_window_t* win) {
+/** @brief Shared GLES2/OPENGL enable path (M25a): mount the PAL GL
+ * context for `api` and switch the vgcanvas to the gles2 backend driven
+ * by `gl_table` (NULL table = the backend was stubbed at build time). */
+static my_ret_t window_enable_gpu_gl(my_window_t* win, int api,
+                                     const my_gl_t* gl_table) {
   my_pal_gl_t* gl;
   my_vgcanvas_t* vg;
   int32_t w = 0, h = 0;
-  if (win == NULL) {
-    return MY_RET_INVALID_PARAMS;
-  }
   if (win->gl != NULL) {
     return MY_RET_OK; /* already enabled */
   }
-  gl = my_pal_window_gl_enable(win->pal_window);
+  if (gl_table == NULL) {
+    return MY_RET_NOT_SUPPORTED; /* backend not built in */
+  }
+  gl = my_pal_window_gl_enable_api(win->pal_window, api);
   if (gl == NULL) {
     return MY_RET_NOT_SUPPORTED;
   }
@@ -326,7 +331,7 @@ my_ret_t my_window_enable_gl(my_window_t* win) {
     return MY_RET_FAIL;
   }
   my_pal_gl_get_size(gl, &w, &h);
-  vg = my_vgcanvas_gles2_create(win->allocator, w, h);
+  vg = my_vgcanvas_gles2_create_with_gl(win->allocator, w, h, gl_table);
   if (vg == NULL) {
     my_pal_gl_destroy(gl);
     return MY_RET_FAIL;
@@ -345,6 +350,61 @@ my_ret_t my_window_enable_gl(my_window_t* win) {
     my_vgcanvas_set_font(win->vg, win->font, win->font_size);
   }
   return MY_RET_OK;
+}
+
+/** @brief Tear down any GL mount and return to the soft rasterizer. */
+static my_ret_t window_enable_gpu_soft(my_window_t* win) {
+  if (win->gl != NULL) {
+    if (win->gl_owned) {
+      my_pal_gl_destroy(win->gl);
+    }
+    win->gl = NULL;
+    win->gl_owned = false;
+  }
+  if (win->vg_owned) {
+    my_vgcanvas_destroy(win->vg);
+    win->vg = NULL; /* lazily recreated soft by window_ensure_vg */
+    win->vg_owned = false;
+  }
+  /* an injected (not owned) vgcanvas — my_window_set_vgcanvas test hook —
+   * is kept as-is */
+  return MY_RET_OK;
+}
+
+my_ret_t my_window_enable_gpu(my_window_t* win, my_gpu_backend_t backend) {
+  if (win == NULL) {
+    return MY_RET_INVALID_PARAMS;
+  }
+  switch (backend) {
+    case MY_GPU_SOFT:
+      return window_enable_gpu_soft(win);
+    case MY_GPU_GLES2:
+      return window_enable_gpu_gl(win, MY_PAL_GL_API_GLES2,
+                                  my_gl_real_default());
+    case MY_GPU_OPENGL:
+      return window_enable_gpu_gl(win, MY_PAL_GL_API_OPENGL,
+                                  my_gl_desktop_default());
+    case MY_GPU_VULKAN:
+      return MY_RET_NOT_SUPPORTED; /* M25b */
+    case MY_GPU_AUTO:
+    default:
+      /* priority: GLES2 (most mature) -> OPENGL -> VULKAN; all failed =
+       * stay on the soft path, which is always OK (documented) */
+      if (my_window_enable_gpu(win, MY_GPU_GLES2) == MY_RET_OK) {
+        return MY_RET_OK;
+      }
+      if (my_window_enable_gpu(win, MY_GPU_OPENGL) == MY_RET_OK) {
+        return MY_RET_OK;
+      }
+      return MY_RET_OK;
+  }
+}
+
+my_ret_t my_window_enable_gl(my_window_t* win) {
+  if (win == NULL) {
+    return MY_RET_INVALID_PARAMS;
+  }
+  return my_window_enable_gpu(win, MY_GPU_GLES2);
 }
 
 void my_window_set_theme(my_window_t* win, my_theme_t* theme,
