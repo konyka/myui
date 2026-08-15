@@ -11,13 +11,12 @@
 
 static void checkbox_on_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
   my_checkbox_t* c = (my_checkbox_t*)widget;
-  my_widget_state_t state =
-      widget->enable ? MY_STATE_NORMAL : MY_STATE_DISABLED;
-  uint32_t bg = my_widget_style_get_color(widget, state, "bg_color",
+  my_widget_state_t state = my_widget_current_state(widget, c->pressed);
+  uint32_t bg = my_widget_style_get_color(widget, state, MY_STYLE_BG_COLOR,
                                           0xFFFFFFFFu);
-  uint32_t border = my_widget_style_get_color(widget, state, "border_color",
+  uint32_t border = my_widget_style_get_color(widget, state, MY_STYLE_BORDER_COLOR,
                                               0x9E9E9EFFu);
-  uint32_t fg = my_widget_style_get_color(widget, state, "fg_color",
+  uint32_t fg = my_widget_style_get_color(widget, state, MY_STYLE_FG_COLOR,
                                           0x212121FFu);
   int32_t by = (widget->rect.h - CHECK_BOX_SIZE) / 2;
   float bx = 0, bw = (float)CHECK_BOX_SIZE;

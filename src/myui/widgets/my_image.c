@@ -106,7 +106,7 @@ static my_ret_t image_on_paint_blit(my_widget_t* widget, my_vgcanvas_t* vg,
                                     const cached_image_t* img, int32_t dx,
                                     int32_t dy, int32_t dw, int32_t dh) {
   my_image_t* im = (my_image_t*)widget;
-  uint32_t bg = my_widget_style_get_color(widget, MY_STATE_NORMAL, "bg_color",
+  uint32_t bg = my_widget_style_get_color(widget, MY_STATE_NORMAL, MY_STYLE_BG_COLOR,
                                           0x00000000u);
   my_color_t bgc = my_color_from_rgba32(bg);
   my_vgcanvas_soft_set_scale_filter(vg, im->scale_filter);
@@ -118,7 +118,7 @@ static my_ret_t image_on_paint_blit(my_widget_t* widget, my_vgcanvas_t* vg,
 
 static void image_on_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
   my_image_t* im = (my_image_t*)widget;
-  uint32_t bg = my_widget_style_get_color(widget, MY_STATE_NORMAL, "bg_color",
+  uint32_t bg = my_widget_style_get_color(widget, MY_STATE_NORMAL, MY_STYLE_BG_COLOR,
                                           0x00000000u);
   cached_image_t img;
   int32_t dw, dh, dx, dy;

@@ -21,7 +21,7 @@ static void csd_bar_layout(my_widget_t* widget);
 
 static void window_on_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
   my_window_t* win = (my_window_t*)widget;
-  uint32_t bg = my_widget_style_get_color(widget, MY_STATE_NORMAL, "bg_color",
+  uint32_t bg = my_widget_style_get_color(widget, MY_STATE_NORMAL, MY_STYLE_BG_COLOR,
                                           my_color_to_rgba32(win->bg_color));
   my_vgcanvas_set_fill_color(vg, my_color_from_rgba32(bg));
   my_vgcanvas_fill_rect(vg, &(my_rectf_t){0, 0, (float)widget->rect.w,
@@ -438,11 +438,11 @@ void my_window_paint(my_window_t* win) {
 /** @brief Paint the floating tip (text stored in its own tooltip field). */
 static void tip_on_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
   uint32_t bg = my_widget_style_get_color(widget, MY_STATE_NORMAL,
-                                          "bg_color", 0x323232F2u);
+                                          MY_STYLE_BG_COLOR, 0x323232F2u);
   uint32_t fg = my_widget_style_get_color(widget, MY_STATE_NORMAL,
-                                          "fg_color", 0xF5F5F5FFu);
+                                          MY_STYLE_FG_COLOR, 0xF5F5F5FFu);
   uint32_t border = my_widget_style_get_color(widget, MY_STATE_NORMAL,
-                                              "border_color", 0x616161FFu);
+                                              MY_STYLE_BORDER_COLOR, 0x616161FFu);
   my_vgcanvas_set_fill_color(vg, my_color_from_rgba32(bg));
   my_vgcanvas_fill_rect(vg, &(my_rectf_t){0, 0, (float)widget->rect.w,
                                           (float)widget->rect.h});

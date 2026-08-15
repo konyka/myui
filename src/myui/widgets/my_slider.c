@@ -60,18 +60,20 @@ static void slider_set_from_x(my_widget_t* widget, int32_t global_x) {
 
 static void slider_on_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
   my_slider_t* s = (my_slider_t*)widget;
-  my_widget_state_t state =
-      widget->enable ? MY_STATE_NORMAL : MY_STATE_DISABLED;
-  uint32_t track_c = my_widget_style_get_color(widget, state, "bg_color",
-                                               0xD0D0D0FFu);
-  uint32_t fill_c = my_widget_style_get_color(widget, state, "fg_color",
-                                              0x3F51B5FFu);
-  uint32_t knob_c = my_widget_style_get_color(widget, state, "border_color",
-                                              0xFFFFFF00u);
+  my_widget_state_t state = my_widget_current_state(widget, s->dragging);
+  const my_value_t* knob_v = my_widget_style_get(widget, state,
+                                                 MY_STYLE_BORDER_COLOR);
+  uint32_t track_c = my_widget_style_get_color(widget, state,
+                                               MY_STYLE_BG_COLOR, 0xD0D0D0FFu);
+  uint32_t fill_c = my_widget_style_get_color(widget, state,
+                                              MY_STYLE_FG_COLOR, 0x3F51B5FFu);
   float cy = (float)widget->rect.h / 2.0f;
   float frac = (s->max > s->min) ? (s->value - s->min) / (s->max - s->min) : 0.0f;
   float knob_x = frac * (float)(widget->rect.w - SLIDER_KNOB);
-  uint32_t knob_rgb = knob_c == 0xFFFFFF00u ? 0xFFFFFFFFu : knob_c;
+  /* M24b: knob default is plain white, an explicit style overrides it
+   * (replaces the old 0xFFFFFF00 sentinel hack; same paint output) */
+  uint32_t knob_rgb = knob_v != NULL ? my_value_get_uint32(knob_v)
+                                     : 0xFFFFFFFFu;
 
   my_vgcanvas_set_fill_color(vg, my_color_from_rgba32(track_c));
   my_vgcanvas_fill_rounded_rect(

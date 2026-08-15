@@ -8,9 +8,9 @@
 
 static void label_on_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
   my_label_t* label = (my_label_t*)widget;
-  uint32_t bg = my_widget_style_get_color(widget, MY_STATE_NORMAL, "bg_color",
+  uint32_t bg = my_widget_style_get_color(widget, MY_STATE_NORMAL, MY_STYLE_BG_COLOR,
                                           my_color_to_rgba32(label->bg));
-  uint32_t fg = my_widget_style_get_color(widget, MY_STATE_NORMAL, "fg_color",
+  uint32_t fg = my_widget_style_get_color(widget, MY_STATE_NORMAL, MY_STYLE_FG_COLOR,
                                           my_color_to_rgba32(label->fg));
   my_vgcanvas_set_fill_color(vg, my_color_from_rgba32(bg));
   my_vgcanvas_fill_rect(vg, &(my_rectf_t){0, 0, (float)widget->rect.w,
@@ -18,7 +18,7 @@ static void label_on_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
   if (label->text != NULL) {
     int32_t tw = 0, th = 0;
     int32_t font_size =
-        my_widget_style_get_int(widget, MY_STATE_NORMAL, "font_size", 16);
+        my_widget_style_get_int(widget, MY_STATE_NORMAL, MY_STYLE_FONT_SIZE, 16);
     float tx = 0.0f;
     my_vgcanvas_set_font(vg, NULL, font_size);
     if (my_vgcanvas_measure_text(vg, label->text, &tw, &th) == MY_RET_OK) {

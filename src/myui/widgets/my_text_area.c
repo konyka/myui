@@ -1080,13 +1080,15 @@ static my_ret_t ta_on_event(my_widget_t* widget, const my_event_t* event) {
 
 static void ta_on_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
   my_text_area_t* ta = (my_text_area_t*)widget;
+  /* M24b: deliberately NOT my_widget_current_state(): the focused border
+   * borrows the HOVER style slot (same convention as my_edit). */
   uint32_t bg = my_widget_style_get_color(
-      widget, widget->enable ? MY_STATE_NORMAL : MY_STATE_DISABLED, "bg_color",
+      widget, widget->enable ? MY_STATE_NORMAL : MY_STATE_DISABLED, MY_STYLE_BG_COLOR,
       0xFFFFFFFFu);
   uint32_t border = my_widget_style_get_color(
-      widget, ta->focused ? MY_STATE_HOVER : MY_STATE_NORMAL, "border_color",
+      widget, ta->focused ? MY_STATE_HOVER : MY_STATE_NORMAL, MY_STYLE_BORDER_COLOR,
       0x9E9E9EFFu);
-  uint32_t fg = my_widget_style_get_color(widget, MY_STATE_NORMAL, "fg_color",
+  uint32_t fg = my_widget_style_get_color(widget, MY_STATE_NORMAL, MY_STYLE_FG_COLOR,
                                           0x212121FFu);
   int32_t line_h = ta->font != NULL
                        ? my_font_line_height(ta->font, ta->font_size)

@@ -185,6 +185,20 @@ my_ret_t my_widget_set_visible(my_widget_t* widget, bool visible) {
   return MY_RET_OK;
 }
 
+my_widget_state_t my_widget_current_state(const my_widget_t* widget,
+                                          bool pressed) {
+  if (widget == NULL || !widget->enable) {
+    return MY_STATE_DISABLED;
+  }
+  if (pressed) {
+    return MY_STATE_PRESSED;
+  }
+  if (widget->hovered) {
+    return MY_STATE_HOVER;
+  }
+  return MY_STATE_NORMAL;
+}
+
 my_ret_t my_widget_set_name(my_widget_t* widget, const char* name) {
   my_object_t* obj = (my_object_t*)widget;
   char* copy;

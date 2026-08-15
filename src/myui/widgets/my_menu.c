@@ -52,10 +52,10 @@ typedef struct menu_item_widget_t {
 static void menu_item_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
   menu_item_widget_t* iw = (menu_item_widget_t*)widget;
   uint32_t fg = my_widget_style_get_color(widget, MY_STATE_NORMAL,
-                                          "fg_color", 0x212121FFu);
+                                          MY_STYLE_FG_COLOR, 0x212121FFu);
   uint32_t bg = my_widget_style_get_color(
       widget, iw->index == iw->menu->active ? MY_STATE_HOVER : MY_STATE_NORMAL,
-      "bg_color", 0xF5F5F5FFu);
+      MY_STYLE_BG_COLOR, 0xF5F5F5FFu);
   my_vgcanvas_set_fill_color(vg, my_color_from_rgba32(bg));
   my_vgcanvas_fill_rect(vg, &(my_rectf_t){0, 0, (float)widget->rect.w,
                                           (float)widget->rect.h});
@@ -125,9 +125,9 @@ static void menu_overlay_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
 
 static void menu_box_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
   uint32_t bg = my_widget_style_get_color(widget, MY_STATE_NORMAL,
-                                          "bg_color", 0xFAFAFAFFu);
+                                          MY_STYLE_BG_COLOR, 0xFAFAFAFFu);
   uint32_t border = my_widget_style_get_color(widget, MY_STATE_NORMAL,
-                                              "border_color", 0x9E9E9EFFu);
+                                              MY_STYLE_BORDER_COLOR, 0x9E9E9EFFu);
   my_vgcanvas_set_fill_color(vg, my_color_from_rgba32(bg));
   my_vgcanvas_fill_rect(vg, &(my_rectf_t){0, 0, (float)widget->rect.w,
                                           (float)widget->rect.h});

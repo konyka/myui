@@ -666,14 +666,17 @@ static void edit_on_blur(void* ctx, const char* event, void* data) {
 
 static void edit_on_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
   my_edit_t* e = (my_edit_t*)widget;
+  /* M24b: deliberately NOT my_widget_current_state(): the focused edit
+   * borrows the HOVER style slot (documented in my_edit.h); pointer hover
+   * plays no role here. */
   my_widget_state_t state =
       widget->enable ? (e->focused ? MY_STATE_HOVER : MY_STATE_NORMAL)
                      : MY_STATE_DISABLED;
-  uint32_t bg = my_widget_style_get_color(widget, state, "bg_color",
+  uint32_t bg = my_widget_style_get_color(widget, state, MY_STYLE_BG_COLOR,
                                           0xFFFFFFFFu);
-  uint32_t border = my_widget_style_get_color(widget, state, "border_color",
+  uint32_t border = my_widget_style_get_color(widget, state, MY_STYLE_BORDER_COLOR,
                                               0x9E9E9EFFu);
-  uint32_t fg = my_widget_style_get_color(widget, state, "fg_color",
+  uint32_t fg = my_widget_style_get_color(widget, state, MY_STYLE_FG_COLOR,
                                           0x212121FFu);
   const char* shown = e->password ? e->masked : e->text;
   int32_t text_y;

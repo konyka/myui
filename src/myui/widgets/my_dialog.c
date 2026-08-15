@@ -25,7 +25,7 @@ typedef struct dialog_state_t {
 /* content container: paints the dialog background */
 static void dialog_content_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
   uint32_t bg = my_widget_style_get_color(widget, MY_STATE_NORMAL,
-                                          "bg_color", 0xF5F5F5FFu);
+                                          MY_STYLE_BG_COLOR, 0xF5F5F5FFu);
   my_vgcanvas_set_fill_color(vg, my_color_from_rgba32(bg));
   my_vgcanvas_fill_rect(vg, &(my_rectf_t){0, 0, (float)widget->rect.w,
                                           (float)widget->rect.h});

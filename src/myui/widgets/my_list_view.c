@@ -240,7 +240,7 @@ my_ret_t my_list_view_set_scroll_bar(my_widget_t* list_view,
 
 static void lv_on_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
   my_list_view_t* lv = (my_list_view_t*)widget;
-  uint32_t bg = my_widget_style_get_color(widget, MY_STATE_NORMAL, "bg_color",
+  uint32_t bg = my_widget_style_get_color(widget, MY_STATE_NORMAL, MY_STYLE_BG_COLOR,
                                           0xFFFFFFFFu);
   int32_t max = lv_max_offset(lv);
   my_vgcanvas_set_fill_color(vg, my_color_from_rgba32(bg));

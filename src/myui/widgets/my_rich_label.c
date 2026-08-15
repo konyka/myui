@@ -38,7 +38,7 @@ static int32_t seg_width(my_vgcanvas_t* vg, const rich_seg_t* s, int32_t* out_h)
 
 static void rich_label_on_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
   my_rich_label_t* rl = (my_rich_label_t*)widget;
-  uint32_t bg = my_widget_style_get_color(widget, MY_STATE_NORMAL, "bg_color",
+  uint32_t bg = my_widget_style_get_color(widget, MY_STATE_NORMAL, MY_STYLE_BG_COLOR,
                                           0x00000000u);
   size_t i, n;
   float x = 0.0f;

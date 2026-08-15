@@ -12,6 +12,7 @@
 #define MY_STYLE_H
 
 #include "myc/my_value.h"
+#include "myui/my_style_keys.h"
 
 /** @brief Widget visual states (style slots). */
 typedef enum my_widget_state_t {

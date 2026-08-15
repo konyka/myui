@@ -4,6 +4,8 @@
  */
 #include "myui/my_widget.h"
 
+#include "myui/my_style_keys.h"
+
 #include "mytest.h"
 #include "rec_vgcanvas.h"
 
@@ -185,6 +187,39 @@ static void test_null_params(void) {
   my_widget_unref(w);
 }
 
+/* M24b: enable/hover/pressed -> state derivation matrix */
+static void test_current_state_derivation(void) {
+  my_widget_t* w = make("s", 0, 0, 10, 10);
+  /* disabled wins over everything */
+  w->enable = false;
+  w->hovered = false;
+  TEST_ASSERT_EQ_INT(my_widget_current_state(w, false), MY_STATE_DISABLED);
+  TEST_ASSERT_EQ_INT(my_widget_current_state(w, true), MY_STATE_DISABLED);
+  w->hovered = true;
+  TEST_ASSERT_EQ_INT(my_widget_current_state(w, false), MY_STATE_DISABLED);
+  TEST_ASSERT_EQ_INT(my_widget_current_state(w, true), MY_STATE_DISABLED);
+  /* pressed wins over hover */
+  w->enable = true;
+  w->hovered = true;
+  TEST_ASSERT_EQ_INT(my_widget_current_state(w, true), MY_STATE_PRESSED);
+  TEST_ASSERT_EQ_INT(my_widget_current_state(w, false), MY_STATE_HOVER);
+  /* plain */
+  w->hovered = false;
+  TEST_ASSERT_EQ_INT(my_widget_current_state(w, true), MY_STATE_PRESSED);
+  TEST_ASSERT_EQ_INT(my_widget_current_state(w, false), MY_STATE_NORMAL);
+  my_widget_unref(w);
+}
+
+/* M24b: style key constants must keep their literal values (ABI) */
+static void test_style_key_constants(void) {
+  TEST_ASSERT_EQ_STR(MY_STYLE_BG_COLOR, "bg_color");
+  TEST_ASSERT_EQ_STR(MY_STYLE_FG_COLOR, "fg_color");
+  TEST_ASSERT_EQ_STR(MY_STYLE_BORDER_COLOR, "border_color");
+  TEST_ASSERT_EQ_STR(MY_STYLE_ROUND_RADIUS, "round_radius");
+  TEST_ASSERT_EQ_STR(MY_STYLE_FONT_SIZE, "font_size");
+  TEST_ASSERT_EQ_STR(MY_STYLE_BORDER_WIDTH, "border_width");
+}
+
 static void test_no_leak_with_debug_allocator(void) {
   my_allocator_t* dbg = my_allocator_debug_create(NULL);
   my_widget_t* root = my_widget_create(dbg, "root");
@@ -217,5 +252,7 @@ MYTEST_MAIN_BEGIN()
   MYTEST_RUN(test_invalidate_bubbles_to_dirty_sink);
   MYTEST_RUN(test_widget_on_off);
   MYTEST_RUN(test_null_params);
+  MYTEST_RUN(test_current_state_derivation);
+  MYTEST_RUN(test_style_key_constants);
   MYTEST_RUN(test_no_leak_with_debug_allocator);
 MYTEST_MAIN_END()

@@ -190,7 +190,7 @@ static void node_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
   }
   /* body */
   uint32_t body = my_widget_style_get_color(widget, MY_STATE_NORMAL,
-                                            "bg_color", 0x3A3A3AFFu);
+                                            MY_STYLE_BG_COLOR, 0x3A3A3AFFu);
   my_vgcanvas_set_fill_color(vg, my_color_from_rgba32(body));
   my_vgcanvas_fill_rounded_rect(vg, &(my_rectf_t){0, 0, (float)widget->rect.w,
                                                   (float)widget->rect.h},
@@ -202,7 +202,7 @@ static void node_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
      * very end of node_paint so it sits above the header fill and the
      * sockets instead of being covered by them) */
     uint32_t border = my_widget_part_color(
-        widget, "node", NULL, MY_STATE_NORMAL, "border_color", 0x1E1E1EFFu);
+        widget, "node", NULL, MY_STATE_NORMAL, MY_STYLE_BORDER_COLOR, 0x1E1E1EFFu);
     my_vgcanvas_set_stroke_color(vg, my_color_from_rgba32(border));
     my_vgcanvas_set_line_width(vg, 1);
     my_vgcanvas_stroke(vg);
@@ -211,7 +211,7 @@ static void node_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
    * node's style_class; .header is a CLASS selector) */
   {
     uint32_t hc = my_widget_part_color(widget, NULL, "header",
-                                       MY_STATE_NORMAL, "bg_color",
+                                       MY_STATE_NORMAL, MY_STYLE_BG_COLOR,
                                        0x525252FFu);
     my_vgcanvas_set_fill_color(vg, my_color_from_rgba32(hc));
     my_vgcanvas_fill_rounded_rect(vg, &(my_rectf_t){0, 0, (float)widget->rect.w,
@@ -221,8 +221,14 @@ static void node_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
                                             (float)widget->rect.w,
                                             MY_NODE_HEADER_H / 2});
     if (n->title != NULL) {
+      /* M24b: was a hardcoded white; now theme-overridable via the
+       * header part (e.g. `node.<category> .header { color: ... }`),
+       * same fallback value -> identical pixels by default */
+      uint32_t tc = my_widget_part_color(widget, NULL, "header",
+                                         MY_STATE_NORMAL, MY_STYLE_FG_COLOR,
+                                         0xFFFFFFFFu);
       my_vgcanvas_set_font(vg, NULL, 13);
-      my_vgcanvas_set_fill_color(vg, my_color_from_rgba32(0xFFFFFFFFu));
+      my_vgcanvas_set_fill_color(vg, my_color_from_rgba32(tc));
       my_vgcanvas_draw_text(vg, n->title, 8, 5);
     }
   }
@@ -243,23 +249,34 @@ static void node_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
     cy = MY_NODE_HEADER_H + (int32_t)slot * MY_NODE_ROW_H + MY_NODE_ROW_H / 2;
     cx = s->dir == MY_SOCKET_IN ? 0 : widget->rect.w;
     {
+      const char* scls = s->dir == MY_SOCKET_IN ? "input" : "output";
       uint32_t sc = my_widget_part_color(
-          widget, "node_socket", s->dir == MY_SOCKET_IN ? "input" : "output",
-          MY_STATE_NORMAL, "bg_color", s->color);
+          widget, "node_socket", scls,
+          MY_STATE_NORMAL, MY_STYLE_BG_COLOR, s->color);
+      /* M24b: socket ring was a hardcoded 0x1E1E1EFF; now theme-overridable
+       * (`node_socket.input/.output { border-color: ... }`), same fallback */
+      uint32_t ring = my_widget_part_color(widget, "node_socket", scls,
+                                           MY_STATE_NORMAL,
+                                           MY_STYLE_BORDER_COLOR, 0x1E1E1EFFu);
       my_vgcanvas_set_fill_color(vg, my_color_from_rgba32(sc));
       my_vgcanvas_begin_path(vg);
       my_node_path_circle(vg, (float)cx, (float)cy, MY_NODE_SOCKET_R);
       my_vgcanvas_fill(vg);
       my_vgcanvas_begin_path(vg);
       my_node_path_circle(vg, (float)cx, (float)cy, MY_NODE_SOCKET_R);
-      my_vgcanvas_set_stroke_color(vg, my_color_from_rgba32(0x1E1E1EFFu));
+      my_vgcanvas_set_stroke_color(vg, my_color_from_rgba32(ring));
       my_vgcanvas_set_line_width(vg, 1);
       my_vgcanvas_stroke(vg);
     }
     /* socket name */
     if (s->name != NULL) {
+      /* M24b: was a hardcoded 0xCCCCCCFF; now theme-overridable
+       * (`node_socket.input/.output { color: ... }`), same fallback */
+      uint32_t nc = my_widget_part_color(
+          widget, "node_socket", s->dir == MY_SOCKET_IN ? "input" : "output",
+          MY_STATE_NORMAL, MY_STYLE_FG_COLOR, 0xCCCCCCFFu);
       my_vgcanvas_set_font(vg, NULL, 12);
-      my_vgcanvas_set_fill_color(vg, my_color_from_rgba32(0xCCCCCCFFu));
+      my_vgcanvas_set_fill_color(vg, my_color_from_rgba32(nc));
       if (s->dir == MY_SOCKET_IN) {
         my_vgcanvas_draw_text(vg, s->name, 10, (float)(cy - 6));
       } else {
@@ -277,7 +294,7 @@ static void node_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
    * the node's own transform — no cross-layer coordinate matching) */
   if (n->view != NULL && my_node_view_is_selected(n->view, widget)) {
     uint32_t sc = my_widget_part_color(widget, "node", "selected",
-                                       MY_STATE_NORMAL, "border_color",
+                                       MY_STATE_NORMAL, MY_STYLE_BORDER_COLOR,
                                        0xE0A030FFu);
     my_vgcanvas_set_stroke_color(vg, my_color_from_rgba32(sc));
     my_vgcanvas_set_line_width(vg, 2);

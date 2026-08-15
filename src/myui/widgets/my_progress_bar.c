@@ -6,9 +6,9 @@
 
 static void progress_on_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
   my_progress_bar_t* b = (my_progress_bar_t*)widget;
-  uint32_t bg = my_widget_style_get_color(widget, MY_STATE_NORMAL, "bg_color",
+  uint32_t bg = my_widget_style_get_color(widget, MY_STATE_NORMAL, MY_STYLE_BG_COLOR,
                                           0xE0E0E0FFu);
-  uint32_t fg = my_widget_style_get_color(widget, MY_STATE_NORMAL, "fg_color",
+  uint32_t fg = my_widget_style_get_color(widget, MY_STATE_NORMAL, MY_STYLE_FG_COLOR,
                                           0x4CAF50FFu);
   float frac = b->value / 100.0f;
   float r = (float)widget->rect.h / 2.0f;

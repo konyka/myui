@@ -81,9 +81,18 @@ static void test_button_paint_states(void) {
   my_widget_t* b = make_button(0, 0, 80, 30);
   my_button_t* btn = (my_button_t*)b;
   rec_vg_t rec;
+  my_value_t cv;
   rec_vg_init(&rec);
 
-  btn->color_normal = my_color_rgb(10, 20, 30);
+  /* M24b: the color_normal field is gone; inject the custom color via a
+   * local style override instead (pressed set too, since style lookups
+   * fall back to the normal slot) */
+  my_value_init(&cv, NULL);
+  my_value_set_uint32(&cv, 0x0A141EFFu);
+  my_widget_style_set(b, MY_STATE_NORMAL, MY_STYLE_BG_COLOR, &cv);
+  my_value_set_uint32(&cv, 0x9696A0FFu);
+  my_widget_style_set(b, MY_STATE_PRESSED, MY_STYLE_BG_COLOR, &cv);
+  my_value_reset(&cv);
   my_widget_paint(b, (my_vgcanvas_t*)&rec);
   TEST_ASSERT(rec_has(&rec, "set_fill #0a141e")); /* normal */
 

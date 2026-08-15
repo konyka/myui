@@ -15,14 +15,11 @@
 typedef struct my_button_t {
   my_widget_t base;
   char* text;                 /**< owned copy */
-  my_color_t color_normal;
-  my_color_t color_hover;
-  my_color_t color_pressed;
-  my_color_t color_disabled;
   bool pressed;               /**< pointer is down inside */
   uint64_t down_ms;           /**< press time (min display, M16) */
   uint32_t release_timer;     /**< pending delayed release (0 = none) */
-  /* hover comes from the base widget (dispatcher-maintained, M14a) */
+  /* hover comes from the base widget (dispatcher-maintained, M14a);
+   * fallback state colors are literals in button_state_color (M24b) */
 } my_button_t;
 
 /** @brief Create a button (NULL allocator = default, NULL text allowed). */

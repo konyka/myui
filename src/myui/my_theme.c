@@ -338,37 +338,37 @@ my_theme_t* my_theme_default_create(const my_allocator_t* allocator) {
   if (t == NULL) {
     return NULL;
   }
-  my_theme_set_color(t, "window", NULL, MY_STATE_NORMAL, "bg_color", 0xF5F5F5FF);
+  my_theme_set_color(t, "window", NULL, MY_STATE_NORMAL, MY_STYLE_BG_COLOR, 0xF5F5F5FF);
 
-  my_theme_set_color(t, "button", NULL, MY_STATE_NORMAL, "bg_color", 0xE0E0E0FF);
-  my_theme_set_color(t, "button", NULL, MY_STATE_HOVER, "bg_color", 0xEEEEEEFF);
-  my_theme_set_color(t, "button", NULL, MY_STATE_PRESSED, "bg_color", 0xBDBDBDFF);
-  my_theme_set_color(t, "button", NULL, MY_STATE_DISABLED, "bg_color", 0xCFCFCFFF);
-  my_theme_set_color(t, "button", NULL, MY_STATE_NORMAL, "border_color", 0x9E9E9EFF);
-  my_theme_set_color(t, "button", NULL, MY_STATE_NORMAL, "fg_color", 0x212121FF);
-  my_theme_set_int(t, "button", NULL, MY_STATE_NORMAL, "round_radius", 4);
+  my_theme_set_color(t, "button", NULL, MY_STATE_NORMAL, MY_STYLE_BG_COLOR, 0xE0E0E0FF);
+  my_theme_set_color(t, "button", NULL, MY_STATE_HOVER, MY_STYLE_BG_COLOR, 0xEEEEEEFF);
+  my_theme_set_color(t, "button", NULL, MY_STATE_PRESSED, MY_STYLE_BG_COLOR, 0xBDBDBDFF);
+  my_theme_set_color(t, "button", NULL, MY_STATE_DISABLED, MY_STYLE_BG_COLOR, 0xCFCFCFFF);
+  my_theme_set_color(t, "button", NULL, MY_STATE_NORMAL, MY_STYLE_BORDER_COLOR, 0x9E9E9EFF);
+  my_theme_set_color(t, "button", NULL, MY_STATE_NORMAL, MY_STYLE_FG_COLOR, 0x212121FF);
+  my_theme_set_int(t, "button", NULL, MY_STATE_NORMAL, MY_STYLE_ROUND_RADIUS, 4);
 
-  my_theme_set_color(t, "label", NULL, MY_STATE_NORMAL, "bg_color", 0xF5F5F5FF);
-  my_theme_set_color(t, "label", NULL, MY_STATE_NORMAL, "fg_color", 0x212121FF);
+  my_theme_set_color(t, "label", NULL, MY_STATE_NORMAL, MY_STYLE_BG_COLOR, 0xF5F5F5FF);
+  my_theme_set_color(t, "label", NULL, MY_STATE_NORMAL, MY_STYLE_FG_COLOR, 0x212121FF);
 
   /* composite widgets (M13c) */
-  my_theme_set_color(t, "dialog_content", NULL, MY_STATE_NORMAL, "bg_color",
+  my_theme_set_color(t, "dialog_content", NULL, MY_STATE_NORMAL, MY_STYLE_BG_COLOR,
                      0xF5F5F5FF);
-  my_theme_set_color(t, "menu_box", NULL, MY_STATE_NORMAL, "bg_color",
+  my_theme_set_color(t, "menu_box", NULL, MY_STATE_NORMAL, MY_STYLE_BG_COLOR,
                      0xFAFAFAFF);
-  my_theme_set_color(t, "menu_box", NULL, MY_STATE_NORMAL, "border_color",
+  my_theme_set_color(t, "menu_box", NULL, MY_STATE_NORMAL, MY_STYLE_BORDER_COLOR,
                      0x9E9E9EFF);
-  my_theme_set_color(t, "menu_item", NULL, MY_STATE_NORMAL, "bg_color",
+  my_theme_set_color(t, "menu_item", NULL, MY_STATE_NORMAL, MY_STYLE_BG_COLOR,
                      0xFAFAFAFF);
-  my_theme_set_color(t, "menu_item", NULL, MY_STATE_HOVER, "bg_color",
+  my_theme_set_color(t, "menu_item", NULL, MY_STATE_HOVER, MY_STYLE_BG_COLOR,
                      0xE3F2FDFF);
-  my_theme_set_color(t, "menu_item", NULL, MY_STATE_NORMAL, "fg_color",
+  my_theme_set_color(t, "menu_item", NULL, MY_STATE_NORMAL, MY_STYLE_FG_COLOR,
                      0x212121FF);
-  my_theme_set_color(t, "tooltip", NULL, MY_STATE_NORMAL, "bg_color",
+  my_theme_set_color(t, "tooltip", NULL, MY_STATE_NORMAL, MY_STYLE_BG_COLOR,
                      0x323232F2);
-  my_theme_set_color(t, "tooltip", NULL, MY_STATE_NORMAL, "fg_color",
+  my_theme_set_color(t, "tooltip", NULL, MY_STATE_NORMAL, MY_STYLE_FG_COLOR,
                      0xF5F5F5FF);
-  my_theme_set_color(t, "tooltip", NULL, MY_STATE_NORMAL, "border_color",
+  my_theme_set_color(t, "tooltip", NULL, MY_STATE_NORMAL, MY_STYLE_BORDER_COLOR,
                      0x616161FF);
   return t;
 }

@@ -408,10 +408,10 @@ typedef struct css_alias_t {
 } css_alias_t;
 
 static const css_alias_t KEY_ALIASES[] = {
-    {"background-color", "bg_color"}, {"background", "bg_color"},
-    {"color", "fg_color"},           {"border-color", "border_color"},
-    {"border-width", "border_width"}, {"border-radius", "round_radius"},
-    {"font-size", "font_size"},
+    {"background-color", MY_STYLE_BG_COLOR}, {"background", MY_STYLE_BG_COLOR},
+    {"color", MY_STYLE_FG_COLOR},           {"border-color", MY_STYLE_BORDER_COLOR},
+    {"border-width", MY_STYLE_BORDER_WIDTH}, {"border-radius", MY_STYLE_ROUND_RADIUS},
+    {"font-size", MY_STYLE_FONT_SIZE},
 };
 
 static void css_key_map(const char* key, char* out, size_t cap) {

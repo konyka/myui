@@ -138,6 +138,18 @@ my_widget_t* my_widget_get_child(my_widget_t* parent, size_t index);
 my_ret_t my_widget_set_rect(my_widget_t* widget, const my_rect_t* rect);
 my_ret_t my_widget_set_visible(my_widget_t* widget, bool visible);
 
+/**
+ * @brief Single point of the enable/hover/pressed -> style state
+ * derivation (M24b): !enable -> MY_STATE_DISABLED, else pressed ->
+ * MY_STATE_PRESSED, else hovered -> MY_STATE_HOVER, else MY_STATE_NORMAL.
+ * Each widget keeps owning its `pressed` flag (button press, slider or
+ * scroll_bar drag) and passes it in. Widgets whose state derivation
+ * deliberately differs (edit/text_area borrow the HOVER slot for the
+ * focused border) do NOT use this helper.
+ */
+my_widget_state_t my_widget_current_state(const my_widget_t* widget,
+                                          bool pressed);
+
 /** @brief Rename a widget (name is used by theme [name] selectors). */
 my_ret_t my_widget_set_name(my_widget_t* widget, const char* name);
 

@@ -116,12 +116,10 @@ static my_ret_t sb_on_event(my_widget_t* widget, const my_event_t* event) {
 
 static void sb_on_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
   my_scroll_bar_t* b = (my_scroll_bar_t*)widget;
-  my_widget_state_t state =
-      widget->enable ? (b->dragging ? MY_STATE_PRESSED : MY_STATE_NORMAL)
-                     : MY_STATE_DISABLED;
+  my_widget_state_t state = my_widget_current_state(widget, b->dragging);
   uint32_t track_c = my_widget_style_get_color(widget, MY_STATE_NORMAL,
-                                               "bg_color", 0xE8E8E8FFu);
-  uint32_t thumb_c = my_widget_style_get_color(widget, state, "fg_color",
+                                               MY_STYLE_BG_COLOR, 0xE8E8E8FFu);
+  uint32_t thumb_c = my_widget_style_get_color(widget, state, MY_STYLE_FG_COLOR,
                                                0x9E9E9EFFu);
   float ty = sb_thumb_y(b);
   float tl = sb_thumb_len(b);

@@ -602,7 +602,7 @@ static void nv_stroke_link(my_widget_t* widget, my_vgcanvas_t* vg, float x0,
                            float cy2, float x1, float y1,
                            const char* cls, uint32_t fallback) {
   uint32_t c = my_widget_part_color(widget, "node_link", cls,
-                                    MY_STATE_NORMAL, "fg_color", fallback);
+                                    MY_STATE_NORMAL, MY_STYLE_FG_COLOR, fallback);
   my_vgcanvas_set_stroke_color(vg, my_color_from_rgba32(c));
   my_vgcanvas_set_line_width(vg, 3);
   my_vgcanvas_begin_path(vg);
@@ -626,7 +626,7 @@ static void nv_stroke_link_rgba(my_vgcanvas_t* vg, float x0, float y0,
 static void nv_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
   my_node_view_t* v = (my_node_view_t*)widget;
   uint32_t bg = my_widget_style_get_color(widget, MY_STATE_NORMAL,
-                                          "bg_color", 0x282828FFu);
+                                          MY_STYLE_BG_COLOR, 0x282828FFu);
   size_t i, n;
   /* keep the overlay full-span HERE (view on_paint runs before the
    * children): my_widget_paint clips each child to its rect BEFORE its
@@ -706,7 +706,7 @@ static void nv_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
       }
     }
     c = my_widget_part_color(widget, "node_link", sel ? "selected" : NULL,
-                             MY_STATE_NORMAL, "fg_color", fb);
+                             MY_STATE_NORMAL, MY_STYLE_FG_COLOR, fb);
     if (v->flow_all || sel) {
       /* M20b: marching dashes (selected always flows; flow_all covers
        * everything) */
@@ -961,10 +961,10 @@ static void nv_overlay_paint(my_widget_t* ov, my_vgcanvas_t* vg) {
   if (v->banding && v->band_moved) {
     float sx0, sy0, sx1, sy1;
     uint32_t border = my_widget_part_color(w, "node_view", "rubber_band",
-                                           MY_STATE_NORMAL, "fg_color",
+                                           MY_STATE_NORMAL, MY_STYLE_FG_COLOR,
                                            0x4090E0FFu);
     uint32_t fill = my_widget_part_color(w, "node_view", "rubber_band",
-                                         MY_STATE_NORMAL, "bg_color",
+                                         MY_STATE_NORMAL, MY_STYLE_BG_COLOR,
                                          0x4090E014u); /* ~8%: clearly translucent */
     my_node_view_canvas_to_screen(w, v->band_x0, v->band_y0, &sx0, &sy0);
     my_node_view_canvas_to_screen(w, v->band_x1, v->band_y1, &sx1, &sy1);
@@ -991,7 +991,7 @@ static void nv_overlay_paint(my_widget_t* ov, my_vgcanvas_t* vg) {
                               v->preview.magnet_slot, &mcx, &mcy)) {
       float rsx = 0.0f, rsy = 0.0f;
       uint32_t ring = my_widget_part_color(w, "node_socket", "magnet",
-                                           MY_STATE_NORMAL, "bg_color",
+                                           MY_STATE_NORMAL, MY_STYLE_BG_COLOR,
                                            0xFFD050FFu);
       my_node_view_canvas_to_screen(w, (float)mcx, (float)mcy, &rsx, &rsy);
       my_vgcanvas_set_stroke_color(vg, my_color_from_rgba32(ring));
@@ -1006,10 +1006,10 @@ static void nv_overlay_paint(my_widget_t* ov, my_vgcanvas_t* vg) {
     float mx = 0.0f, my = 0.0f;
     float bx0 = 0.0f, by0 = 0.0f, s = 1.0f;
     uint32_t mbg = my_widget_part_color(w, "node_view", "minimap",
-                                        MY_STATE_NORMAL, "bg_color",
+                                        MY_STATE_NORMAL, MY_STYLE_BG_COLOR,
                                         0x000000A0u);
     uint32_t vbc = my_widget_part_color(w, "node_view", "minimap_viewport",
-                                        MY_STATE_NORMAL, "fg_color",
+                                        MY_STATE_NORMAL, MY_STYLE_FG_COLOR,
                                         0xFFFFFFFFu);
     size_t i, n;
     nv_minimap_origin(w, &mx, &my);
@@ -1024,7 +1024,7 @@ static void nv_overlay_paint(my_widget_t* ov, my_vgcanvas_t* vg) {
       if (!node->floating) {
         my_vgcanvas_set_fill_color(
             vg, my_color_from_rgba32(my_widget_style_get_color(
-                    node, MY_STATE_NORMAL, "bg_color", 0x3A3A3AFFu)));
+                    node, MY_STATE_NORMAL, MY_STYLE_BG_COLOR, 0x3A3A3AFFu)));
         my_vgcanvas_fill_rect(
             vg, &(my_rectf_t){mx + ((float)node->rect.x - bx0) * s,
                               my + ((float)node->rect.y - by0) * s,

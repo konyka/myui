@@ -7,47 +7,37 @@
 #include "myc/my_str.h"
 #include "myui/my_window.h"
 
-static my_widget_state_t button_state(my_button_t* b) {
-  my_widget_t* w = (my_widget_t*)b;
-  if (!w->enable) {
-    return MY_STATE_DISABLED;
-  }
-  if (b->pressed) {
-    return MY_STATE_PRESSED;
-  }
-  if (w->hovered) { /* dispatcher-maintained (M14a) */
-    return MY_STATE_HOVER;
-  }
-  return MY_STATE_NORMAL;
-}
-
 static my_color_t button_state_color(my_button_t* b) {
   my_widget_t* w = (my_widget_t*)b;
-  my_color_t fallback;
-  switch (button_state(b)) {
+  my_widget_state_t state = my_widget_current_state(w, b->pressed);
+  uint32_t fallback;
+  switch (state) {
+    /* M24b: the former color_normal/hover/pressed/disabled struct fields,
+     * inlined as literals (identical values, rgb -> 0xRRGGBBAA) */
     case MY_STATE_DISABLED:
-      fallback = b->color_disabled;
+      fallback = 0x787878FFu; /* rgb(120,120,120) */
       break;
     case MY_STATE_PRESSED:
-      fallback = b->color_pressed;
+      fallback = 0x9696A0FFu; /* rgb(150,150,160) */
       break;
     case MY_STATE_HOVER:
-      fallback = b->color_hover;
+      fallback = 0xDCDCE6FFu; /* rgb(220,220,230) */
       break;
     default:
-      fallback = b->color_normal;
+      fallback = 0xC8C8C8FFu; /* rgb(200,200,200) */
       break;
   }
-  return my_color_from_rgba32(my_widget_style_get_color(
-      w, button_state(b), "bg_color", my_color_to_rgba32(fallback)));
+  return my_color_from_rgba32(
+      my_widget_style_get_color(w, state, MY_STYLE_BG_COLOR, fallback));
 }
 
 static void button_on_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
   my_button_t* b = (my_button_t*)widget;
+  my_widget_state_t state = my_widget_current_state(widget, b->pressed);
   uint32_t border = my_widget_style_get_color(
-      widget, button_state(b), "border_color", 0x000000FFu);
+      widget, state, MY_STYLE_BORDER_COLOR, 0x000000FFu);
   int32_t radius =
-      my_widget_style_get_int(widget, button_state(b), "round_radius", 4);
+      my_widget_style_get_int(widget, state, MY_STYLE_ROUND_RADIUS, 4);
   my_vgcanvas_set_fill_color(vg, button_state_color(b));
   my_vgcanvas_fill_rounded_rect(vg, &(my_rectf_t){0, 0, (float)widget->rect.w,
                                                  (float)widget->rect.h},
@@ -60,11 +50,11 @@ static void button_on_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
   if (b->text != NULL) {
     int32_t tw = 0, th = 0;
     int32_t font_size =
-        my_widget_style_get_int(widget, button_state(b), "font_size", 14);
+        my_widget_style_get_int(widget, state, MY_STYLE_FONT_SIZE, 14);
     my_vgcanvas_set_font(vg, NULL, font_size);
     if (my_vgcanvas_measure_text(vg, b->text, &tw, &th) == MY_RET_OK) {
-      uint32_t fg = my_widget_style_get_color(widget, button_state(b),
-                                              "fg_color", 0x212121FFu);
+      uint32_t fg = my_widget_style_get_color(widget, state,
+                                              MY_STYLE_FG_COLOR, 0x212121FFu);
       my_vgcanvas_set_fill_color(vg, my_color_from_rgba32(fg));
       my_vgcanvas_draw_text(vg, b->text,
                             ((float)widget->rect.w - (float)tw) / 2.0f,
@@ -177,10 +167,6 @@ my_widget_t* my_button_create(const my_allocator_t* allocator, const char* text)
       return NULL;
     }
   }
-  b->color_normal = my_color_rgb(200, 200, 200);
-  b->color_hover = my_color_rgb(220, 220, 230);
-  b->color_pressed = my_color_rgb(150, 150, 160);
-  b->color_disabled = my_color_rgb(120, 120, 120);
   ((my_widget_t*)b)->focusable = true;
   ((my_widget_t*)b)->widget_type = "button";
   return (my_widget_t*)b;
