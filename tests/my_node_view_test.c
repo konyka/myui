@@ -678,6 +678,78 @@ static void test_minimap_first_frame_soft_pixels(void) {
   wfx_destroy(&f);
 }
 
+static void test_minimap_anchored_at_zoom_and_pan(void) {
+  /* M23 regression: the overlay reset the canvas CTM with a plain
+   * -pan/(b*z) translate, but the inherited tx was (viewT+pan)/(b*z) —
+   * computed for the canvas scale — so at zoom != 1 the whole
+   * screen-space overlay drifted by viewT*(1/zoom - 1) and the minimap
+   * visibly slid away from the view's bottom-right corner. Real-pixel
+   * edge detection: the minimap's left/top edges must land on the
+   * anchored corner (+-3px) at every zoom/pan. */
+  my_pal_t* pal = my_pal_dummy_create(NULL);
+  my_pal_main_loop_t* loop = my_pal_main_loop_create(pal);
+  my_window_manager_t* wm = my_window_manager_create(NULL, pal, loop);
+  my_window_t* win = my_window_create(NULL, pal, 700, 500, "t");
+  my_widget_t* view = my_node_view_create(NULL);
+  my_widget_t* a;
+  my_widget_t* b;
+  my_lcd_t* lcd;
+  /* view (50,40,600,400): visible corner (600,400) -> minimap at
+   * view-local (430,290) = window (480,330) */
+  static const int MMX = 480, MMY = 330;
+  static const struct {
+    float zoom;
+    int px, py;
+  } cases[4] = {{1.0f, 0, 0}, {0.5f, 0, 0}, {0.6f, 80, 40}, {1.8f, -120, -60}};
+  int i;
+  my_window_manager_open(wm, win);
+  my_widget_unref(my_window_widget(win));
+  my_widget_set_rect(view, &(my_rect_t){50, 40, 600, 400});
+  my_widget_add_child(my_window_widget(win), view);
+  my_widget_unref(view);
+  a = my_node_view_add_node(view, "a", "A", NULL, 50, 100, 120, 60);
+  b = my_node_view_add_node(view, "b", "B", NULL, 350, 220, 160, 80);
+  my_node_add_socket(a, MY_SOCKET_OUT, "o", 0x2266CCFFu);
+  my_node_add_socket(b, MY_SOCKET_IN, "i", 0x2266CCFFu);
+  my_node_view_connect(view, a, 0, b, 0);
+  lcd = my_pal_window_get_lcd(win->pal_window);
+  for (i = 0; i < 4; i++) {
+    float cpx = 0.0f, cpy = 0.0f;
+    const uint8_t* buf;
+    uint32_t stride;
+    int x, y, fx = -1, fy = -1;
+    my_node_view_get_pan(view, &cpx, &cpy);
+    my_node_view_pan_by(view, -(int)cpx, -(int)cpy);
+    my_node_view_set_zoom(view, cases[i].zoom);
+    my_node_view_pan_by(view, cases[i].px, cases[i].py);
+    my_widget_invalidate(my_window_widget(win), NULL);
+    my_window_paint(win);
+    buf = my_lcd_mem_get_buffer(lcd);
+    stride = my_lcd_mem_get_stride(lcd);
+    /* left edge: first dark pixel on row MMY+50 near MMX */
+    for (x = MMX - 30; x < MMX + 30; x++) {
+      const uint8_t* p = buf + (size_t)(MMY + 50) * stride + (size_t)x * 4;
+      if (p[0] + p[1] + p[2] < 90) {
+        fx = x;
+        break;
+      }
+    }
+    /* top edge: first dark pixel on column MMX+80 near MMY */
+    for (y = MMY - 30; y < MMY + 30; y++) {
+      const uint8_t* p = buf + (size_t)y * stride + (size_t)(MMX + 80) * 4;
+      if (p[0] + p[1] + p[2] < 90) {
+        fy = y;
+        break;
+      }
+    }
+    TEST_ASSERT(fx >= MMX - 3 && fx <= MMX + 3);
+    TEST_ASSERT(fy >= MMY - 3 && fy <= MMY + 3);
+  }
+  my_window_manager_destroy(wm);
+  my_pal_main_loop_destroy(loop);
+  my_pal_destroy(pal);
+}
+
 /* ---------------- M21b: auto size / arrows+type colors / layering ---- */
 
 static void test_node_auto_size(void) {
@@ -748,10 +820,11 @@ static void test_link_type_color_and_arrow(void) {
   TEST_ASSERT(rec_has(&rec, "set_stroke #60a060"));
   TEST_ASSERT(!rec_has(&rec, "set_stroke #a0a0a0"));
   /* arrowhead at the in socket (400,234): rightward link -> tip is the
-   * rightmost vertex, base 8px back, half-width 4 (dx handle = 70) */
+   * rightmost vertex, base 10px back, half-width 5 (M23 screen-space
+   * fixed size, zoom-independent) */
   TEST_ASSERT(rec_has(&rec, "move_to 400 234"));
-  TEST_ASSERT(rec_has(&rec, "line_to 392 238"));
-  TEST_ASSERT(rec_has(&rec, "line_to 392 230"));
+  TEST_ASSERT(rec_has(&rec, "line_to 390 229"));
+  TEST_ASSERT(rec_has(&rec, "line_to 390 239"));
   /* a second source type -> a second link color */
   my_node_add_socket(f.nb, MY_SOCKET_IN, "in2", 0x808080FFu);
   nc = my_node_view_add_node(f.view, "c", "C", NULL, 100, 320, 160, 80);
@@ -817,9 +890,21 @@ static void test_magnet_ring_paints_above_selection(void) {
   TEST_ASSERT(ring_idx >= 0);
   TEST_ASSERT(border_idx >= 0);
   TEST_ASSERT(ring_idx > border_idx); /* ring above everything node-ish */
-  /* the selected border is the orange one, now width 1 (M21b) */
-  TEST_ASSERT(strcmp(rec.ops[border_idx - 1], "set_line_width 1") == 0);
-  TEST_ASSERT(strcmp(rec.ops[border_idx - 2], "set_stroke #e0a030") == 0);
+  /* the selected border is the orange one, now width 1 (M21b);
+   * M22: the ring is an outset stroke_rect in the overlay — look it up
+   * directly rather than by op-order arithmetic */
+  {
+    int sel_idx = -1;
+    for (i = 0; i < rec.n_ops; i++) {
+      if (strcmp(rec.ops[i], "set_stroke #e0a030") == 0) {
+        sel_idx = i;
+      }
+    }
+    TEST_ASSERT(sel_idx >= 0);
+    TEST_ASSERT(strcmp(rec.ops[sel_idx + 1], "set_line_width 2") == 0);
+    TEST_ASSERT(strstr(rec.ops[sel_idx + 2], "stroke_rect") != NULL);
+    TEST_ASSERT(ring_idx > sel_idx); /* magnet ring above the selection */
+  }
   fx_destroy(&f);
 }
 
@@ -846,6 +931,7 @@ MYTEST_MAIN_BEGIN()
   MYTEST_RUN(test_minimap_visible_extent_under_csd);
   MYTEST_RUN(test_minimap_rect_corner_when_fitting);
   MYTEST_RUN(test_minimap_first_frame_soft_pixels);
+  MYTEST_RUN(test_minimap_anchored_at_zoom_and_pan);
   MYTEST_RUN(test_node_auto_size);
   MYTEST_RUN(test_node_explicit_size_wins);
   MYTEST_RUN(test_link_type_color_and_arrow);

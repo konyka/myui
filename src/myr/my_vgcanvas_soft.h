@@ -43,6 +43,11 @@ void my_vgcanvas_soft_set_antialias(my_vgcanvas_t* vg, bool enabled);
  */
 void my_vgcanvas_soft_set_antialias_level(my_vgcanvas_t* vg, int level);
 
+/** @brief Replace the clip with rect (transformed by the current CTM),
+ * ignoring the previous clip — soft clip_rect() intersects, which cannot
+ * recover from a transform baked earlier (see node_view overlay). */
+void my_vgcanvas_soft_reset_clip(my_vgcanvas_t* vg, const my_rectf_t* rect);
+
 /** @brief draw_image sampling filter (default MY_SCALE_FILTER_BILINEAR). */
 void my_vgcanvas_soft_set_scale_filter(my_vgcanvas_t* vg,
                                        my_scale_filter_t filter);

@@ -333,9 +333,17 @@ static my_widget_t* hit_test_rec(my_widget_t* widget, int32_t x, int32_t y) {
   }
   i = my_darray_size(widget->children);
   while (i > 0) {
+    my_widget_t* child;
     my_widget_t* hit;
     i--;
-    hit = hit_test_rec((my_widget_t*)my_darray_get(widget->children, i), lx, ly);
+    child = (my_widget_t*)my_darray_get(widget->children, i);
+    /* paint-only floating overlays (no on_event, e.g. node_view's
+     * minimap/rubber-band layer) must not swallow hits meant for the
+     * widgets beneath them; interactive floaters (menus) keep theirs */
+    if (child->floating && child->vtable->on_event == NULL) {
+      continue;
+    }
+    hit = hit_test_rec(child, lx, ly);
     if (hit != NULL) {
       return hit;
     }

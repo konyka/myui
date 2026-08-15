@@ -583,7 +583,7 @@ int32_t my_node_view_find_link_at(my_widget_t* view, int32_t x, int32_t y) {
     pts.n = 1;
     my_bezier_cubic_to_lines(x0, y0, cx1, cy1, cx2, cy2, x1, y1, 0.25f, 16,
                              link_pts_emit, &pts, NULL);
-    if (link_pts_dist(&pts, (float)x, (float)y) <= 16.0f) { /* 4px */
+    if (link_pts_dist(&pts, (float)x, (float)y) <= 64.0f) { /* 8px */
       return (int32_t)(i - 1);
     }
   }
@@ -616,30 +616,6 @@ static void nv_stroke_link_rgba(my_vgcanvas_t* vg, float x0, float y0,
   my_vgcanvas_move_to(vg, x0, y0);
   my_vgcanvas_curve_to(vg, cx1, cy1, cx2, cy2, x1, y1);
   my_vgcanvas_stroke(vg);
-}
-
-/** @brief Filled arrowhead at the link's end point (M21b): a triangle
- * along the end tangent (from the second handle to (x1, y1)), 8px long,
- * 4px half-width (line_width 3 + 1), same color as the link. The input
- * socket dot (nodes paint over links) covers the tip. */
-static void nv_fill_link_arrow(my_vgcanvas_t* vg, float cx2, float cy2,
-                               float x1, float y1, uint32_t rgba) {
-  float dx = x1 - cx2, dy = y1 - cy2;
-  float len = sqrtf(dx * dx + dy * dy);
-  float ux = 1.0f, uy = 0.0f;
-  if (len > 1e-6f) {
-    ux = dx / len;
-    uy = dy / len;
-  }
-  my_vgcanvas_set_fill_color(vg, my_color_from_rgba32(rgba));
-  my_vgcanvas_begin_path(vg);
-  my_vgcanvas_move_to(vg, x1, y1);
-  my_vgcanvas_line_to(vg, x1 - ux * 8.0f - uy * 4.0f,
-                      y1 - uy * 8.0f + ux * 4.0f);
-  my_vgcanvas_line_to(vg, x1 - ux * 8.0f + uy * 4.0f,
-                      y1 - uy * 8.0f - ux * 4.0f);
-  my_vgcanvas_close_path(vg);
-  my_vgcanvas_fill(vg);
 }
 
 static void nv_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
@@ -675,9 +651,32 @@ static void nv_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
     if (my_str_eq(root->widget_type, "window")) {
       base_scale = ((my_window_t*)root)->scale;
     }
-    my_vgcanvas_translate(vg, v->pan_off_x / (base_scale * v->zoom),
-                          v->pan_off_y / (base_scale * v->zoom));
-    my_vgcanvas_soft_set_scale(vg, base_scale * v->zoom);
+    if (getenv("MYUI_NV_TRACE") != NULL) {
+      fprintf(stderr, "[nvtrace] ctm zoom=%.3f pan=(%.1f,%.1f) tx=(%.1f,%.1f)\n",
+              (double)v->zoom, (double)v->pan_off_x, (double)v->pan_off_y,
+              (double)(v->pan_off_x / (base_scale * v->zoom)),
+              (double)(v->pan_off_y / (base_scale * v->zoom)));
+    }
+    {
+      /* scale ABOUT the view origin (M23): my_widget_paint already
+       * translated by the ancestor chain (viewT) in unscaled units, so a
+       * plain pan/(b*z) translate would scale viewT too — device coords
+       * then disagree with canvas_to_screen/screen_to_canvas by
+       * viewT*(z-1), which made clicks and overlay rings miss by up to
+       * 72px at deep zoom. Correct translate: ((viewT+pan)/(b*z))-viewT. */
+      float vx = (float)widget->rect.x, vy = (float)widget->rect.y;
+      float dx, dy;
+      my_widget_t* par = widget->parent;
+      while (par != NULL) {
+        vx += (float)par->rect.x;
+        vy += (float)par->rect.y;
+        par = par->parent;
+      }
+      dx = (vx + v->pan_off_x) / (base_scale * v->zoom) - vx;
+      dy = (vy + v->pan_off_y) / (base_scale * v->zoom) - vy;
+      my_vgcanvas_translate(vg, dx, dy);
+      my_vgcanvas_soft_set_scale(vg, base_scale * v->zoom);
+    }
   }
   /* links (nodes paint after us: children over links) */
   n = my_darray_size(v->links);
@@ -711,7 +710,62 @@ static void nv_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
     } else {
       nv_stroke_link_rgba(vg, x0, y0, cx1, cy1, cx2, cy2, x1, y1, c);
     }
-    nv_fill_link_arrow(vg, cx2, cy2, x1, y1, c); /* M21b arrowhead */
+    /* arrowhead + flow pulse in CANVAS space (same CTM as the curve, so
+     * alignment is by construction), sizes zoom-compensated so they stay
+     * ~10px/~4px on screen at any zoom (M23) */
+    {
+      float dx = x1 - cx2, dy = y1 - cy2, len = sqrtf(dx * dx + dy * dy);
+      if (len > 1e-6f) {
+        float ux = dx / len, uy = dy / len;
+        float alen = 10.0f / v->zoom, aw = 5.0f / v->zoom;
+        my_vgcanvas_set_fill_color(vg, my_color_from_rgba32(c));
+        my_vgcanvas_begin_path(vg);
+        my_vgcanvas_move_to(vg, x1, y1);
+        my_vgcanvas_line_to(vg, x1 - ux * alen - uy * aw,
+                            y1 - uy * alen + ux * aw);
+        my_vgcanvas_line_to(vg, x1 - ux * alen + uy * aw,
+                            y1 - uy * alen - ux * aw);
+        my_vgcanvas_close_path(vg);
+        my_vgcanvas_fill(vg);
+      }
+      if (v->flow_all || sel) {
+        link_pts_t pts;
+        float bx = x1, by = y1;
+        pts.n = 0;
+        pts.xs[0] = x0;
+        pts.ys[0] = y0;
+        pts.n = 1;
+        my_bezier_cubic_to_lines(x0, y0, cx1, cy1, cx2, cy2, x1, y1, 0.25f,
+                                 16, link_pts_emit, &pts, NULL);
+        {
+          float acc = 0.0f, total = 0.0f, target;
+          float tt = fmodf(v->flow_offset / 160.0f, 1.0f);
+          int k;
+          for (k = 1; k < pts.n; k++) {
+            float ddx = pts.xs[k] - pts.xs[k - 1];
+            float ddy = pts.ys[k] - pts.ys[k - 1];
+            total += sqrtf(ddx * ddx + ddy * ddy);
+          }
+          target = tt * (total > 0.0f ? total : 1.0f);
+          for (k = 1; k < pts.n && acc < target; k++) {
+            float ddx = pts.xs[k] - pts.xs[k - 1];
+            float ddy = pts.ys[k] - pts.ys[k - 1];
+            float seg = sqrtf(ddx * ddx + ddy * ddy);
+            if (acc + seg >= target && seg > 1e-6f) {
+              float f = (target - acc) / seg;
+              bx = pts.xs[k - 1] + ddx * f;
+              by = pts.ys[k - 1] + ddy * f;
+              break;
+            }
+            acc += seg;
+          }
+        }
+        my_vgcanvas_set_fill_color(vg, my_color_from_rgba32(c));
+        my_vgcanvas_begin_path(vg);
+        my_node_path_circle(vg, bx, by, 4.0f / v->zoom);
+        my_vgcanvas_fill(vg);
+      }
+    }
   }
   /* link preview follows the cursor (magnet-snapped when a target is
    * in range; the snapped socket gets a highlight ring) */
@@ -860,21 +914,43 @@ static void nv_overlay_paint(my_widget_t* ov, my_vgcanvas_t* vg) {
   my_widget_t* w = (my_widget_t*)v;
   /* rect synced by nv_paint (before the child clip; floating, no
    * on_event -> events bubble) */
-  /* reset the canvas CTM: absolute scale + inverse translate */
+  /* reset the canvas CTM: absolute scale + translate back to the view's
+   * screen origin. The inherited tx is (viewT+pan)/(base*zoom) — computed
+   * for the canvas scale — so at zoom != 1 a plain -pan/(b*z) inverse
+   * leaves tx = viewT/zoom instead of viewT and the whole screen-space
+   * overlay (minimap, rubber band, magnet ring) drifts with the zoom
+   * (M23). Bring tx to viewT exactly: */
   {
     my_widget_t* root = w;
+    my_widget_t* par;
     float base = 1.0f;
-    float txa = 0.0f, tya = 0.0f;
+    float vx = (float)w->rect.x, vy = (float)w->rect.y;
+    float ddx, ddy;
     while (root->parent != NULL) {
       root = root->parent;
     }
     if (my_str_eq(root->widget_type, "window")) {
       base = ((my_window_t*)root)->scale;
     }
-    txa = v->pan_off_x / (base * v->zoom);
-    tya = v->pan_off_y / (base * v->zoom);
+    for (par = w->parent; par != NULL; par = par->parent) {
+      vx += (float)par->rect.x;
+      vy += (float)par->rect.y;
+    }
+    if (v->zoom != 1.0f || v->pan_off_x != 0.0f || v->pan_off_y != 0.0f) {
+      /* nv_paint left tx = (viewT+pan)/(base*zoom) at scale base*zoom */
+      ddx = vx - (vx + v->pan_off_x) / (base * v->zoom);
+      ddy = vy - (vy + v->pan_off_y) / (base * v->zoom);
+    } else {
+      /* no canvas transform: inherited tx is already viewT at scale base */
+      ddx = vx - vx / base;
+      ddy = vy - vy / base;
+    }
     my_vgcanvas_soft_set_scale(vg, base);
-    my_vgcanvas_translate(vg, -txa, -tya);
+    my_vgcanvas_translate(vg, ddx, ddy);
+    /* the clip baked by my_widget_paint under the canvas CTM shifts with
+     * pan/zoom and clips the screen-space minimap (M22); replace it */
+    my_vgcanvas_soft_reset_clip(vg, &(my_rectf_t){0, 0, (float)ov->rect.w,
+                                                  (float)ov->rect.h});
   }
   /* rubber band (canvas rect -> screen) */
   if (v->banding && v->band_moved) {
@@ -884,7 +960,7 @@ static void nv_overlay_paint(my_widget_t* ov, my_vgcanvas_t* vg) {
                                            0x4090E0FFu);
     uint32_t fill = my_widget_part_color(w, "node_view", "rubber_band",
                                          MY_STATE_NORMAL, "bg_color",
-                                         0x4090E030u);
+                                         0x4090E014u); /* ~8%: clearly translucent */
     my_node_view_canvas_to_screen(w, v->band_x0, v->band_y0, &sx0, &sy0);
     my_node_view_canvas_to_screen(w, v->band_x1, v->band_y1, &sx1, &sy1);
     if (sx1 < sx0) {
@@ -961,12 +1037,22 @@ static void nv_overlay_paint(my_widget_t* ov, my_vgcanvas_t* vg) {
       float vy0 = (0.0f - v->pan_off_y) / v->zoom;
       float vx1 = ((float)w->rect.w - v->pan_off_x) / v->zoom;
       float vy1 = ((float)w->rect.h - v->pan_off_y) / v->zoom;
-      my_vgcanvas_set_stroke_color(vg, my_color_from_rgba32(vbc));
-      my_vgcanvas_set_line_width(vg, 1);
-      my_vgcanvas_stroke_rect(vg, &(my_rectf_t){mx + (vx0 - bx0) * s,
-                                                my + (vy0 - by0) * s,
-                                                (vx1 - vx0) * s,
-                                                (vy1 - vy0) * s});
+      /* clamp the viewport frame to the minimap box (M23: it used to
+       * fly outside when the canvas viewport exceeded the node span) */
+      {
+        float fx0 = mx + (vx0 - bx0) * s, fy0 = my + (vy0 - by0) * s;
+        float fx1 = fx0 + (vx1 - vx0) * s, fy1 = fy0 + (vy1 - vy0) * s;
+        if (fx0 < mx) fx0 = mx;
+        if (fy0 < my) fy0 = my;
+        if (fx1 > mx + NV_MINIMAP_W) fx1 = mx + NV_MINIMAP_W;
+        if (fy1 > my + NV_MINIMAP_H) fy1 = my + NV_MINIMAP_H;
+        if (fx1 > fx0 && fy1 > fy0) {
+          my_vgcanvas_set_stroke_color(vg, my_color_from_rgba32(vbc));
+          my_vgcanvas_set_line_width(vg, 1);
+          my_vgcanvas_stroke_rect(vg, &(my_rectf_t){fx0, fy0, fx1 - fx0,
+                                                    fy1 - fy0});
+        }
+      }
     }
   }
 }
@@ -1047,6 +1133,10 @@ static my_ret_t nv_event(my_widget_t* widget, const my_event_t* event) {
       my_widget_t* node = NULL;
       size_t slot = 0;
       my_widget_global_to_local(widget, &lx, &ly);
+      if (getenv("MYUI_NV_TRACE") != NULL) {
+        fprintf(stderr, "[nvtrace] DOWN g=(%d,%d) local=(%d,%d)\n",
+                event->u.pointer.x, event->u.pointer.y, lx, ly);
+      }
       /* minimap click: jump the viewport (screen space, BEFORE the
        * canvas transform) */
       {
@@ -1062,6 +1152,9 @@ static my_ret_t nv_event(my_widget_t* widget, const my_event_t* event) {
         }
       }
       my_node_view_screen_to_canvas(widget, lx, ly, &cx, &cy);
+      if (getenv("MYUI_NV_TRACE") != NULL) {
+        fprintf(stderr, "[nvtrace] canvas=(%.1f,%.1f)\n", cx, cy);
+      }
       /* drag out of an output socket: preview */
       if (nv_socket_at(v, (int32_t)cx, (int32_t)cy, MY_SOCKET_OUT, &node,
                        &slot)) {

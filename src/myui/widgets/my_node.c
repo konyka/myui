@@ -195,16 +195,14 @@ static void node_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
   my_vgcanvas_fill_rounded_rect(vg, &(my_rectf_t){0, 0, (float)widget->rect.w,
                                                   (float)widget->rect.h},
                                 4);
-  node_path_rounded_rect(vg, 0, 0, (float)widget->rect.w,
-                         (float)widget->rect.h, 4);
+  node_path_rounded_rect(vg, 1, 1, (float)widget->rect.w - 2,
+                         (float)widget->rect.h - 2, 4);
   {
-    /* selection border (M20b): the view owns the set; M21b: width stays
-     * 1 (was 2) so the width-2 magnet ring reads as the top layer */
-    bool sel = n->view != NULL &&
-               my_node_view_is_selected(n->view, widget);
+    /* plain node edge (the SELECTION border is drawn separately at the
+     * very end of node_paint so it sits above the header fill and the
+     * sockets instead of being covered by them) */
     uint32_t border = my_widget_part_color(
-        widget, "node", sel ? "selected" : NULL, MY_STATE_NORMAL,
-        "border_color", sel ? 0xE0A030FFu : 0x1E1E1EFFu);
+        widget, "node", NULL, MY_STATE_NORMAL, "border_color", 0x1E1E1EFFu);
     my_vgcanvas_set_stroke_color(vg, my_color_from_rgba32(border));
     my_vgcanvas_set_line_width(vg, 1);
     my_vgcanvas_stroke(vg);
@@ -273,6 +271,18 @@ static void node_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
                               (float)(cy - 6));
       }
     }
+  }
+  /* selection border, drawn LAST so it sits above everything the node
+   * paints (M22 follow-up: it is part of the node, so it always tracks
+   * the node's own transform — no cross-layer coordinate matching) */
+  if (n->view != NULL && my_node_view_is_selected(n->view, widget)) {
+    uint32_t sc = my_widget_part_color(widget, "node", "selected",
+                                       MY_STATE_NORMAL, "border_color",
+                                       0xE0A030FFu);
+    my_vgcanvas_set_stroke_color(vg, my_color_from_rgba32(sc));
+    my_vgcanvas_set_line_width(vg, 2);
+    my_vgcanvas_stroke_rect(vg, &(my_rectf_t){1, 1, (float)widget->rect.w - 2,
+                                              (float)widget->rect.h - 2});
   }
 }
 

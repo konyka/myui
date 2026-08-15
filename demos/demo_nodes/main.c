@@ -46,14 +46,16 @@ static my_font_t* create_demo_font(void) {
   return font;
 }
 
-#ifdef MYUI_PAL_DUMMY
 #include "myr/my_lcd_mem.h"
+#ifdef MYUI_PAL_DUMMY
 #include "mypal/dummy/my_pal_dummy.h"
+#endif
 
+static my_ret_t live_dump_tick(void* ctx);
 static void dump_ppm(my_pal_window_t* window, const char* path) {
   my_lcd_t* lcd = my_pal_window_get_lcd(window);
-  uint8_t* buf = my_lcd_mem_get_buffer(lcd);
-  uint32_t stride = my_lcd_mem_get_stride(lcd);
+  uint8_t* buf = my_lcd_get_buffer(lcd);
+  uint32_t stride = my_lcd_get_stride(lcd);
   uint32_t w = my_lcd_get_width(lcd);
   uint32_t h = my_lcd_get_height(lcd);
   uint32_t x, y;
@@ -73,7 +75,6 @@ static void dump_ppm(my_pal_window_t* window, const char* path) {
   fclose(f);
   printf("demo_nodes: dumped %s\n", path);
 }
-#endif
 
 int main(void) {
   my_pal_t* pal = my_pal_create(NULL);
@@ -226,9 +227,23 @@ int main(void) {
   }
 #endif
 
+  /* live debugging aid: MYUI_LIVE_DUMP=<path> dumps the frame every 500ms */
+  if (getenv("MYUI_LIVE_DUMP") != NULL) {
+    my_pal_main_loop_add_timer(loop, live_dump_tick, wm, 500);
+  }
   my_pal_main_loop_run(loop);
   my_window_manager_destroy(wm);
   my_pal_main_loop_destroy(loop);
   my_pal_destroy(pal);
   return 0;
+}
+
+static my_ret_t live_dump_tick(void* ctx) {
+  my_window_manager_t* wm = (my_window_manager_t*)ctx;
+  my_window_t* top = my_window_manager_top(wm);
+  const char* path = getenv("MYUI_LIVE_DUMP");
+  if (top != NULL && path != NULL) {
+    dump_ppm(top->pal_window, path);
+  }
+  return MY_RET_OK; /* repeat */
 }

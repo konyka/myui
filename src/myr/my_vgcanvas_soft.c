@@ -312,12 +312,14 @@ static my_ret_t fill_polys(my_vgcanvas_soft_t* s, const path_point_t* pts,
     }
     rb.alpha = rb.cov + clip->w;
     {
-      /* limit the scan to the polygon's y range (clipped) */
-      float ymin = pts[0].y + s->state.ty, ymax = ymin;
+      /* limit the scan to the polygon's y range (clipped); the range
+       * must be in DEVICE space like collect_intersections (M23: it used
+       * y+ty without the scale, emptying the fill at scale != 1) */
+      float ymin = SOFT_SY(s, pts[0].y), ymax = ymin;
       size_t pi;
       int32_t row0, row1;
       for (pi = 1; pi < npts; pi++) {
-        float py = pts[pi].y + s->state.ty;
+        float py = SOFT_SY(s, pts[pi].y);
         if (py < ymin) {
           ymin = py;
         }
@@ -1493,6 +1495,21 @@ my_vgcanvas_t* my_vgcanvas_soft_create(const my_allocator_t* allocator,
   s->scale_filter = MY_SCALE_FILTER_BILINEAR;
   my_dirty_rects_init(&s->dirty);
   return (my_vgcanvas_t*)s;
+}
+
+void my_vgcanvas_soft_reset_clip(my_vgcanvas_t* vg, const my_rectf_t* rect) {
+  my_vgcanvas_soft_t* s = (my_vgcanvas_soft_t*)vg;
+  my_rect_t dev;
+  if (rect == NULL) {
+    return;
+  }
+  dev = my_rect_init((int32_t)floorf(SOFT_SX(s, rect->x)),
+                     (int32_t)floorf(SOFT_SY(s, rect->y)),
+                     (int32_t)ceilf(SOFT_SX(s, rect->x + rect->w)) -
+                         (int32_t)floorf(SOFT_SX(s, rect->x)),
+                     (int32_t)ceilf(SOFT_SY(s, rect->y + rect->h)) -
+                         (int32_t)floorf(SOFT_SY(s, rect->y)));
+  s->state.clip = dev; /* replace, not intersect */
 }
 
 void my_vgcanvas_soft_set_scale(my_vgcanvas_t* vg, float scale) {

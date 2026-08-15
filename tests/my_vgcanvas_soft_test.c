@@ -85,6 +85,43 @@ static void test_path_triangle_fill(void) {
   my_lcd_destroy(lcd);
 }
 
+static void test_path_triangle_fill_scaled(void) {
+  /* M23 regression: fill_polys computed the scanline y range as y+ty
+   * (translate without the scale), so ANY path fill silently rasterized
+   * zero pixels at scale != 1 with AA on (the hard-edge path was fine).
+   * Same triangle as test_path_triangle_fill, authored at 2x in user
+   * space and rasterized at scale 0.5 -> identical device pixels. */
+  my_lcd_t* lcd = my_lcd_mem_create(NULL, 32, 32, MY_PIXEL_FORMAT_BGRA8888);
+  my_vgcanvas_t* vg = my_vgcanvas_soft_create(NULL, lcd);
+  int x, y, n = 0;
+
+  my_vgcanvas_soft_set_scale(vg, 0.5f); /* default AA level is 2 */
+  my_vgcanvas_begin_frame(vg, NULL);
+  my_vgcanvas_set_fill_color(vg, BLUE);
+  my_vgcanvas_begin_path(vg);
+  my_vgcanvas_move_to(vg, 32, 8);
+  my_vgcanvas_line_to(vg, 56, 56);
+  my_vgcanvas_line_to(vg, 8, 56);
+  my_vgcanvas_close_path(vg);
+  my_vgcanvas_fill(vg);
+  my_vgcanvas_end_frame(vg);
+
+  for (y = 0; y < 32; y++) {
+    for (x = 0; x < 32; x++) {
+      my_color_t c = px(lcd, x, y);
+      if (c.r + c.g + c.b > 0) {
+        n++;
+      }
+    }
+  }
+  TEST_ASSERT(n > 40); /* the bug produced exactly 0 */
+  TEST_ASSERT(my_color_eq(px(lcd, 16, 20), BLUE)); /* interior */
+  TEST_ASSERT(my_color_eq(px(lcd, 2, 8), BLACK));  /* exterior */
+
+  my_vgcanvas_destroy(vg);
+  my_lcd_destroy(lcd);
+}
+
 static void test_fill_even_odd_hole(void) {
   my_lcd_t* lcd = my_lcd_mem_create(NULL, 40, 40, MY_PIXEL_FORMAT_BGRA8888);
   my_vgcanvas_t* vg = my_vgcanvas_soft_create(NULL, lcd);
@@ -341,6 +378,7 @@ MYTEST_MAIN_BEGIN()
   MYTEST_RUN(test_fill_rect);
   MYTEST_RUN(test_stroke_rect_line_width);
   MYTEST_RUN(test_path_triangle_fill);
+  MYTEST_RUN(test_path_triangle_fill_scaled);
   MYTEST_RUN(test_fill_even_odd_hole);
   MYTEST_RUN(test_fill_concave_polygon);
   MYTEST_RUN(test_clip_rect_limits_drawing);
