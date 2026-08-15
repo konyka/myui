@@ -100,9 +100,16 @@ GUI 无关核心（`src/mymvvm/`，只链接 myc）：
 | backend | 状态 | 验证 |
 |---------|------|------|
 | software (my_vgcanvas_soft) | 完成 | 单测 + golden-image + 全 demo |
-| GLES2 (my_vgcanvas_gles2) | 完成 | mock GL 单测（三角化/scissor/状态）+ EGL surfaceless 真实冒烟（glReadPixels 断言） |
+| GLES2 (my_vgcanvas_gles2 + my_gl_real) | 完成 | mock GL 单测（三角化/scissor/状态）+ EGL surfaceless 真实冒烟（glReadPixels 断言） |
+| OpenGL 2.1 (my_vgcanvas_gles2 + my_gl_desktop) | 完成（M25a） | EGL surfaceless + EGL_OPENGL_API 真上下文 13 像素断言（gl_desktop_smoke） |
+| Vulkan (my_vgcanvas_vulkan) | 完成（M25b） | 离屏 12 像素断言真 ICD（vulkan_smoke）+ validation 0 错误 + asan 零泄漏 + x11/wayland 真机 demo |
 
-GLES2 backend 说明：调用方持有 GL 上下文（PAL 窗口创建），backend 只做三角化与提交；路径填充沿用 even-odd 扫描线（span 合并为三角形批，避免扇形三角化对凹多边形的错误）；stroke 为法线扩展线段四边形。`my_gl_t` 函数表隔离全部 GL 调用，可注入 mock/WebGL 变体。
+GPU 后端架构（M25）：
+
+- **my_gl_t 语义层**（GLES2/桌面 GL 共用 vgcanvas）：调用方持有 GL 上下文（PAL 窗口创建），backend 只做三角化与提交；`my_gl_t` 函数表隔离全部 GL 调用，可注入 mock/桌面/WebGL 变体；`shader_header_vs/fs` 缝解决 GLSL ES 1.00 ↔ 桌面 `#version 120` 的源差异，vgcanvas 层零分支。CPU 三角化是独立的 `my_vggeometry` 共享层（even-odd 扫描线 span 合并、法线扩展 stroke、圆角/贝塞尔细分），GLES2 与 Vulkan 共用。
+- **Vulkan 直实现 vtable**（不走 my_gl_t——立即提交语义对 Vulkan 无意义）：全局惰性 instance/设备，窗口 swapchain + renderpass（MSAA4 优先回落单采样）；renderpass 是 **LOAD 持久化模型**（MSAA 持久色图直染 + flush 全幅 resolve）以适配脏矩形局部重绘——标准 resolve-入-swapchain+CLEAR 模型会用未重绘区垃圾覆盖目标。文字 R8/图片 RGBA8 纹理缓存策略与 gles2 一致，缓逐经逐帧槽退役列表延迟销毁防在飞帧引用。
+- **统一选择**：`my_window_enable_gpu(win, MY_GPU_*)`（AUTO 优先 GLES2→OPENGL→VULKAN，全败留 soft）；present 协议复用 my_window_paint 现有路径（Vulkan 经 my_pal_gl_t 语义适配：swap=submit+present）。
+- 帧耗时基线（50 按钮全帧，本机 Intel/Mesa，bench_gpu）：soft 1.52 / gles2 0.56 / opengl 0.57 / vulkan 0.96 ms。
 
 PAL port 矩阵：
 

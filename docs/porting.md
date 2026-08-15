@@ -38,6 +38,10 @@
 
 - 无 GPU / 裸机 / RTOS / Linux-FB：**software backend**（默认）：`my_lcd_mem` 或直接包显存的 lcd 实现 + `my_vgcanvas_soft`。
 - 有 GLES2+：GLES backend（M5），真窗口经 GL 挂载点（M10c，下节）。
+- **GPU 后端全矩阵接入（M25）**：应用侧一行 `my_window_enable_gpu(win, MY_GPU_GLES2/OPENGL/VULKAN/AUTO)`。新 port 想获得全部 GPU 后端，实现 pal window vtable 末尾两个槽即可（均可先置 NULL 打桩）：
+  - [ ] `gl_enable_api(window, api)`（M25a，api=GLES2/OPENGL）：建对应类型的 GL 上下文（桌面系统 EGL/GLX/WGL/NSGL 均可——port 内部自由，返回 `my_pal_gl_t` 语义对象：make_current/swap/get_size/has_multisample/destroy）。旧 `gl_enable` 槽保留 = GLES2 转发。
+  - [ ] `vk_create_surface(window, vk_instance, &vk_surface)`（M25b）：`vkCreateXlibSurfaceKHR`/`vkCreateWaylandSurfaceKHR`/对应平台的 surface 创建一行转发；Vulkan 后端（swapchain/管线/present）全在 myr 层，port 不需要任何其它 Vulkan 代码。
+  - 验证顺序：gl_desktop_smoke/vulkan_smoke 的离屏部分不依赖 port（EGL surfaceless / 离屏 image），可先跑通；再真窗口 enable_gpu 冒烟（照 gl_window_smoke_test）。
 - Apple 平台：Metal shim（M6）。Web(Emscripten)：WebGL（M5）。
 
 ## IME 移植要点（M13a）
