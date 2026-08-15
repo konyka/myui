@@ -27,6 +27,7 @@
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 #include <X11/Xatom.h>
+#include <X11/cursorfont.h>
 
 #if defined(MYUI_PAL_GL_EGL)
 #include <EGL/egl.h>
@@ -413,6 +414,27 @@ static my_ret_t x11_win_begin_move(my_pal_window_t* win) {
   return MY_RET_OK;
 }
 
+/** @brief M21a: XDefineCursor with a cached glyph-font cursor
+ * (XC_left_ptr / XC_xterm / XC_hand2 — always present in the core font). */
+static my_ret_t x11_win_set_cursor(my_pal_window_t* win, my_cursor_t cursor) {
+  static const unsigned SHAPES[3] = {XC_left_ptr, XC_xterm, XC_hand2};
+  x11_window_t* w = (x11_window_t*)win;
+  x11_pal_t* p = w->pal;
+  int i;
+  if (cursor < MY_CURSOR_ARROW || cursor > MY_CURSOR_HAND) {
+    return MY_RET_INVALID_PARAMS;
+  }
+  if (!p->cursors_init) {
+    for (i = 0; i < 3; i++) {
+      p->cursors[i] = XCreateFontCursor(p->display, SHAPES[i]);
+    }
+    p->cursors_init = true;
+  }
+  XDefineCursor(p->display, w->xwin, p->cursors[cursor]);
+  XFlush(p->display);
+  return MY_RET_OK;
+}
+
 static bool x11_needs_csd(my_pal_t* pal) {
   (void)pal;
   return false; /* WMs decorate x11 windows (SSD) */
@@ -422,7 +444,8 @@ static const my_pal_window_vtable_t s_x11_window_vtable = {
     x11_win_set_title, x11_win_resize,  x11_win_show,
     x11_win_get_size,  x11_win_get_lcd, x11_win_destroy,
     x11_win_gl_enable, x11_win_ime_set_spot,
-    x11_win_move,      x11_win_begin_move};
+    x11_win_move,      x11_win_begin_move,
+    x11_win_set_cursor};
 
 static my_pal_window_t* x11_window_create(my_pal_t* pal, int32_t w, int32_t h,
                                           const char* title) {
@@ -1223,6 +1246,14 @@ static void x11_pal_destroy(my_pal_t* pal) {
   my_mem_free(p->allocator, p->clipboard);
   my_darray_destroy(p->windows);
   x11_ime_shutdown(p); /* M13a */
+  if (p->cursors_init) { /* M21a cached font cursors */
+    int i;
+    for (i = 0; i < 3; i++) {
+      if (p->cursors[i] != 0) {
+        XFreeCursor(p->display, p->cursors[i]);
+      }
+    }
+  }
   XCloseDisplay(p->display);
   my_mem_free(p->allocator, p);
 }

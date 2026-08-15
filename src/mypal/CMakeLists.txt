@@ -70,11 +70,13 @@ if(MYUI_PAL_RESOLVED STREQUAL "x11")
   endif()
 elseif(MYUI_PAL_RESOLVED STREQUAL "wayland")
   target_compile_definitions(mypal PUBLIC MYUI_PAL_WAYLAND)
+  pkg_check_modules(MYUI_PAL_WAYLAND_CURSOR REQUIRED wayland-cursor)
   target_include_directories(mypal PRIVATE
     ${WAYLAND_CLIENT_INCLUDE_DIRS} ${XKBCOMMON_INCLUDE_DIRS}
+    ${MYUI_PAL_WAYLAND_CURSOR_INCLUDE_DIRS}
     ${CMAKE_CURRENT_BINARY_DIR})
   target_link_libraries(mypal PUBLIC ${WAYLAND_CLIENT_LIBRARIES}
-    ${XKBCOMMON_LIBRARIES})
+    ${XKBCOMMON_LIBRARIES} ${MYUI_PAL_WAYLAND_CURSOR_LIBRARIES})
   # optional GL mount (M10c): wl_egl_window + EGL window surface
   pkg_check_modules(MYUI_PAL_EGL QUIET egl)
   pkg_check_modules(MYUI_PAL_WAYLAND_EGL QUIET wayland-egl)

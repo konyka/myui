@@ -41,6 +41,7 @@ typedef struct dummy_window_t {
   int32_t pos_x; /**< last move (M13c, for tests) */
   int32_t pos_y;
   uint32_t begin_move_count; /**< begin_move calls (M16, for tests) */
+  my_cursor_t cursor;        /**< last set_cursor (M21a, for tests) */
 } dummy_window_t;
 
 static my_ret_t dummy_win_set_title(my_pal_window_t* win, const char* title) {
@@ -130,6 +131,16 @@ static my_ret_t dummy_win_begin_move(my_pal_window_t* win) {
   return MY_RET_OK;
 }
 
+static my_ret_t dummy_win_set_cursor(my_pal_window_t* win,
+                                     my_cursor_t cursor) {
+  dummy_window_t* w = (dummy_window_t*)win;
+  if (cursor < MY_CURSOR_ARROW || cursor > MY_CURSOR_HAND) {
+    return MY_RET_INVALID_PARAMS;
+  }
+  w->cursor = cursor; /* recorded for tests (M21a) */
+  return MY_RET_OK;
+}
+
 static bool dummy_needs_csd(my_pal_t* pal) {
   return pal_from(pal)->needs_csd; /* injectable test hook (M16) */
 }
@@ -138,7 +149,8 @@ static const my_pal_window_vtable_t s_dummy_window_vtable = {
     dummy_win_set_title, dummy_win_resize,  dummy_win_show,
     dummy_win_get_size,  dummy_win_get_lcd, dummy_win_destroy,
     dummy_win_gl_enable, dummy_win_ime_set_spot,
-    dummy_win_move,      dummy_win_begin_move};
+    dummy_win_move,      dummy_win_begin_move,
+    dummy_win_set_cursor};
 
 static my_pal_window_t* dummy_window_create(my_pal_t* pal, int32_t w, int32_t h,
                                             const char* title) {
@@ -415,4 +427,8 @@ void my_pal_dummy_set_needs_csd(my_pal_t* pal, bool needs) {
 
 uint32_t my_pal_dummy_begin_move_count(my_pal_window_t* win) {
   return win != NULL ? ((dummy_window_t*)win)->begin_move_count : 0;
+}
+
+my_cursor_t my_pal_dummy_get_cursor(my_pal_window_t* win) {
+  return win != NULL ? ((dummy_window_t*)win)->cursor : MY_CURSOR_ARROW;
 }

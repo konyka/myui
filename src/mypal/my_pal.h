@@ -29,6 +29,17 @@ typedef struct my_pal_main_loop_t my_pal_main_loop_t;
 typedef struct my_pal_gl_t my_pal_gl_t;
 
 /**
+ * @brief Mouse cursor shape over a window (M21a). ARROW is the default
+ * baseline; TEXT = I-beam over text inputs; HAND = pointer over
+ * clickable widgets (applied by the event dispatcher's hover tracking).
+ */
+typedef enum my_cursor_t {
+  MY_CURSOR_ARROW = 0,
+  MY_CURSOR_TEXT,
+  MY_CURSOR_HAND
+} my_cursor_t;
+
+/**
  * @brief Application event handler. window is the event source, or NULL
  * for window-less events (e.g. posted USER events). Return value is
  * reserved (currently ignored).
@@ -79,6 +90,14 @@ typedef struct my_pal_window_vtable_t {
    * no concept of it (dummy/linux_fb).
    */
   my_ret_t (*begin_move)(my_pal_window_t* win);
+  /**
+   * @brief Set the mouse cursor shape over this window (M21a). Optional
+   * slot: NULL = the port has no cursor control (linux_fb); the inline
+   * wrapper then returns MY_RET_NOT_SUPPORTED. The port re-asserts the
+   * shape itself where the windowing system resets it (wayland: on every
+   * wl_pointer enter, with that enter's serial).
+   */
+  my_ret_t (*set_cursor)(my_pal_window_t* win, my_cursor_t cursor);
 } my_pal_window_vtable_t;
 
 /** @brief Window base "class". */
@@ -183,6 +202,16 @@ static inline my_ret_t my_pal_window_begin_move(my_pal_window_t* win) {
     return MY_RET_NOT_SUPPORTED;
   }
   return win->vtable->begin_move(win);
+}
+
+/** @brief Set the mouse cursor shape over this window (M21a).
+ * NOT_SUPPORTED when the port has no cursor control (NULL slot). */
+static inline my_ret_t my_pal_window_set_cursor(my_pal_window_t* win,
+                                                my_cursor_t cursor) {
+  if (win->vtable->set_cursor == NULL) {
+    return MY_RET_NOT_SUPPORTED;
+  }
+  return win->vtable->set_cursor(win, cursor);
 }
 
 /* ---------------- main loop ---------------- */

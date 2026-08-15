@@ -23,6 +23,7 @@
   - [ ] `get_lcd()`：给 myr 绘制的 `my_lcd_t*`；最简单方案 = 内嵌 `my_lcd_mem`，`end_frame` 时整块拷贝/上屏（x11 port 就是这么做的）
   - [ ] `set_title` / `resize`（重建 lcd 缓冲）/ `show` / `get_size` / `destroy`
   - [ ] `gl_enable`（M10c，可打桩返回 NULL）：窗口的 GL 挂载点，见下节
+  - [ ] `set_cursor`（M21a，可打桩 noop/NULL 槽）：鼠标光标形状，见"光标决策点"节
   - [ ] `get_scale_factor`（M12c，可返回 1.0 打桩）：显示器缩放比。PAL 边界一律**逻辑像素**——窗口尺寸与事件坐标报逻辑值；port 内部把渲染缓冲物理化（x11 照抄：窗口/缓冲按 logical*scale 建、事件 ÷scale；wayland：shm 缓冲 ×scale + `wl_surface_set_buffer_scale`，事件直通；dummy：注入即可测全链路）。scale 检测来源：x11=Xft.dpi→物理 DPI→1.0，wayland=wl_output.scale，嵌入式=环境变量或 1.0。
 - [ ] 主循环 `my_pal_main_loop_t` vtable
   - [ ] `run`：阻塞等待（select/poll/平台 wait），超时取 `my_timer_manager_due_in_ms`，分发事件 + `my_timer_manager_fire`
@@ -51,6 +52,12 @@
 
 - pal vtable `needs_client_decoration`：**合成器/WM 给不给窗口装饰（SSD）**——给（x11 各 WM、windows/macOS）返回 false；不给（mutter 的 plain xdg-shell）返回 true，my_window 会自绘标题栏（拖动 + 关闭）。嵌入式/全屏 port（linux_fb 类）返回 false（根本没有装饰概念）。
 - 返回 true 的 port 必须实现窗口 vtable `begin_move`：记录最近一次指针 button 的 serial/句柄，调入合成器的交互式移动（wayland 参考实现 = `xdg_toplevel_move`）。返回 false 的 port 打桩 noop 即可。
+
+## 光标决策点（M21a）
+
+- 窗口 vtable `set_cursor(win, my_cursor_t)`（ARROW/TEXT/HAND；末尾槽，NULL 安全 inline——无指针概念的 port（linux_fb 类全屏）打桩 noop 返回 NOT_SUPPORTED 或留 NULL）。语义层在 myui 分发器 hover 切换处统一调用，port 只管"把形状落到系统"。
+- **桌面窗口系统**：x11 参考 = `XCreateFontCursor`（核心字体 XC_left_ptr/XC_xterm/XC_hand2）缓存 + `XDefineCursor`，pal destroy 时释放缓存。**wayland 注意**：合成器在每次 `wl_pointer.enter` 时重置指针图像——必须存最近 enter 的 serial 并在 enter 回调里用 `wl_pointer_set_cursor` 重设当前形状（参考实现 = wl_cursor_theme 按别名 fallback 序取主题光标，取不到静默留合成器默认）。
+- 无窗口系统的 port 不实现也不影响上层（inline 包装返回 NOT_SUPPORTED，分发器静默跳过）。
 
 ## GL 窗口集成（M10c，可选）
 

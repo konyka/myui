@@ -151,9 +151,14 @@ PAL port 矩阵：
 
 - **框选多选**：view 内选择集 darray（弱引用，`my_node_view_is_selected/selected_count/selected_at` 查询 API）；左键空拖 = rubber band（>3px 才显现，`nv_dashed_rect` 6/4 虚线 + 半透明填充，up 时按节点 rect 与框相交批量选中）；Ctrl+点 = toggle，普通点 = 单选；选中集 >1 时拖任一选中节点 = 整体拖动（MOVE drag_node 分支全员位移）；Del 批量级联删（while 循环 remove_node，其内部自清选择集）。节点选中描边在 my_node 绘制（view 拥有集合、node 回查，`node.selected` 部件色回退 #E0A030，线宽 2）。
 - **小地图**：floating overlay 子控件（`floating` 标志 + 全幅 rect，最后绘制；CTM 用 `soft_set_scale(base)` + 逆平移还原屏幕坐标系）——同件绘制框选与小地图。小地图固定右下 160×100（边距 10），内容 = 全部节点包围盒适配缩放画节点色块 + 视口框（`node_view.minimap`/`node_view.minimap_viewport` 键）；DOWN 先查小地图命中（屏幕坐标），命中则 `nv_center_on` 跳转视口中心。
-- **连线流动画**：选中连线（或 `flow_all`）以 marching dashes 绘制——my_bezier 细分点 + 6px/4px 相位 fmod 的 `nv_stroke_link_dashed`；`nv_flow_sync_timer` 按需挂 33ms 定时器（仅选中连线或 flow_all 时存在），tick offset += 1.5px + invalidate；`my_node_view_flow_offset` 诊断 API 供测试。
+- **连线流动画**：选中连线（或 `flow_all`）以 marching dashes 绘制——my_bezier 细分点 + 相位 fmod 的 `nv_stroke_link_dashed`；`nv_flow_sync_timer` 按需挂 33ms 定时器（仅选中连线或 flow_all 时存在），tick 推进 offset + invalidate；`my_node_view_flow_offset` 诊断 API 供测试。（M21a 调速：dash 8px/6px、0.5px/tick ≈15px/s。）
 - **事件分派顺序**（DOWN）：小地图命中 → 接口（拖线/拾起）→ 连线（点选）→ 节点（Ctrl toggle/单选/开始拖动）→ 空白（开始框选）；中键拖 = pan。一切坐标仍在 view 层单一逆变换（M20a 约定），overlay 交互用屏幕坐标。
 - **遍历过滤**：overlay 是纯 widget 非节点——`nv_node_at`/`nv_socket_at`/`nv_magnet_scan`/`remove_node` 全部按 `node->floating` 跳过（修掉对浮层越界读节点字段的隐患）。
+
+### 增强第三批（M21a）
+
+- **小地图底部裁剪修复**：实测根因与设计猜测不同——overlay/小地图定位本就相对 view 自身 rect；真正原因是 CSD 内容容器比窗口矮 36px（M16），app 按窗口全高给 view 定 rect（demo_nodes：窗口 640 高、view (10,36,940,594)，容器仅 604）导致 view 底部被父级 clip（my_widget_paint 每个父件 clip 到自己 rect），坐落在 view 底缘的小地图随之下半被裁。修法：`nv_visible_extent`（view rect 与祖先 clip 链求交，纯平移坐标系）算出**可见底右缘**，小地图定位/命中统一锚可见区（`nv_minimap_origin` 单一来源）；无裁剪时与旧行为逐像素一致（回归测试双断言：CSD 溢出场景小地图完整落在容器内 + 非 CSD 场景锚 rect 角不变）。
+- **流动画调速**：1.5px/tick(≈45px/s) → 0.5px/tick(≈15px/s)，dash 6/4 → 8/6；测试钉死精确步进（dummy 假时钟下一 tick = 0.5px）。
 
 ## 三次贝塞尔曲线（M19a）
 - **接口**：vgcanvas vtable 末尾追加 `curve_to(cx1,cy1,cx2,cy2,x,y)`（冻结式扩展；NULL 槽 = NOT_SUPPORTED，inline 包装判定）。路径级操作，与 line_to 同类，save/restore 无涉；无当前点（未 move_to）返回 FAIL（canvas 惯例，注释注明）。
@@ -319,6 +324,13 @@ PAL port 矩阵：
 - `src/myc/myconf/`（并入 myc）：`my_conf_node_t` 七型树（NULL/BOOL/INT64/DOUBLE/STR/OBJECT/ARRAY，OBJECT 保插入序，children=darray，父持子所有权）+ 点路径查询（数字段在 ARRAY 上是下标、OBJECT 上是字面键）+ 类型严格带默认值的 getter（INT64↛DOUBLE 不互转）+ load/save_file（JSON）。
 - **JSON 全集**（RFC 8259 自研递归下降）：全转义 + \uXXXX 代理对、整数→INT64（strtoll ERANGE 溢出回落 DOUBLE）/小数指数→DOUBLE、错误带 1 基行列；序列化紧凑/pretty(2) 两式，整数值 DOUBLE 打 %.1f 保类型往返；畸形输入 14 种向量全部明确拒绝。
 - **BSON**：严格小端读（长度自洽校验、零越界、嵌套上顶 64、任意前缀截断 fuzz 不崩）；映射 0x01/02/03/04/07(24 hex)/08/09(datetime→INT64 毫秒)/0A/10→INT64/12，**其余类型一律报错**（完整性优先）；写侧 INT64 按范围选 0x10/0x12。TOML/YAML 子集为 M17b（docs/conf.md）。
+
+## 鼠标光标体系（M21a）
+
+- **PAL 槽**：`my_cursor_t`（ARROW/TEXT/HAND，my_pal.h）+ 窗口 vtable 末尾槽 `set_cursor`（NULL 安全 inline `my_pal_window_set_cursor`，无槽 = NOT_SUPPORTED；linux_fb 打桩 noop——全屏无指针概念）。
+- **port 实现**：wayland = wl_cursor_theme（size 24，GNOME/Adwaita 标准名按 fallback 序探测：ARROW `left_ptr/default/arrow`、TEXT `xterm/ibeam/text`、HAND `hand2/pointer/pointing_hand`，frame 0 静态图；主题缺失静默留合成器默认）——**每次 wl_pointer enter 必须重设**（合成器在 enter 时重置图像），serial 用该次 enter 的（存 pal），set_cursor 时指针在面内立即重设；x11 = `XCreateFontCursor`（XC_left_ptr/XC_xterm/XC_hand2 核心字体恒有）懒缓存三枚 + `XDefineCursor`，pal destroy 时 XFreeCursor；dummy 记录当前形状（`my_pal_dummy_get_cursor` 测试钩子）。
+- **语义接线在分发器**：hover 唯一变化点 = `hover_update`——按 hover 目标沿父链取最近命中规则：**edit/text_area → TEXT，其他 focusable → HAND，其余 → ARROW**（离开后回 ARROW）；window 缓存已应用形状，同类切换不重复下发；无窗口树（单测）/无 pal 窗口静默跳过。
+- 测试：dummy 全 hover 矩阵（edit/text_area/button/空白/直接切换/恢复）+ window-less 树静默 + NULL 槽 NOT_SUPPORTED + 非法枚举 INVALID_PARAMS（tests/my_cursor_test.c）。
 
 ## 客户端装饰（CSD）标题栏（M16）
 - **动机（实测）**：GNOME/mutter 的 wayland 会话对 plain xdg-shell 客户端**不提供 SSD**（registry 不广告 zxdg_decoration_manager_v1）——窗口无标题栏、无法拖动。结论：必须由客户端自绘装饰。

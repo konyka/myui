@@ -42,6 +42,9 @@ typedef struct x11_pal_t {
   } incr_tx[4];      /**< concurrent INCR transfers (M12d) */
   /** @brief XIM connection (M13a; NULL = no input method, plain keys). */
   XIM xim;
+  /** @brief Cached font cursors by my_cursor_t (M21a; lazy, 0 = uncached). */
+  Cursor cursors[3];
+  bool cursors_init;
 #if defined(MYUI_PAL_GL_EGL)
   EGLDisplay egl_dpy; /**< shared EGL display (lazy, EGL_NO_DISPLAY off) */
   EGLConfig egl_cfg;

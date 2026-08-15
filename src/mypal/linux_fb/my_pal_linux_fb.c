@@ -170,6 +170,13 @@ static my_ret_t fb_win_begin_move_noop(my_pal_window_t* win) {
   return MY_RET_OK; /* M16: fullscreen, no interactive move */
 }
 
+static my_ret_t fb_win_set_cursor_noop(my_pal_window_t* win,
+                                       my_cursor_t cursor) {
+  (void)win;
+  (void)cursor;
+  return MY_RET_NOT_SUPPORTED; /* M21a: fb has no pointer cursor at all */
+}
+
 static bool fb_needs_csd(my_pal_t* pal) {
   (void)pal;
   return false; /* fullscreen: no decoration at all */
@@ -179,7 +186,8 @@ static const my_pal_window_vtable_t s_fb_window_vtable = {
     fb_win_set_title, fb_win_resize,  fb_win_show,
     fb_win_get_size,  fb_win_get_lcd, fb_win_destroy,
     fb_win_gl_enable, fb_win_ime_noop,
-    fb_win_move_noop, fb_win_begin_move_noop};
+    fb_win_move_noop, fb_win_begin_move_noop,
+    fb_win_set_cursor_noop};
 
 static my_pal_window_t* fb_window_create(my_pal_t* pal, int32_t w, int32_t h,
                                          const char* title) {

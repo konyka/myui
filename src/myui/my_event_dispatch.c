@@ -4,6 +4,52 @@
  */
 #include "myui/my_event_dispatch.h"
 
+#include "myc/my_str.h"
+#include "myui/my_window.h"
+
+/**
+ * @brief Cursor shape for a hover target (M21a): nearest ancestor-or-self
+ * that is a text input (edit/text_area) -> TEXT; else the nearest
+ * focusable -> HAND (buttons, menus, links, focusable canvases); else
+ * ARROW. Single walk up the parent chain, first rule hit wins.
+ */
+static my_cursor_t hover_cursor_of(my_widget_t* target) {
+  my_widget_t* w = target;
+  while (w != NULL) {
+    if (my_str_eq(w->widget_type, "edit") ||
+        my_str_eq(w->widget_type, "text_area")) {
+      return MY_CURSOR_TEXT;
+    }
+    if (w->focusable) {
+      return MY_CURSOR_HAND;
+    }
+    w = w->parent;
+  }
+  return MY_CURSOR_ARROW;
+}
+
+/** @brief Apply the hover-driven cursor to the window owning the
+ * dispatcher's root (M21a). Silent no-op for window-less trees (unit
+ * tests) and for ports without cursor control (NULL vtable slot). */
+static void hover_cursor_apply(my_event_dispatcher_t* d,
+                               my_widget_t* target) {
+  my_widget_t* root = d->root;
+  my_window_t* win;
+  my_cursor_t cur;
+  if (root == NULL || !my_str_eq(root->widget_type, "window")) {
+    return;
+  }
+  win = (my_window_t*)root;
+  if (win->pal_window == NULL) {
+    return;
+  }
+  cur = hover_cursor_of(target);
+  if (cur != win->cursor) {
+    win->cursor = cur;
+    my_pal_window_set_cursor(win->pal_window, cur);
+  }
+}
+
 void my_event_dispatcher_init(my_event_dispatcher_t* dispatcher,
                               my_widget_t* root) {
   if (dispatcher != NULL) {
@@ -139,6 +185,7 @@ static void hover_update(my_event_dispatcher_t* d, my_widget_t* target) {
     my_widget_invalidate(target, NULL);
     my_emitter_emit(target->emitter, "hover_enter", NULL);
   }
+  hover_cursor_apply(d, target); /* M21a: cursor follows the hover class */
 }
 
 /** @brief Switch key focus, emitting "blur"/"focus" on the widgets. */

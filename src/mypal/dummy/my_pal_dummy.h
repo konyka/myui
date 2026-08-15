@@ -44,4 +44,7 @@ void my_pal_dummy_set_needs_csd(my_pal_t* pal, bool needs);
 /** @brief Test hook (M16): how often begin_move was requested. */
 uint32_t my_pal_dummy_begin_move_count(my_pal_window_t* win);
 
+/** @brief Test hook (M21a): the window's current cursor shape. */
+my_cursor_t my_pal_dummy_get_cursor(my_pal_window_t* win);
+
 #endif /* MY_PAL_DUMMY_H */

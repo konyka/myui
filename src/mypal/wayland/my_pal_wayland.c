@@ -27,6 +27,7 @@
 #include <unistd.h>
 
 #include <wayland-client.h>
+#include <wayland-cursor.h>
 #include <xkbcommon/xkbcommon.h>
 
 #if defined(MYUI_PAL_GL_EGL)
@@ -77,6 +78,15 @@ typedef struct wl_pal_t {
   uint32_t kb_enter_serial;              /**< last keyboard enter serial */
   uint32_t last_button_serial; /**< last pointer button serial (M16 CSD:
                                 * xdg_toplevel_move needs it) */
+  /** @brief Cursor theme state (M21a): the compositor resets the pointer
+   * image on every wl_pointer enter, so we re-assert `cursor` there
+   * (with that enter's serial) and on every set_cursor while inside. */
+  struct wl_cursor_theme* cursor_theme;
+  struct wl_cursor* cursors[3]; /**< by my_cursor_t (NULL = not in theme) */
+  struct wl_surface* cursor_surface;
+  my_cursor_t cursor;      /**< last requested shape (default ARROW) */
+  uint32_t ptr_enter_serial; /**< last pointer enter serial */
+  int8_t cursor_state;     /**< 0 = untried, 1 = theme ready, -1 = no theme */
   struct wl_window_t* kb_focus;          /**< window with keyboard focus */
   /** @brief text-input-v3 (IME): pending state until done (M16). */
   struct zwp_text_input_manager_v3* ti_mgr;
@@ -423,17 +433,99 @@ static wl_window_t* find_by_surface(wl_pal_t* p, struct wl_surface* surface) {
 
 static struct wl_surface* g_last_surface = NULL;
 
+/* ---------------- pointer cursor (M21a) ----------------
+ * GNOME/Adwaita theme names, probed in order (first hit wins); themes
+ * missing every alias leave the compositor's default image in place. */
+
+/** @brief Candidate theme names per my_cursor_t, most specific first. */
+static const char* const CURSOR_NAMES[3][4] = {
+    {"left_ptr", "default", "arrow", NULL},       /* MY_CURSOR_ARROW */
+    {"xterm", "ibeam", "text", NULL},             /* MY_CURSOR_TEXT */
+    {"hand2", "pointer", "pointing_hand", NULL}}; /* MY_CURSOR_HAND */
+
+/** @brief Lazily load the theme (size 24, default name) and resolve the
+ * three shapes with their fallback aliases. Idempotent. */
+static void wl_cursor_ensure_theme(wl_pal_t* p) {
+  int i, j;
+  if (p->cursor_state != 0) {
+    return;
+  }
+  p->cursor_state = -1; /* load failure sticks: no cursor control */
+  p->cursor_theme = wl_cursor_theme_load(NULL, 24, p->shm);
+  if (p->cursor_theme == NULL) {
+    return;
+  }
+  for (i = 0; i < 3; i++) {
+    for (j = 0; CURSOR_NAMES[i][j] != NULL; j++) {
+      p->cursors[i] =
+          wl_cursor_theme_get_cursor(p->cursor_theme, CURSOR_NAMES[i][j]);
+      if (p->cursors[i] != NULL) {
+        break;
+      }
+    }
+  }
+  p->cursor_state = 1;
+  if (getenv("MYUI_WL_TRACE") != NULL) {
+    fprintf(stderr, "[wltrace] cursor theme: arrow=%s text=%s hand=%s\n",
+            p->cursors[0] != NULL ? p->cursors[0]->name : "(none)",
+            p->cursors[1] != NULL ? p->cursors[1]->name : "(none)",
+            p->cursors[2] != NULL ? p->cursors[2]->name : "(none)");
+  }
+}
+
+/** @brief Assert the requested shape on the seat's pointer. Must be
+ * called after every wl_pointer enter (the compositor resets the image
+ * then) with that enter's serial. Frame 0 only (no animation). */
+static void wl_cursor_apply(wl_pal_t* p, uint32_t serial) {
+  struct wl_cursor* c;
+  struct wl_cursor_image* img;
+  struct wl_buffer* buf;
+  if (p->pointer == NULL) {
+    return;
+  }
+  wl_cursor_ensure_theme(p);
+  if (p->cursor_state != 1 || p->compositor == NULL) {
+    return;
+  }
+  c = p->cursors[p->cursor];
+  if (c == NULL || c->image_count <= 0) {
+    return; /* shape missing from the theme: keep the default image */
+  }
+  img = c->images[0];
+  buf = wl_cursor_image_get_buffer(img);
+  if (buf == NULL) {
+    return;
+  }
+  if (p->cursor_surface == NULL) {
+    p->cursor_surface = wl_compositor_create_surface(p->compositor);
+    if (p->cursor_surface == NULL) {
+      return;
+    }
+  }
+  wl_surface_attach(p->cursor_surface, buf, 0, 0);
+  wl_surface_damage(p->cursor_surface, 0, 0, (int32_t)img->width,
+                    (int32_t)img->height);
+  wl_surface_commit(p->cursor_surface);
+  wl_pointer_set_cursor(p->pointer, serial, p->cursor_surface,
+                        (int32_t)img->hotspot_x, (int32_t)img->hotspot_y);
+  if (getenv("MYUI_WL_TRACE") != NULL) {
+    fprintf(stderr, "[wltrace] set_cursor %s (serial=%u)\n", c->name,
+            serial);
+  }
+}
+
 static void on_pointer_enter(void* data, struct wl_pointer* ptr,
                              uint32_t serial, struct wl_surface* surface,
                              wl_fixed_t sx, wl_fixed_t sy) {
   wl_pal_t* p = (wl_pal_t*)data;
   wl_window_t* w;
   (void)ptr;
-  (void)serial;
   if (getenv("MYUI_WL_TRACE") != NULL) {
     fprintf(stderr, "[wltrace] enter surf=%p\n", (void*)surface);
   }
   g_last_surface = surface;
+  p->ptr_enter_serial = serial; /* M21a: wl_pointer_set_cursor anchor */
+  wl_cursor_apply(p, serial);   /* re-assert after the compositor reset */
   w = find_by_surface(p, surface);
   if (w != NULL) {
     w->pointer_x = wl_fixed_to_int(sx);
@@ -1321,6 +1413,21 @@ static my_ret_t wl_win_begin_move(my_pal_window_t* win) {
   return MY_RET_OK;
 }
 
+/** @brief M21a: record the shape; apply immediately when the pointer is
+ * inside one of our surfaces (otherwise the next enter applies it). */
+static my_ret_t wl_win_set_cursor(my_pal_window_t* win, my_cursor_t cursor) {
+  wl_window_t* w = (wl_window_t*)win;
+  wl_pal_t* p = w->pal;
+  if (cursor < MY_CURSOR_ARROW || cursor > MY_CURSOR_HAND) {
+    return MY_RET_INVALID_PARAMS;
+  }
+  p->cursor = cursor;
+  if (g_last_surface != NULL && p->ptr_enter_serial != 0) {
+    wl_cursor_apply(p, p->ptr_enter_serial);
+  }
+  return MY_RET_OK;
+}
+
 /** @brief M16: mutter on plain xdg-shell advertises no decoration
  * manager -> we must draw our own title bar. */
 static bool wl_needs_csd(my_pal_t* pal) {
@@ -1332,7 +1439,8 @@ static const my_pal_window_vtable_t s_wl_window_vtable = {
     wl_win_set_title, wl_win_resize,  wl_win_show,
     wl_win_get_size,  wl_win_get_lcd, wl_win_destroy,
     wl_win_gl_enable, wl_win_ime_noop,
-    wl_win_move,      wl_win_begin_move};
+    wl_win_move,      wl_win_begin_move,
+    wl_win_set_cursor};
 
 static my_pal_window_t* wl_window_create(my_pal_t* pal, int32_t w, int32_t h,
                                          const char* title) {
@@ -1670,6 +1778,12 @@ static void wl_pal_destroy(my_pal_t* pal) {
   }
   if (p->pointer != NULL) {
     wl_pointer_destroy(p->pointer);
+  }
+  if (p->cursor_surface != NULL) { /* M21a */
+    wl_surface_destroy(p->cursor_surface);
+  }
+  if (p->cursor_theme != NULL) {
+    wl_cursor_theme_destroy(p->cursor_theme);
   }
   if (p->keyboard != NULL) {
     wl_keyboard_destroy(p->keyboard);

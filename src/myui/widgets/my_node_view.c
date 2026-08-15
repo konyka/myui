@@ -231,10 +231,11 @@ void my_node_view_get_pan(const my_widget_t* view, float* out_x,
   }
 }
 
-/** @brief 33ms tick: advance the dash phase (marching ants). */
+/** @brief 33ms tick: advance the dash phase (marching ants). M21a: step
+ * 0.5px/tick ≈ 15px/s (was 1.5 ≈ 45px/s — too frantic). */
 static my_ret_t nv_flow_tick(void* ctx) {
   my_node_view_t* v = (my_node_view_t*)ctx;
-  v->flow_offset += 1.5f;
+  v->flow_offset += 0.5f;
   if (v->flow_offset > 100000.0f) {
     v->flow_offset = 0.0f;
   }
@@ -256,15 +257,15 @@ static void nv_flow_sync_timer(my_node_view_t* v) {
   }
 }
 
-/** @brief Stroke a bezier as marching dashes (dash 6 / gap 4, phase
- * -offset). Same sampling as the solid path (my_bezier). */
+/** @brief Stroke a bezier as marching dashes (dash 8 / gap 6 since M21a,
+ * phase -offset). Same sampling as the solid path (my_bezier). */
 static void nv_stroke_link_dashed(my_widget_t* widget, my_vgcanvas_t* vg,
                                   float x0, float y0, float cx1, float cy1,
                                   float cx2, float cy2, float x1, float y1,
                                   float offset, uint32_t rgba) {
   link_pts_t pts;
   int i;
-  float dash = 6.0f, period = 10.0f;
+  float dash = 8.0f, period = 14.0f;
   float phase;
   float acc = 0.0f;
   float px = x0, py = y0;
@@ -707,6 +708,45 @@ static void nv_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
 #define NV_MINIMAP_W 160
 #define NV_MINIMAP_H 100
 
+/** @brief Visible bottom-right extent of the view in VIEW-LOCAL coords
+ * (M21a): the view's own rect intersected with every ancestor's clip
+ * (my_widget_paint clips children to the parent rect). When the view
+ * overflows its container — e.g. a CSD content container 36px shorter
+ * than the window while the app sized the view for the full window —
+ * the minimap anchors to the VISIBLE bottom-right instead of the
+ * clipped-away rect corner. Pure translations only (no scaling between
+ * widget rects). */
+static void nv_visible_extent(const my_widget_t* w, float* out_x1,
+                              float* out_y1) {
+  float x1 = (float)w->rect.w, y1 = (float)w->rect.h;
+  int32_t ox = w->rect.x, oy = w->rect.y; /* view origin, ancestor space */
+  const my_widget_t* p = w->parent;
+  while (p != NULL) {
+    float ex = (float)p->rect.w - (float)ox; /* parent edges, view-local */
+    float ey = (float)p->rect.h - (float)oy;
+    if (ex < x1) {
+      x1 = ex;
+    }
+    if (ey < y1) {
+      y1 = ey;
+    }
+    ox += p->rect.x;
+    oy += p->rect.y;
+    p = p->parent;
+  }
+  *out_x1 = x1 > 0.0f ? x1 : 0.0f;
+  *out_y1 = y1 > 0.0f ? y1 : 0.0f;
+}
+
+/** @brief Minimap top-left in view-local screen coords (shared by the
+ * overlay paint and the DOWN hit test so they never disagree). */
+static void nv_minimap_origin(const my_widget_t* w, float* mx, float* my) {
+  float x1 = 0.0f, y1 = 0.0f;
+  nv_visible_extent(w, &x1, &y1);
+  *mx = x1 - (float)NV_MINIMAP_W - 10.0f;
+  *my = y1 - (float)NV_MINIMAP_H - 10.0f;
+}
+
 /** @brief Dashed rect stroke in screen space (dash 6 / gap 4). */
 static void nv_dashed_rect(my_vgcanvas_t* vg, float x, float y, float w,
                            float h, uint32_t rgba) {
@@ -820,10 +860,9 @@ static void nv_overlay_paint(my_widget_t* ov, my_vgcanvas_t* vg) {
     my_vgcanvas_fill_rect(vg, &(my_rectf_t){sx0, sy0, sx1 - sx0, sy1 - sy0});
     nv_dashed_rect(vg, sx0, sy0, sx1 - sx0, sy1 - sy0, border);
   }
-  /* minimap (bottom-right, screen space) */
+  /* minimap (bottom-right of the VISIBLE area, screen space) */
   {
-    float mx = (float)(w->rect.w - NV_MINIMAP_W - 10);
-    float my = (float)(w->rect.h - NV_MINIMAP_H - 10);
+    float mx = 0.0f, my = 0.0f;
     float bx0 = 0.0f, by0 = 0.0f, s = 1.0f;
     uint32_t mbg = my_widget_part_color(w, "node_view", "minimap",
                                         MY_STATE_NORMAL, "bg_color",
@@ -832,6 +871,7 @@ static void nv_overlay_paint(my_widget_t* ov, my_vgcanvas_t* vg) {
                                         MY_STATE_NORMAL, "fg_color",
                                         0xFFFFFFFFu);
     size_t i, n;
+    nv_minimap_origin(w, &mx, &my);
     my_vgcanvas_set_fill_color(vg, my_color_from_rgba32(mbg));
     my_vgcanvas_fill_rect(vg, &(my_rectf_t){mx, my, NV_MINIMAP_W,
                                             NV_MINIMAP_H});
@@ -949,16 +989,17 @@ static my_ret_t nv_event(my_widget_t* widget, const my_event_t* event) {
       my_widget_global_to_local(widget, &lx, &ly);
       /* minimap click: jump the viewport (screen space, BEFORE the
        * canvas transform) */
-      if (lx >= widget->rect.w - NV_MINIMAP_W - 10 &&
-          lx < widget->rect.w - 10 && ly >= widget->rect.h - NV_MINIMAP_H - 10 &&
-          ly < widget->rect.h - 10) {
-        float bx0 = 0.0f, by0 = 0.0f, s = 1.0f;
-        float mx = (float)(widget->rect.w - NV_MINIMAP_W - 10);
-        float my = (float)(widget->rect.h - NV_MINIMAP_H - 10);
-        nv_minimap_fit(v, &bx0, &by0, &s);
-        nv_center_on(v, bx0 + ((float)lx - mx) / s,
-                     by0 + ((float)ly - my) / s);
-        return MY_RET_OK;
+      {
+        float mx = 0.0f, my = 0.0f;
+        nv_minimap_origin(widget, &mx, &my);
+        if ((float)lx >= mx && (float)lx < mx + NV_MINIMAP_W &&
+            (float)ly >= my && (float)ly < my + NV_MINIMAP_H) {
+          float bx0 = 0.0f, by0 = 0.0f, s = 1.0f;
+          nv_minimap_fit(v, &bx0, &by0, &s);
+          nv_center_on(v, bx0 + ((float)lx - mx) / s,
+                       by0 + ((float)ly - my) / s);
+          return MY_RET_OK;
+        }
       }
       my_node_view_screen_to_canvas(widget, lx, ly, &cx, &cy);
       /* drag out of an output socket: preview */

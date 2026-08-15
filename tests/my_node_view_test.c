@@ -543,7 +543,9 @@ static void test_flow_selected_link_marches(void) {
   o0 = my_node_view_flow_offset(f.view);
   TEST_ASSERT(o0 == 0.0f);
   /* select the link (click its midpoint ~ (330,184)) -> timer mounts,
-   * offset advances on ticks (added at now=100, due at 133) */
+   * offset advances 0.5px per 33ms tick (M21a; the dummy timer manager
+   * fires an overdue timer exactly once per run with a frozen clock:
+   * added at now=100 due 133, then rescheduled now+33) */
   wev(&f, MY_EVENT_POINTER_DOWN, 330, 184);
   wev(&f, MY_EVENT_POINTER_UP, 330, 184);
   my_pal_dummy_set_now_ms(f.pal, 200);
@@ -554,6 +556,8 @@ static void test_flow_selected_link_marches(void) {
   o2 = my_node_view_flow_offset(f.view);
   TEST_ASSERT(o1 > o0);
   TEST_ASSERT(o2 > o1);
+  TEST_ASSERT(o1 == 0.5f); /* exact M21a pace: 0.5px/tick (~15px/s) */
+  TEST_ASSERT(o2 == 1.0f);
   /* deselect (click empty) -> timer unmounts, offset stops */
   wev(&f, MY_EVENT_POINTER_DOWN, 500, 400);
   wev(&f, MY_EVENT_POINTER_UP, 500, 400);
@@ -599,6 +603,58 @@ static void test_selection_overlay_no_leak(void) {
   my_allocator_debug_destroy(dbg);
 }
 
+/* ---------------- M21a: minimap anchors to the VISIBLE bottom -------- */
+
+static void test_minimap_visible_extent_under_csd(void) {
+  /* CSD (M16) shrinks the content container by the 36px title bar; a
+   * view sized for the FULL window height (the demo_nodes values:
+   * window 960x640, view (10,36,940,594)) overflows the 604-high
+   * container and its rect bottom is clipped away by the parent clip
+   * (my_widget_paint clips children to the parent rect). The minimap
+   * must anchor to the VISIBLE bottom-right, not the rect corner. */
+  my_pal_t* pal = my_pal_dummy_create(NULL);
+  my_pal_main_loop_t* loop = my_pal_main_loop_create(pal);
+  my_window_manager_t* wm;
+  my_window_t* win;
+  my_widget_t* view;
+  rec_vg_t rec;
+  my_pal_dummy_set_needs_csd(pal, true);
+  wm = my_window_manager_create(NULL, pal, loop);
+  win = my_window_create(NULL, pal, 960, 640, "t");
+  my_window_manager_open(wm, win);
+  my_widget_unref(my_window_widget(win));
+  view = my_node_view_create(NULL);
+  my_widget_set_rect(view, &(my_rect_t){10, 36, 940, 594}); /* demo_nodes */
+  my_widget_add_child(my_window_widget(win), view);
+  my_widget_unref(view);
+  my_node_view_add_node(view, "a", "A", NULL, 100, 100, 160, 80);
+  my_widget_relayout((my_widget_t*)win); /* bar h:36 + content h:604 */
+  rec_vg_init(&rec);
+  my_widget_paint((my_widget_t*)win, (my_vgcanvas_t*)&rec);
+  /* visible bottom (view-local) = 604 - 36 = 568 -> minimap bg at
+   * (940-170, 568-110) = (770, 458), bottom edge 558 <= 568; the
+   * pre-fix rect-corner spot (770, 484) would have been clipped */
+  TEST_ASSERT(rec_has(&rec, "fill_rect 770 458 160 100"));
+  TEST_ASSERT(!rec_has(&rec, "fill_rect 770 484 160 100"));
+  my_window_manager_destroy(wm);
+  my_pal_main_loop_destroy(loop);
+  my_pal_destroy(pal);
+}
+
+static void test_minimap_rect_corner_when_fitting(void) {
+  /* no clipping anywhere (non-CSD dummy, view == window): the minimap
+   * stays at the view rect's bottom-right corner (zero regression) */
+  wfx_t f;
+  rec_vg_t rec;
+  wfx_init(&f);
+  my_widget_relayout((my_widget_t*)f.win);
+  rec_vg_init(&rec);
+  my_widget_paint((my_widget_t*)f.win, (my_vgcanvas_t*)&rec);
+  TEST_ASSERT(rec_has(&rec, "fill_rect 630 490 160 100")); /* (800-170,
+                                                            * 600-110) */
+  wfx_destroy(&f);
+}
+
 MYTEST_MAIN_BEGIN()
   MYTEST_RUN(test_model_connect_replace_disconnect);
   MYTEST_RUN(test_drag_preview_connect);
@@ -619,4 +675,6 @@ MYTEST_MAIN_BEGIN()
   MYTEST_RUN(test_flow_selected_link_marches);
   MYTEST_RUN(test_flow_dash_matches_bezier);
   MYTEST_RUN(test_selection_overlay_no_leak);
+  MYTEST_RUN(test_minimap_visible_extent_under_csd);
+  MYTEST_RUN(test_minimap_rect_corner_when_fitting);
 MYTEST_MAIN_END()

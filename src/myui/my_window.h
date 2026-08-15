@@ -42,6 +42,8 @@ typedef struct my_window_t {
   uint32_t tip_timer;       /**< pending hover timer id, 0 = none */
   int32_t tip_x;            /**< cursor pos at hover start (window space) */
   int32_t tip_y;
+  my_cursor_t cursor; /**< last shape applied via the pal (M21a; the
+                       * dispatcher's hover tracking drives it) */
   char* title;       /**< owned copy (M16: CSD bar text) */
   struct my_window_manager_t* wm; /**< weak: set by wm open (M16) */
   bool csd;                 /**< client-side decoration active (M16) */
