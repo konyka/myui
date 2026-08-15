@@ -59,6 +59,11 @@ typedef struct my_node_view_t {
   bool flow_all;          /**< flow ALL links (default: selected only) */
   /* M20b: minimap (floating child, painted last) */
   my_widget_t* minimap;   /**< weak (tree ref) */
+  /* M23c: embedded-widget grab for zoom != 1. The generic hit_test walks
+   * SCREEN coords against CANVAS-space child rects, so at zoom != 1 an
+   * embedded control (slider...) is unreachable and the event lands on
+   * the view instead; the view then re-dispatches it in canvas space */
+  my_widget_t* child_grab; /**< weak, NULL = none */
 } my_node_view_t;
 
 #define NV_ZOOM_MIN 0.25f
@@ -1124,6 +1129,39 @@ static my_widget_t* nv_node_at(my_node_view_t* v, float cx, float cy,
   return NULL;
 }
 
+/** @brief Embedded interactive widget (slider...) under a CANVAS point,
+ * or NULL when the point is on bare node surface (M23c). */
+static my_widget_t* nv_embedded_at(my_node_view_t* v, float cx, float cy) {
+  bool titlebar = false;
+  my_widget_t* node = nv_node_at(v, cx, cy, &titlebar);
+  my_widget_t* hit;
+  if (node == NULL) {
+    return NULL;
+  }
+  /* node rects live in canvas coords relative to the view, so (cx,cy)
+   * IS the parent-space coordinate hit_test expects for the subtree */
+  hit = my_widget_hit_test(node, (int32_t)cx, (int32_t)cy);
+  if (hit == NULL || hit == node || hit->vtable == NULL ||
+      hit->vtable->on_event == NULL) {
+    return NULL;
+  }
+  return hit;
+}
+
+/** @brief Deliver a pointer event to an embedded widget with synthesized
+ * "global" coords (M23c): children do their own global_to_local math
+ * over ancestor rects, which are canvas coords — so the synth global is
+ * the canvas point offset by the view's global origin. */
+static bool nv_deliver_canvas(my_widget_t* widget, my_widget_t* target,
+                              const my_event_t* event, float cx, float cy) {
+  my_event_t synth = *event;
+  int32_t gx = 0, gy = 0;
+  my_widget_local_to_global(widget, &gx, &gy);
+  synth.u.pointer.x = (int32_t)cx + gx;
+  synth.u.pointer.y = (int32_t)cy + gy;
+  return target->vtable->on_event(target, &synth) == MY_RET_OK;
+}
+
 static my_ret_t nv_event(my_widget_t* widget, const my_event_t* event) {
   my_node_view_t* v = (my_node_view_t*)widget;
   switch (event->type) {
@@ -1155,6 +1193,7 @@ static my_ret_t nv_event(my_widget_t* widget, const my_event_t* event) {
       if (getenv("MYUI_NV_TRACE") != NULL) {
         fprintf(stderr, "[nvtrace] canvas=(%.1f,%.1f)\n", cx, cy);
       }
+      v->child_grab = NULL;
       /* drag out of an output socket: preview */
       if (nv_socket_at(v, (int32_t)cx, (int32_t)cy, MY_SOCKET_OUT, &node,
                        &slot)) {
@@ -1194,6 +1233,16 @@ static my_ret_t nv_event(my_widget_t* widget, const my_event_t* event) {
           nv_select_clear(v);
           nv_flow_sync_timer(v); /* selected link starts marching */
           my_widget_invalidate(widget, NULL);
+          return MY_RET_OK;
+        }
+      }
+      /* embedded widget (slider...): only reachable via the view at
+       * zoom != 1 (the generic hit_test compares screen coords against
+       * canvas rects); deliver in canvas space and grab it (M23c) */
+      {
+        my_widget_t* emb = nv_embedded_at(v, cx, cy);
+        if (emb != NULL && nv_deliver_canvas(widget, emb, event, cx, cy)) {
+          v->child_grab = emb;
           return MY_RET_OK;
         }
       }
@@ -1243,6 +1292,11 @@ static my_ret_t nv_event(my_widget_t* widget, const my_event_t* event) {
       float cx, cy;
       my_widget_global_to_local(widget, &lx, &ly);
       my_node_view_screen_to_canvas(widget, lx, ly, &cx, &cy);
+      if (v->child_grab != NULL) {
+        /* M23c: forward to the grabbed embedded widget (canvas space) */
+        nv_deliver_canvas(widget, v->child_grab, event, cx, cy);
+        return MY_RET_OK;
+      }
       if (v->preview.active) {
         v->preview.cur_x = (int32_t)cx;
         v->preview.cur_y = (int32_t)cy;
@@ -1294,6 +1348,16 @@ static my_ret_t nv_event(my_widget_t* widget, const my_event_t* event) {
       return MY_RET_FAIL;
     }
     case MY_EVENT_POINTER_UP:
+      if (v->child_grab != NULL) {
+        /* M23c: release the embedded-widget grab */
+        int32_t lx = event->u.pointer.x, ly = event->u.pointer.y;
+        float cx, cy;
+        my_widget_global_to_local(widget, &lx, &ly);
+        my_node_view_screen_to_canvas(widget, lx, ly, &cx, &cy);
+        nv_deliver_canvas(widget, v->child_grab, event, cx, cy);
+        v->child_grab = NULL;
+        return MY_RET_OK;
+      }
       if (v->preview.active) {
         if (v->preview.magnet_node != NULL) {
           /* snapped: connect to the magnet target */

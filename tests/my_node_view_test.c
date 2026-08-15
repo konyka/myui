@@ -5,6 +5,7 @@
  * cancel / pickup-reconnect, select + Del, pan, CSS part colors, leaks.
  */
 #include "myui/widgets/my_node_view.h"
+#include "myui/widgets/my_slider.h"
 
 #include "mypal/dummy/my_pal_dummy.h"
 #include "myr/my_lcd_mem.h"
@@ -304,6 +305,46 @@ static void test_magnet_respects_type_and_distance(void) {
   ev(&f, MY_EVENT_POINTER_MOVE, 320, 300);
   ev(&f, MY_EVENT_POINTER_UP, 320, 300);
   TEST_ASSERT_EQ_INT((int)my_node_view_link_count(f.view), 0);
+  fx_destroy(&f);
+}
+
+static void test_zoomed_embedded_widget_drag(void) {
+  /* M23c regression (the live "slider dead after banding at zoom" bug):
+   * the generic hit_test walks SCREEN coords against CANVAS-space child
+   * rects, so at zoom != 1 an embedded control was unreachable — the
+   * DOWN landed on the view and became a node click / rubber band. The
+   * view now re-dispatches to embedded children in canvas space. */
+  fx_t f;
+  my_widget_t* slider;
+  float v0, v1;
+  fx_init(&f);
+  slider = my_slider_create(NULL);
+  my_widget_set_rect(slider, &(my_rect_t){10, 48, 130, 20});
+  my_widget_add_child(f.na, slider); /* canvas (110,148,130,20) */
+  my_widget_unref(slider);
+  my_node_view_set_zoom(f.view, 1.5f);
+  /* screen = canvas*1.5: slider at (165,222,195,30); press +20/+15,
+   * drag +150px. NOTE: ev() goes through the dispatcher like real
+   * input — at zoom 1 it would hit the slider directly, at 1.5 the
+   * view must forward it (M23c) */
+  v0 = my_slider_get_value(slider);
+  ev(&f, MY_EVENT_POINTER_DOWN, 185, 237);
+  ev(&f, MY_EVENT_POINTER_MOVE, 335, 237);
+  ev(&f, MY_EVENT_POINTER_UP, 335, 237);
+  v1 = my_slider_get_value(slider);
+  TEST_ASSERT(v1 > v0 + 50.0f);
+  /* a rubber band at the same zoom must not break the next drag */
+  my_slider_set_value(slider, 0.0f);
+  ev(&f, MY_EVENT_POINTER_DOWN, 20, 20);
+  ev(&f, MY_EVENT_POINTER_MOVE, 700, 500);
+  ev(&f, MY_EVENT_POINTER_UP, 700, 500);
+  TEST_ASSERT(my_node_view_selected_count(f.view) >= 1);
+  v0 = my_slider_get_value(slider);
+  ev(&f, MY_EVENT_POINTER_DOWN, 185, 237);
+  ev(&f, MY_EVENT_POINTER_MOVE, 335, 237);
+  ev(&f, MY_EVENT_POINTER_UP, 335, 237);
+  v1 = my_slider_get_value(slider);
+  TEST_ASSERT(v1 > v0 + 50.0f);
   fx_destroy(&f);
 }
 
@@ -972,6 +1013,7 @@ MYTEST_MAIN_BEGIN()
   MYTEST_RUN(test_magnet_respects_type_and_distance);
   MYTEST_RUN(test_zoom_clamp_and_anchor);
   MYTEST_RUN(test_zoomed_interaction_uses_canvas_coords);
+  MYTEST_RUN(test_zoomed_embedded_widget_drag);
   MYTEST_RUN(test_remove_node_cascade);
   MYTEST_RUN(test_rubber_band_multi_select);
   MYTEST_RUN(test_multi_drag_and_batch_delete);
