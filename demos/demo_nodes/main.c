@@ -19,7 +19,9 @@
 
 /* Part palette demo — every CSS rule maps to a visual part (M19b):
  * canvas bg / node body / per-category headers (descendant) / socket
- * dots / link + selected + preview. */
+ * dots / link selected + preview. M21b: no `node_link` base rule on
+ * purpose — unselected links tint from their SOURCE socket type color
+ * (a theme `node_link` would still win over the type color). */
 static const char* NODES_CSS =
     "node_view { background-color: #282828 } "
     "node { background-color: #3A3A3A } "
@@ -29,7 +31,6 @@ static const char* NODES_CSS =
     "node.input .header { background-color: #66502E } "  /* brown: env */
     "node_socket.input { background-color: #8A8A8A } "
     "node_socket.output { background-color: #A0A060 } "
-    "node_link { color: #A0A0A0 } "
     "node_link.selected { color: #E0A030 } "
     "node_link.preview { color: #70C0E8 }";
 
@@ -101,7 +102,8 @@ int main(void) {
 
   hint = my_label_create(NULL,
                          "拖标题栏移动节点，右点拖到左点连线（磁吸高亮），点线选中流动，"
-                         "Del 删除；滚轮缩放，中键平移，空白左拖框选，右下角小地图");
+                         "Del 删除；滚轮缩放，中键平移，空白左拖框选，右下角小地图；"
+                         "连线按源接口类型着色带箭头，Environment 节点尺寸自适应");
   my_widget_set_rect(hint, &(my_rect_t){10, 6, 940, 24});
   my_widget_add_child(my_window_widget(win), hint);
   my_widget_unref(hint);
@@ -130,14 +132,16 @@ int main(void) {
                                 160, 80);
   my_node_add_socket(color, MY_SOCKET_OUT, "Color", 0xA060A0FFu);
 
-  /* Environment (brown) + embedded slider */
-  env = my_node_view_add_node(view, "env", "Environment", "input", 60, 360,
-                              200, 120);
-  my_node_add_socket(env, MY_SOCKET_OUT, "Color", 0xA08850FFu);
+  /* Environment (brown) + embedded slider — M21b: w/h = 0 auto-sizes
+   * the node to its content (title/socket row/slider). The slider is
+   * added BEFORE the socket so the add_socket recompute sees it. */
+  env = my_node_view_add_node(view, "env", "Environment", "input", 60,
+                              360, 0, 0);
   slider = my_slider_create(NULL);
   my_widget_set_rect(slider, &(my_rect_t){10, 64, 180, 24});
   my_widget_add_child(env, slider);
   my_widget_unref(slider);
+  my_node_add_socket(env, MY_SOCKET_OUT, "Color", 0xA08850FFu);
 
   /* links per the reference: Color->BaseColor, Mapping->Metallic; the
    * Environment output stays unlinked (dangling-output demo) */

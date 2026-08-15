@@ -149,7 +149,7 @@ PAL port 矩阵：
 
 ### 增强第二批（M20b）
 
-- **框选多选**：view 内选择集 darray（弱引用，`my_node_view_is_selected/selected_count/selected_at` 查询 API）；左键空拖 = rubber band（>3px 才显现，`nv_dashed_rect` 6/4 虚线 + 半透明填充，up 时按节点 rect 与框相交批量选中）；Ctrl+点 = toggle，普通点 = 单选；选中集 >1 时拖任一选中节点 = 整体拖动（MOVE drag_node 分支全员位移）；Del 批量级联删（while 循环 remove_node，其内部自清选择集）。节点选中描边在 my_node 绘制（view 拥有集合、node 回查，`node.selected` 部件色回退 #E0A030，线宽 2）。
+- **框选多选**：view 内选择集 darray（弱引用，`my_node_view_is_selected/selected_count/selected_at` 查询 API）；左键空拖 = rubber band（>3px 才显现，`nv_dashed_rect` 6/4 虚线 + 半透明填充，up 时按节点 rect 与框相交批量选中）；Ctrl+点 = toggle，普通点 = 单选；选中集 >1 时拖任一选中节点 = 整体拖动（MOVE drag_node 分支全员位移）；Del 批量级联删（while 循环 remove_node，其内部自清选择集）。节点选中描边在 my_node 绘制（view 拥有集合、node 回查，`node.selected` 部件色回退 #E0A030；线宽 M20b 为 2，M21b 起为 1——给磁吸环让出顶层）。
 - **小地图**：floating overlay 子控件（`floating` 标志 + 全幅 rect，最后绘制；CTM 用 `soft_set_scale(base)` + 逆平移还原屏幕坐标系）——同件绘制框选与小地图。小地图固定右下 160×100（边距 10），内容 = 全部节点包围盒适配缩放画节点色块 + 视口框（`node_view.minimap`/`node_view.minimap_viewport` 键）；DOWN 先查小地图命中（屏幕坐标），命中则 `nv_center_on` 跳转视口中心。
 - **连线流动画**：选中连线（或 `flow_all`）以 marching dashes 绘制——my_bezier 细分点 + 相位 fmod 的 `nv_stroke_link_dashed`；`nv_flow_sync_timer` 按需挂 33ms 定时器（仅选中连线或 flow_all 时存在），tick 推进 offset + invalidate；`my_node_view_flow_offset` 诊断 API 供测试。（M21a 调速：dash 8px/6px、0.5px/tick ≈15px/s。）
 - **事件分派顺序**（DOWN）：小地图命中 → 接口（拖线/拾起）→ 连线（点选）→ 节点（Ctrl toggle/单选/开始拖动）→ 空白（开始框选）；中键拖 = pan。一切坐标仍在 view 层单一逆变换（M20a 约定），overlay 交互用屏幕坐标。
@@ -159,6 +159,13 @@ PAL port 矩阵：
 
 - **小地图底部裁剪修复**：实测根因与设计猜测不同——overlay/小地图定位本就相对 view 自身 rect；真正原因是 CSD 内容容器比窗口矮 36px（M16），app 按窗口全高给 view 定 rect（demo_nodes：窗口 640 高、view (10,36,940,594)，容器仅 604）导致 view 底部被父级 clip（my_widget_paint 每个父件 clip 到自己 rect），坐落在 view 底缘的小地图随之下半被裁。修法：`nv_visible_extent`（view rect 与祖先 clip 链求交，纯平移坐标系）算出**可见底右缘**，小地图定位/命中统一锚可见区（`nv_minimap_origin` 单一来源）；无裁剪时与旧行为逐像素一致（回归测试双断言：CSD 溢出场景小地图完整落在容器内 + 非 CSD 场景锚 rect 角不变）。
 - **流动画调速**：1.5px/tick(≈45px/s) → 0.5px/tick(≈15px/s)，dash 6/4 → 8/6；测试钉死精确步进（dummy 假时钟下一 tick = 0.5px）。
+
+### 增强第四批（M21b）
+
+- **节点尺寸自适应内容**：`my_node_view_add_node` 的 w/h 传 0 = 该维自动（`my_node_set_auto_size` 标记，显式尺寸恒优先）。宽 = max(80, 标题文本宽+2×8, 最宽接口行, 内嵌控件 x+w+8)；接口行宽 = 圆点直径 10 + 边距 8 + 名称文本宽（双侧同行再加内隙 8），文本用窗口字体按绘制字号（标题 13/接口 12）实测、无字体回退 7px/格（与 node_paint 既有回退一致）。高 = max(标题栏 24 + max(入,出行数)×20, 内嵌控件底缘) + 8。重算时机：add_socket 同步 + node_paint 惰性兜底（后加的内嵌控件最多一帧滞后）；`my_node_auto_size` 公开，变化才 invalidate。
+- **连线箭头 + 类型着色**：末端沿切线（第二手柄→终点）画 8px 长三角（半宽 4 = 线宽 3+1），色随连线；预览线不画（不追光标）。未选中连线默认色改为**源输出接口 type_color**（新 API `my_node_socket_type_color`；0 回退旧灰 #A0A0A0）——主题 `node_link` 键仍优先（级联不变，纯 fallback 替换）；选中态橙与流动画不受影响（箭头同色）。
+- **磁吸环层级**：选中描边线宽 2→1；磁吸环（线宽 2）从 nv_paint 移到 **overlay 绘制**（屏幕坐标、半径 ×zoom），压所有节点与描边。过程中揪出两个 M20b 潜伏问题一并修：①overlay 自 create 起是 child 0，my_widget_paint 正序画子件——"最后绘制"从未成立（nodes 盖 overlay），新增 `nv_overlay_to_front`（add_node 后把 overlay 重置为末子件，ref/remove/add/unref 保引用平衡）；②overlay rect 在其自身 on_paint 里同步，但 my_widget_paint 先按旧 rect（首帧 0×0）clip——**首帧小地图从未上过屏**（rec_vgcanvas 只记录不执行 clip，单测抓不到；demo dump 目检抓获），修为 nv_paint（先于子件 clip）里同步 overlay rect。回归：软渲染真像素采样首帧小地图底色（负验证：撤掉同步则测试红）。
+- 测试 6 新：auto_size 三内容形态/显式优先/混合维、类型色+箭头几何（顶点精确断言：右向连线尖端朝右）、主题压类型色、双源类型双色、磁吸环 op 序与线宽（ring 的 set_line_width 2 在选中描边之后、描边宽 1）、首帧像素。
 
 ## 三次贝塞尔曲线（M19a）
 - **接口**：vgcanvas vtable 末尾追加 `curve_to(cx1,cy1,cx2,cy2,x,y)`（冻结式扩展；NULL 槽 = NOT_SUPPORTED，inline 包装判定）。路径级操作，与 line_to 同类，save/restore 无涉；无当前点（未 move_to）返回 FAIL（canvas 惯例，注释注明）。

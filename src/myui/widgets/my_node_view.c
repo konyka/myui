@@ -606,11 +606,57 @@ static void nv_stroke_link(my_widget_t* widget, my_vgcanvas_t* vg, float x0,
   my_vgcanvas_stroke(vg);
 }
 
+/** @brief Solid link stroke with an already-resolved color (M21b). */
+static void nv_stroke_link_rgba(my_vgcanvas_t* vg, float x0, float y0,
+                                float cx1, float cy1, float cx2, float cy2,
+                                float x1, float y1, uint32_t rgba) {
+  my_vgcanvas_set_stroke_color(vg, my_color_from_rgba32(rgba));
+  my_vgcanvas_set_line_width(vg, 3);
+  my_vgcanvas_begin_path(vg);
+  my_vgcanvas_move_to(vg, x0, y0);
+  my_vgcanvas_curve_to(vg, cx1, cy1, cx2, cy2, x1, y1);
+  my_vgcanvas_stroke(vg);
+}
+
+/** @brief Filled arrowhead at the link's end point (M21b): a triangle
+ * along the end tangent (from the second handle to (x1, y1)), 8px long,
+ * 4px half-width (line_width 3 + 1), same color as the link. The input
+ * socket dot (nodes paint over links) covers the tip. */
+static void nv_fill_link_arrow(my_vgcanvas_t* vg, float cx2, float cy2,
+                               float x1, float y1, uint32_t rgba) {
+  float dx = x1 - cx2, dy = y1 - cy2;
+  float len = sqrtf(dx * dx + dy * dy);
+  float ux = 1.0f, uy = 0.0f;
+  if (len > 1e-6f) {
+    ux = dx / len;
+    uy = dy / len;
+  }
+  my_vgcanvas_set_fill_color(vg, my_color_from_rgba32(rgba));
+  my_vgcanvas_begin_path(vg);
+  my_vgcanvas_move_to(vg, x1, y1);
+  my_vgcanvas_line_to(vg, x1 - ux * 8.0f - uy * 4.0f,
+                      y1 - uy * 8.0f + ux * 4.0f);
+  my_vgcanvas_line_to(vg, x1 - ux * 8.0f + uy * 4.0f,
+                      y1 - uy * 8.0f - ux * 4.0f);
+  my_vgcanvas_close_path(vg);
+  my_vgcanvas_fill(vg);
+}
+
 static void nv_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
   my_node_view_t* v = (my_node_view_t*)widget;
   uint32_t bg = my_widget_style_get_color(widget, MY_STATE_NORMAL,
                                           "bg_color", 0x282828FFu);
   size_t i, n;
+  /* keep the overlay full-span HERE (view on_paint runs before the
+   * children): my_widget_paint clips each child to its rect BEFORE its
+   * on_paint, so syncing inside the overlay paint would clip the very
+   * first frame to the stale 0x0 rect (M21b first-frame minimap bug) */
+  if (v->minimap != NULL) {
+    v->minimap->rect.x = 0;
+    v->minimap->rect.y = 0;
+    v->minimap->rect.w = widget->rect.w;
+    v->minimap->rect.h = widget->rect.h;
+  }
   my_vgcanvas_set_fill_color(vg, my_color_from_rgba32(bg));
   my_vgcanvas_fill_rect(vg, &(my_rectf_t){0, 0, (float)widget->rect.w,
                                           (float)widget->rect.h});
@@ -638,24 +684,34 @@ static void nv_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
   for (i = 0; i < n; i++) {
     node_link_t* l = (node_link_t*)my_darray_get(v->links, i);
     float x0, y0, cx1, cy1, cx2, cy2, x1, y1;
+    bool sel;
+    uint32_t fb, c;
     if (!nv_link_geo(l->out_node, l->out_slot, l->in_node, l->in_slot, &x0,
                      &y0, &cx1, &cy1, &cx2, &cy2, &x1, &y1)) {
       continue;
     }
-    if (v->flow_all || (int32_t)i == v->selected) {
+    sel = (int32_t)i == v->selected;
+    /* M21b: unselected links tint from their SOURCE socket's type color
+     * (theme `node_link` still wins via the part lookup) */
+    fb = 0xE0A030FFu;
+    if (!sel) {
+      fb = my_node_socket_type_color(l->out_node, MY_SOCKET_OUT,
+                                     l->out_slot);
+      if (fb == 0) {
+        fb = 0xA0A0A0FFu; /* pre-M21b default grey */
+      }
+    }
+    c = my_widget_part_color(widget, "node_link", sel ? "selected" : NULL,
+                             MY_STATE_NORMAL, "fg_color", fb);
+    if (v->flow_all || sel) {
       /* M20b: marching dashes (selected always flows; flow_all covers
        * everything) */
-      uint32_t c = my_widget_part_color(
-          widget, "node_link", (int32_t)i == v->selected ? "selected" : NULL,
-          MY_STATE_NORMAL, "fg_color",
-          (int32_t)i == v->selected ? 0xE0A030FFu : 0xA0A0A0FFu);
       nv_stroke_link_dashed(widget, vg, x0, y0, cx1, cy1, cx2, cy2, x1, y1,
                             v->flow_offset, c);
     } else {
-      nv_stroke_link(widget, vg, x0, y0, cx1, cy1, cx2, cy2, x1, y1,
-                     (int32_t)i == v->selected ? "selected" : NULL,
-                     (int32_t)i == v->selected ? 0xE0A030FFu : 0xA0A0A0FFu);
+      nv_stroke_link_rgba(vg, x0, y0, cx1, cy1, cx2, cy2, x1, y1, c);
     }
+    nv_fill_link_arrow(vg, cx2, cy2, x1, y1, c); /* M21b arrowhead */
   }
   /* link preview follows the cursor (magnet-snapped when a target is
    * in range; the snapped socket gets a highlight ring) */
@@ -678,27 +734,15 @@ static void nv_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
         if (dx < 40.0f) {
           dx = 40.0f;
         }
+        /* no arrowhead on the preview (it would chase the cursor) */
         nv_stroke_link(widget, vg, (float)ix0, (float)iy0, (float)ix0 + dx,
                        (float)iy0, tx - dx, ty, tx, ty, "preview",
                        0x70C0E8FFu);
       }
     }
   }
-  /* magnet ring */
-  if (v->preview.magnet_node != NULL) {
-    int32_t mx = 0, my = 0;
-    if (my_node_socket_center(v->preview.magnet_node, MY_SOCKET_IN,
-                              v->preview.magnet_slot, &mx, &my)) {
-      uint32_t ring = my_widget_part_color(widget, "node_socket", "magnet",
-                                           MY_STATE_NORMAL, "bg_color",
-                                           0xFFD050FFu);
-      my_vgcanvas_set_stroke_color(vg, my_color_from_rgba32(ring));
-      my_vgcanvas_set_line_width(vg, 2);
-      my_vgcanvas_begin_path(vg);
-      my_node_path_circle(vg, (float)mx, (float)my, 9.0f);
-      my_vgcanvas_stroke(vg);
-    }
-  }
+  /* M21b: the magnet ring moved to the overlay paint (it must sit ABOVE
+   * the nodes and their selection borders, which paint after us) */
 }
 
 /* ---------------- overlay: rubber band + minimap (M20b) ----------------
@@ -814,11 +858,8 @@ static void nv_minimap_fit(const my_node_view_t* v, float* bx0, float* by0,
 static void nv_overlay_paint(my_widget_t* ov, my_vgcanvas_t* vg) {
   my_node_view_t* v = (my_node_view_t*)my_widget_get_user_data(ov);
   my_widget_t* w = (my_widget_t*)v;
-  /* the overlay spans the whole view (floating; no on_event -> bubbles) */
-  ov->rect.x = 0;
-  ov->rect.y = 0;
-  ov->rect.w = w->rect.w;
-  ov->rect.h = w->rect.h;
+  /* rect synced by nv_paint (before the child clip; floating, no
+   * on_event -> events bubble) */
   /* reset the canvas CTM: absolute scale + inverse translate */
   {
     my_widget_t* root = w;
@@ -859,6 +900,25 @@ static void nv_overlay_paint(my_widget_t* ov, my_vgcanvas_t* vg) {
     my_vgcanvas_set_fill_color(vg, my_color_from_rgba32(fill));
     my_vgcanvas_fill_rect(vg, &(my_rectf_t){sx0, sy0, sx1 - sx0, sy1 - sy0});
     nv_dashed_rect(vg, sx0, sy0, sx1 - sx0, sy1 - sy0, border);
+  }
+  /* magnet ring (M21b): painted here in the overlay — AFTER all nodes —
+   * so the width-2 ring sits above the (now width-1) selection borders;
+   * screen space, radius scales with the zoom like canvas strokes do */
+  if (v->preview.magnet_node != NULL) {
+    int32_t mcx = 0, mcy = 0;
+    if (my_node_socket_center(v->preview.magnet_node, MY_SOCKET_IN,
+                              v->preview.magnet_slot, &mcx, &mcy)) {
+      float rsx = 0.0f, rsy = 0.0f;
+      uint32_t ring = my_widget_part_color(w, "node_socket", "magnet",
+                                           MY_STATE_NORMAL, "bg_color",
+                                           0xFFD050FFu);
+      my_node_view_canvas_to_screen(w, (float)mcx, (float)mcy, &rsx, &rsy);
+      my_vgcanvas_set_stroke_color(vg, my_color_from_rgba32(ring));
+      my_vgcanvas_set_line_width(vg, 2);
+      my_vgcanvas_begin_path(vg);
+      my_node_path_circle(vg, rsx, rsy, 9.0f * v->zoom);
+      my_vgcanvas_stroke(vg);
+    }
   }
   /* minimap (bottom-right of the VISIBLE area, screen space) */
   {
@@ -1320,6 +1380,20 @@ my_widget_t* my_node_view_create(const my_allocator_t* allocator) {
   return (my_widget_t*)v;
 }
 
+/** @brief Re-seat the overlay as the LAST child so it really paints
+ * after every node (M21b: the magnet ring must sit above selection
+ * borders; the overlay is created first, before any node). */
+static void nv_overlay_to_front(my_node_view_t* v) {
+  my_widget_t* ov = v->minimap;
+  if (ov == NULL || ov->parent != (my_widget_t*)v) {
+    return;
+  }
+  my_widget_ref(ov);
+  my_widget_remove_child((my_widget_t*)v, ov);
+  my_widget_add_child((my_widget_t*)v, ov);
+  my_widget_unref(ov); /* the tree owns it again */
+}
+
 my_widget_t* my_node_view_add_node(my_widget_t* view, const char* id,
                                    const char* title, const char* category,
                                    int32_t x, int32_t y, int32_t w,
@@ -1333,11 +1407,16 @@ my_widget_t* my_node_view_add_node(my_widget_t* view, const char* id,
   if (node == NULL) {
     return NULL;
   }
+  /* M21b: w/h == 0 = auto-size to the content (recomputed on add_socket
+   * and at paint time); explicit dimensions always win */
+  my_node_set_auto_size(node, w == 0, h == 0);
   my_widget_set_rect(node, &(my_rect_t){x, y, w, h});
   if (my_widget_add_child(view, node) != MY_RET_OK) {
     my_widget_unref(node);
     return NULL;
   }
+  my_node_auto_size(node); /* initial (title-only) fit, font reachable */
+  nv_overlay_to_front((my_node_view_t*)view);
   my_widget_unref(node); /* the tree owns it */
   return node;
 }

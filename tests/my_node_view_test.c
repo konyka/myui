@@ -7,6 +7,7 @@
 #include "myui/widgets/my_node_view.h"
 
 #include "mypal/dummy/my_pal_dummy.h"
+#include "myr/my_lcd_mem.h"
 #include "myui/my_css.h"
 #include "myui/my_event_dispatch.h"
 #include "myui/my_layout.h"
@@ -655,6 +656,173 @@ static void test_minimap_rect_corner_when_fitting(void) {
   wfx_destroy(&f);
 }
 
+static void test_minimap_first_frame_soft_pixels(void) {
+  /* M21b regression: my_widget_paint clips a child to its rect BEFORE
+   * on_paint; the overlay synced its rect inside its own paint, so the
+   * very first real frame was clipped to the stale 0x0 rect and the
+   * minimap never reached the pixels (rec_vgcanvas only LOGS clip ops,
+   * it cannot catch this — sample real soft-canvas pixels instead) */
+  wfx_t f;
+  my_lcd_t* lcd;
+  const uint8_t* px;
+  wfx_init(&f);
+  my_widget_invalidate((my_widget_t*)f.win, NULL);
+  my_window_paint(f.win); /* FIRST real frame */
+  lcd = my_pal_window_get_lcd(f.win->pal_window);
+  /* (700,560): inside the minimap bg (630,490,160,100), clear of node
+   * blocks and the viewport frame border; bg #000000 a=0xA0 blended
+   * over the #282828 canvas -> ~0x0F0F0F (BGRA); the bug left #282828 */
+  px = my_lcd_mem_get_buffer(lcd) + 560 * my_lcd_mem_get_stride(lcd) +
+       700 * 4;
+  TEST_ASSERT(px[0] < 0x18 && px[1] < 0x18 && px[2] < 0x18);
+  wfx_destroy(&f);
+}
+
+/* ---------------- M21b: auto size / arrows+type colors / layering ---- */
+
+static void test_node_auto_size(void) {
+  fx_t f;
+  my_widget_t* n;
+  my_widget_t* child;
+  fx_init(&f);
+  /* no window font in fx -> the 7px/cell estimate (same fallback as
+   * node_paint): all expectations below derive from it */
+  n = my_node_view_add_node(f.view, "auto", "NN", NULL, 50, 50, 0, 0);
+  /* title "NN" = 2*7+16 = 30 -> min 80; h = 24 + 0 rows + 8 = 32 */
+  TEST_ASSERT_EQ_INT(n->rect.w, 80);
+  TEST_ASSERT_EQ_INT(n->rect.h, 32);
+  /* in "abcdefgh" (8*7=56): row = 10+8+56 +2*8 = 90; h = 24+20+8 = 52 */
+  my_node_add_socket(n, MY_SOCKET_IN, "abcdefgh", 0xFF0000FFu);
+  TEST_ASSERT_EQ_INT(n->rect.w, 90);
+  TEST_ASSERT_EQ_INT(n->rect.h, 52);
+  /* out "xy" shares row 0: 74 + (10+8+14) + 8 inner + 16 = 130 */
+  my_node_add_socket(n, MY_SOCKET_OUT, "xy", 0x00FF00FFu);
+  TEST_ASSERT_EQ_INT(n->rect.w, 130);
+  TEST_ASSERT_EQ_INT(n->rect.h, 52);
+  /* out row 1 "longnameout" (11*7=77): row = 10+8+77+16 = 111 < 130;
+   * rows = 2 -> h = 24+40+8 = 72 */
+  my_node_add_socket(n, MY_SOCKET_OUT, "longnameout", 0x0000FFFFu);
+  TEST_ASSERT_EQ_INT(n->rect.w, 130);
+  TEST_ASSERT_EQ_INT(n->rect.h, 72);
+  /* embedded child (10,72,150,20): w candidate 10+150+8 = 168, bottom
+   * 92 -> h 100; recomputed on the next content change */
+  child = my_widget_create(NULL, "knob");
+  my_widget_set_rect(child, &(my_rect_t){10, 72, 150, 20});
+  my_widget_add_child(n, child);
+  my_widget_unref(child);
+  my_node_add_socket(n, MY_SOCKET_IN, "zz", 0xFFFFFFFFu);
+  /* rows = max(2,2) = 2; row 1 = (10+8+14) + (10+8+77) + 8 + 16 = 151 */
+  TEST_ASSERT_EQ_INT(n->rect.w, 168);
+  TEST_ASSERT_EQ_INT(n->rect.h, 100);
+  fx_destroy(&f);
+}
+
+static void test_node_explicit_size_wins(void) {
+  fx_t f;
+  my_widget_t* n;
+  fx_init(&f);
+  n = my_node_view_add_node(f.view, "exp", "EXPLICIT TITLE", NULL, 0, 0,
+                            200, 100);
+  my_node_add_socket(n, MY_SOCKET_IN, "averyverylongsocketname",
+                     0xFF0000FFu);
+  TEST_ASSERT_EQ_INT(n->rect.w, 200);
+  TEST_ASSERT_EQ_INT(n->rect.h, 100);
+  /* mixed: auto width only, explicit height kept */
+  n = my_node_view_add_node(f.view, "mix", "M", NULL, 0, 0, 0, 100);
+  my_node_add_socket(n, MY_SOCKET_IN, "zz", 0xFF0000FFu);
+  TEST_ASSERT_EQ_INT(n->rect.h, 100);
+  TEST_ASSERT(n->rect.w >= 80);
+  fx_destroy(&f);
+}
+
+static void test_link_type_color_and_arrow(void) {
+  fx_t f;
+  rec_vg_t rec;
+  my_widget_t* nc;
+  fx_init(&f);
+  /* na out type = 0x60A060FF (fx) -> the link tints from the SOURCE
+   * socket type color instead of the pre-M21b grey */
+  my_node_view_connect(f.view, f.na, 0, f.nb, 0);
+  rec_vg_init(&rec);
+  my_widget_paint(f.view, (my_vgcanvas_t*)&rec);
+  TEST_ASSERT(rec_has(&rec, "set_stroke #60a060"));
+  TEST_ASSERT(!rec_has(&rec, "set_stroke #a0a0a0"));
+  /* arrowhead at the in socket (400,234): rightward link -> tip is the
+   * rightmost vertex, base 8px back, half-width 4 (dx handle = 70) */
+  TEST_ASSERT(rec_has(&rec, "move_to 400 234"));
+  TEST_ASSERT(rec_has(&rec, "line_to 392 238"));
+  TEST_ASSERT(rec_has(&rec, "line_to 392 230"));
+  /* a second source type -> a second link color */
+  my_node_add_socket(f.nb, MY_SOCKET_IN, "in2", 0x808080FFu);
+  nc = my_node_view_add_node(f.view, "c", "C", NULL, 100, 320, 160, 80);
+  my_node_add_socket(nc, MY_SOCKET_OUT, "o2", 0x102030FFu);
+  my_node_view_connect(f.view, nc, 0, f.nb, 1);
+  rec_vg_init(&rec);
+  my_widget_paint(f.view, (my_vgcanvas_t*)&rec);
+  TEST_ASSERT(rec_has(&rec, "set_stroke #60a060"));
+  TEST_ASSERT(rec_has(&rec, "set_stroke #102030"));
+  fx_destroy(&f);
+}
+
+static void test_link_theme_overrides_type_color(void) {
+  fx_t f;
+  my_theme_t* t = my_theme_create(NULL);
+  rec_vg_t rec;
+  fx_init(&f);
+  my_node_view_connect(f.view, f.na, 0, f.nb, 0);
+  my_theme_load_css(t, "node_link { color: #123456 }");
+  my_widget_apply_theme(f.view, t);
+  rec_vg_init(&rec);
+  my_widget_paint(f.view, (my_vgcanvas_t*)&rec);
+  TEST_ASSERT(rec_has(&rec, "set_stroke #123456")); /* theme beats type */
+  TEST_ASSERT(!rec_has(&rec, "set_stroke #60a060"));
+  my_theme_destroy(t);
+  fx_destroy(&f);
+}
+
+static void test_magnet_ring_paints_above_selection(void) {
+  fx_t f;
+  rec_vg_t rec;
+  int ring_idx = -1, border_idx = -1, i, j;
+  fx_init(&f);
+  /* select node a (header click), then drag a preview near b's input:
+   * the magnet ring activates while a keeps its selection border */
+  ev(&f, MY_EVENT_POINTER_DOWN, 110, 110);
+  ev(&f, MY_EVENT_POINTER_UP, 110, 110);
+  TEST_ASSERT(my_node_view_is_selected(f.view, f.na));
+  ev(&f, MY_EVENT_POINTER_DOWN, OUT_X, OUT_Y);
+  ev(&f, MY_EVENT_POINTER_MOVE, 395, 230); /* 6.4px off (400,234) < 20 */
+  rec_vg_init(&rec);
+  my_widget_paint(f.view, (my_vgcanvas_t*)&rec);
+  /* the ring is the only width-2 stroke left (links 3, borders 1) */
+  for (i = 0; i < rec.n_ops; i++) {
+    if (strcmp(rec.ops[i], "set_line_width 2") == 0) {
+      ring_idx = i;
+      break;
+    }
+  }
+  /* node a paints first (child 0): its border = the first stroke after
+   * the first body rounded_rect (node-local coords 0 0 160 80) */
+  for (i = 0; i < rec.n_ops; i++) {
+    if (strstr(rec.ops[i], "rounded_rect 0 0 160 80 4") != NULL) {
+      for (j = i + 1; j < rec.n_ops; j++) {
+        if (strcmp(rec.ops[j], "stroke") == 0) {
+          border_idx = j;
+          break;
+        }
+      }
+      break;
+    }
+  }
+  TEST_ASSERT(ring_idx >= 0);
+  TEST_ASSERT(border_idx >= 0);
+  TEST_ASSERT(ring_idx > border_idx); /* ring above everything node-ish */
+  /* the selected border is the orange one, now width 1 (M21b) */
+  TEST_ASSERT(strcmp(rec.ops[border_idx - 1], "set_line_width 1") == 0);
+  TEST_ASSERT(strcmp(rec.ops[border_idx - 2], "set_stroke #e0a030") == 0);
+  fx_destroy(&f);
+}
+
 MYTEST_MAIN_BEGIN()
   MYTEST_RUN(test_model_connect_replace_disconnect);
   MYTEST_RUN(test_drag_preview_connect);
@@ -677,4 +845,10 @@ MYTEST_MAIN_BEGIN()
   MYTEST_RUN(test_selection_overlay_no_leak);
   MYTEST_RUN(test_minimap_visible_extent_under_csd);
   MYTEST_RUN(test_minimap_rect_corner_when_fitting);
+  MYTEST_RUN(test_minimap_first_frame_soft_pixels);
+  MYTEST_RUN(test_node_auto_size);
+  MYTEST_RUN(test_node_explicit_size_wins);
+  MYTEST_RUN(test_link_type_color_and_arrow);
+  MYTEST_RUN(test_link_theme_overrides_type_color);
+  MYTEST_RUN(test_magnet_ring_paints_above_selection);
 MYTEST_MAIN_END()

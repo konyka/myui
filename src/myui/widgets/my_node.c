@@ -10,6 +10,7 @@
 #include "myc/my_darray.h"
 #include "myc/my_str.h"
 #include "myui/my_theme.h"
+#include "myui/my_window.h"
 
 typedef struct node_socket_t {
   my_socket_dir_t dir;
@@ -23,7 +24,15 @@ typedef struct my_node_t {
   char* id;          /**< owned */
   char* title;       /**< owned */
   my_darray_t* sockets; /**< node_socket_t* (inputs then outputs) */
+  bool auto_w;          /**< width tracks the content (M21b) */
+  bool auto_h;          /**< height tracks the content (M21b) */
 } my_node_t;
+
+/* auto-size layout constants (M21b) */
+#define MY_NODE_MARGIN 8    /**< side/bottom padding */
+#define MY_NODE_MIN_W 80    /**< auto width floor */
+#define MY_NODE_TITLE_PT 13 /**< title font size (matches node_paint) */
+#define MY_NODE_SOCKET_PT 12
 
 /* circle/rounded-rect via 4 cubic arcs (kappa = 0.5523; vgcanvas has no
  * arc primitive — M19a curve_to makes this exact enough) */
@@ -58,9 +67,127 @@ static void node_path_rounded_rect(my_vgcanvas_t* vg, float x, float y,
   my_vgcanvas_close_path(vg);
 }
 
+/* ---------------- auto size (M21b) ---------------- */
+
+/** @brief Text width with the window font at the node paint sizes; the
+ * 7px/cell estimate (same fallback as node_paint) when no window/font
+ * is reachable (detached unit-test trees). */
+static int32_t node_text_w(my_widget_t* node, const char* text,
+                           int32_t pt) {
+  my_font_t* font = NULL;
+  int32_t fsize = 0, w = 0, h = 0;
+  if (text == NULL) {
+    return 0;
+  }
+  my_window_font_of_widget(node, &font, &fsize);
+  (void)fsize; /* node_paint pins its own point sizes */
+  if (font != NULL && my_font_measure(font, text, pt, &w, &h) == MY_RET_OK) {
+    return w;
+  }
+  return (int32_t)strlen(text) * 7;
+}
+
+void my_node_set_auto_size(my_widget_t* node, bool auto_w, bool auto_h) {
+  my_node_t* n;
+  if (node == NULL) {
+    return;
+  }
+  n = (my_node_t*)node;
+  n->auto_w = auto_w;
+  n->auto_h = auto_h;
+}
+
+void my_node_auto_size(my_widget_t* node) {
+  my_node_t* n;
+  size_t i, cnt;
+  size_t in_cnt, out_cnt, rows;
+  int32_t w = MY_NODE_MIN_W;
+  int32_t h;
+  bool changed = false;
+  if (node == NULL) {
+    return;
+  }
+  n = (my_node_t*)node;
+  if (!n->auto_w && !n->auto_h) {
+    return; /* explicit size always wins */
+  }
+  if (n->title != NULL) {
+    int32_t tw = node_text_w(node, n->title, MY_NODE_TITLE_PT) +
+                 2 * MY_NODE_MARGIN;
+    if (tw > w) {
+      w = tw;
+    }
+  }
+  cnt = my_darray_size(n->sockets);
+  in_cnt = my_node_socket_count(node, MY_SOCKET_IN);
+  out_cnt = my_node_socket_count(node, MY_SOCKET_OUT);
+  rows = in_cnt > out_cnt ? in_cnt : out_cnt;
+  /* widest socket row: dot diameter + gap + name per side, an inner gap
+   * when the row carries both directions, plus side margins */
+  {
+    size_t ri;
+    for (ri = 0; ri < rows; ri++) {
+      size_t seen_in = 0, seen_out = 0;
+      int32_t rw = 0;
+      bool has_in = false, has_out = false;
+      for (i = 0; i < cnt; i++) {
+        node_socket_t* s = (node_socket_t*)my_darray_get(n->sockets, i);
+        if (s->dir == MY_SOCKET_IN && seen_in++ == ri) {
+          rw += 2 * MY_NODE_SOCKET_R + MY_NODE_MARGIN +
+                node_text_w(node, s->name, MY_NODE_SOCKET_PT);
+          has_in = true;
+        }
+        if (s->dir == MY_SOCKET_OUT && seen_out++ == ri) {
+          rw += 2 * MY_NODE_SOCKET_R + MY_NODE_MARGIN +
+                node_text_w(node, s->name, MY_NODE_SOCKET_PT);
+          has_out = true;
+        }
+      }
+      if (has_in && has_out) {
+        rw += MY_NODE_MARGIN; /* inner gap between the two labels */
+      }
+      rw += 2 * MY_NODE_MARGIN;
+      if (rw > w) {
+        w = rw;
+      }
+    }
+  }
+  h = MY_NODE_HEADER_H + (int32_t)rows * MY_NODE_ROW_H;
+  /* embedded children (declared rects): widen/lower to contain them */
+  cnt = my_widget_child_count(node);
+  for (i = 0; i < cnt; i++) {
+    my_widget_t* ch = my_widget_get_child(node, i);
+    int32_t cw = ch->rect.x + ch->rect.w + MY_NODE_MARGIN;
+    int32_t cb = ch->rect.y + ch->rect.h;
+    if (cw > w) {
+      w = cw;
+    }
+    if (cb > h) {
+      h = cb;
+    }
+  }
+  h += MY_NODE_MARGIN;
+  if (n->auto_w && node->rect.w != w) {
+    node->rect.w = w;
+    changed = true;
+  }
+  if (n->auto_h && node->rect.h != h) {
+    node->rect.h = h;
+    changed = true;
+  }
+  if (changed) {
+    my_widget_invalidate(node, NULL);
+  }
+}
+
 static void node_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
   my_node_t* n = (my_node_t*)widget;
   size_t i, cnt;
+  /* M21b: recompute lazily so embedded children added after the last
+   * socket still size the node (one frame of lag at most) */
+  if (n->auto_w || n->auto_h) {
+    my_node_auto_size(widget);
+  }
   /* body */
   uint32_t body = my_widget_style_get_color(widget, MY_STATE_NORMAL,
                                             "bg_color", 0x3A3A3AFFu);
@@ -71,14 +198,15 @@ static void node_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
   node_path_rounded_rect(vg, 0, 0, (float)widget->rect.w,
                          (float)widget->rect.h, 4);
   {
-    /* selection border (M20b): the view owns the set */
+    /* selection border (M20b): the view owns the set; M21b: width stays
+     * 1 (was 2) so the width-2 magnet ring reads as the top layer */
     bool sel = n->view != NULL &&
                my_node_view_is_selected(n->view, widget);
     uint32_t border = my_widget_part_color(
         widget, "node", sel ? "selected" : NULL, MY_STATE_NORMAL,
         "border_color", sel ? 0xE0A030FFu : 0x1E1E1EFFu);
     my_vgcanvas_set_stroke_color(vg, my_color_from_rgba32(border));
-    my_vgcanvas_set_line_width(vg, sel ? 2 : 1);
+    my_vgcanvas_set_line_width(vg, 1);
     my_vgcanvas_stroke(vg);
   }
   /* header (category色: CSS `node.<category> .header` hits via the
@@ -228,6 +356,7 @@ my_ret_t my_node_add_socket(my_widget_t* node, my_socket_dir_t dir,
     my_mem_free(((my_object_t*)node)->allocator, s);
     return MY_RET_OOM;
   }
+  my_node_auto_size(node); /* M21b: content changed -> maybe grow */
   my_widget_invalidate(node, NULL);
   return MY_RET_OK;
 }
@@ -274,4 +403,25 @@ bool my_node_socket_center(const my_widget_t* node, my_socket_dir_t dir,
 
 const char* my_node_get_id(const my_widget_t* node) {
   return node != NULL ? ((const my_node_t*)node)->id : NULL;
+}
+
+uint32_t my_node_socket_type_color(const my_widget_t* node,
+                                   my_socket_dir_t dir, size_t slot) {
+  const my_node_t* n;
+  size_t i, cnt, seen = 0;
+  if (node == NULL) {
+    return 0;
+  }
+  n = (const my_node_t*)node;
+  cnt = my_darray_size(n->sockets);
+  for (i = 0; i < cnt; i++) {
+    const node_socket_t* s = (const node_socket_t*)my_darray_get(n->sockets, i);
+    if (s->dir == dir) {
+      if (seen == slot) {
+        return s->color;
+      }
+      seen++;
+    }
+  }
+  return 0;
 }

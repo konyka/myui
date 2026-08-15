@@ -22,7 +22,9 @@
 /** @brief Create the canvas widget (focusable for Del). */
 my_widget_t* my_node_view_create(const my_allocator_t* allocator);
 
-/** @brief Add a node at (x, y) with size w x h (canvas coords).
+/** @brief Add a node at (x, y) with size w x h (canvas coords). w or h
+ * == 0 auto-sizes that dimension to the content (M21b: title, socket
+ * rows, embedded children; recomputed as content changes).
  * @return the node widget (tree-owned after this call). */
 my_widget_t* my_node_view_add_node(my_widget_t* view, const char* id,
                                    const char* title, const char* category,
