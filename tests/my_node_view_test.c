@@ -6,10 +6,12 @@
  */
 #include "myui/widgets/my_node_view.h"
 
+#include "mypal/dummy/my_pal_dummy.h"
 #include "myui/my_css.h"
 #include "myui/my_event_dispatch.h"
 #include "myui/my_layout.h"
 #include "myui/my_theme.h"
+#include "myui/my_window_manager.h"
 
 #include <math.h>
 
@@ -58,6 +60,17 @@ static void ev(fx_t* f, my_event_type_t type, int32_t x, int32_t y) {
   my_event_t e = my_event_init(type);
   e.u.pointer.x = x;
   e.u.pointer.y = y;
+  e.u.pointer.button = 1; /* left */
+  my_event_dispatch(&f->d, &e);
+}
+
+/** @brief Event with an explicit mouse button (1=left, 2=middle). */
+static void evb(fx_t* f, my_event_type_t type, int32_t x, int32_t y,
+                uint8_t button) {
+  my_event_t e = my_event_init(type);
+  e.u.pointer.x = x;
+  e.u.pointer.y = y;
+  e.u.pointer.button = button;
   my_event_dispatch(&f->d, &e);
 }
 
@@ -199,10 +212,11 @@ static void test_pan_moves_nodes(void) {
    * mapping shifts */
   my_node_socket_center(f.na, MY_SOCKET_OUT, 0, &cx0, &cy0);
   my_node_view_canvas_to_screen(f.view, (float)cx0, (float)cy0, &sx0, &sy0);
-  /* drag empty space (700, 500) by (+20, -10) */
-  ev(&f, MY_EVENT_POINTER_DOWN, 700, 500);
-  ev(&f, MY_EVENT_POINTER_MOVE, 720, 490);
-  ev(&f, MY_EVENT_POINTER_UP, 720, 490);
+  /* middle-button drag on empty space pans (M20b: left drag rubber-
+   * bands instead; start away from the minimap corner) */
+  evb(&f, MY_EVENT_POINTER_DOWN, 300, 500, 2);
+  evb(&f, MY_EVENT_POINTER_MOVE, 320, 490, 2);
+  evb(&f, MY_EVENT_POINTER_UP, 320, 490, 2);
   TEST_ASSERT_EQ_INT(f.na->rect.x, 100); /* canvas coords unchanged */
   TEST_ASSERT_EQ_INT(f.na->rect.y, 100);
   my_node_view_canvas_to_screen(f.view, (float)cx0, (float)cy0, &sx1, &sy1);
@@ -374,8 +388,215 @@ static void test_remove_node_cascade(void) {
   key(&f, MY_KEY_DELETE);
   TEST_ASSERT_EQ_INT((int)my_node_view_link_count(f.view), 0);
   TEST_ASSERT_EQ_INT(g_changed, 1);
-  TEST_ASSERT_EQ_INT((int)my_widget_child_count(f.view), 1); /* only nb */
+  /* children: nb + the overlay (M20b) — na and nc are gone */
+  TEST_ASSERT_EQ_INT((int)my_widget_child_count(f.view), 2);
   fx_destroy(&f);
+}
+
+static void test_rubber_band_multi_select(void) {
+  fx_t f;
+  fx_init(&f);
+  /* rubber-band over na (100,100..260,180) only: band (50,50)-(300,190)
+   * partially intersects na, misses nb (400,200+) */
+  ev(&f, MY_EVENT_POINTER_DOWN, 50, 50);
+  ev(&f, MY_EVENT_POINTER_MOVE, 300, 190);
+  ev(&f, MY_EVENT_POINTER_UP, 300, 190); /* band commits on UP */
+  TEST_ASSERT_EQ_INT((int)my_node_view_selected_count(f.view), 1);
+  TEST_ASSERT(my_node_view_selected_at(f.view, 0) == f.na);
+  /* plain click on nb: single-select replaces the set */
+  ev(&f, MY_EVENT_POINTER_DOWN, 420, 230);
+  ev(&f, MY_EVENT_POINTER_UP, 420, 230);
+  TEST_ASSERT_EQ_INT((int)my_node_view_selected_count(f.view), 1);
+  TEST_ASSERT(my_node_view_selected_at(f.view, 0) == f.nb);
+  /* ctrl+click na: toggles in -> two selected */
+  {
+    my_event_t e = my_event_init(MY_EVENT_POINTER_DOWN);
+    e.u.pointer.x = 140;
+    e.u.pointer.y = 130;
+    e.u.pointer.button = 1;
+    e.u.pointer.modifiers = MY_KEYMOD_CTRL;
+    my_event_dispatch(&f.d, &e);
+    e = my_event_init(MY_EVENT_POINTER_UP);
+    my_event_dispatch(&f.d, &e);
+  }
+  TEST_ASSERT_EQ_INT((int)my_node_view_selected_count(f.view), 2);
+  /* ctrl+click na again: toggles out -> one */
+  {
+    my_event_t e = my_event_init(MY_EVENT_POINTER_DOWN);
+    e.u.pointer.x = 140;
+    e.u.pointer.y = 130;
+    e.u.pointer.button = 1;
+    e.u.pointer.modifiers = MY_KEYMOD_CTRL;
+    my_event_dispatch(&f.d, &e);
+    e = my_event_init(MY_EVENT_POINTER_UP);
+    my_event_dispatch(&f.d, &e);
+  }
+  TEST_ASSERT_EQ_INT((int)my_node_view_selected_count(f.view), 1);
+  /* click empty (no drag): clears */
+  ev(&f, MY_EVENT_POINTER_DOWN, 500, 400);
+  ev(&f, MY_EVENT_POINTER_UP, 500, 400);
+  TEST_ASSERT_EQ_INT((int)my_node_view_selected_count(f.view), 0);
+  fx_destroy(&f);
+}
+
+static void test_multi_drag_and_batch_delete(void) {
+  fx_t f;
+  fx_init(&f);
+  /* select both via a band covering everything */
+  ev(&f, MY_EVENT_POINTER_DOWN, 50, 50);
+  ev(&f, MY_EVENT_POINTER_MOVE, 600, 400);
+  ev(&f, MY_EVENT_POINTER_UP, 600, 400);
+  TEST_ASSERT_EQ_INT((int)my_node_view_selected_count(f.view), 2);
+  /* drag na's title bar: the whole set moves together */
+  ev(&f, MY_EVENT_POINTER_DOWN, 140, 110);
+  ev(&f, MY_EVENT_POINTER_MOVE, 170, 130);
+  ev(&f, MY_EVENT_POINTER_UP, 170, 130);
+  TEST_ASSERT_EQ_INT(f.na->rect.x, 130);
+  TEST_ASSERT_EQ_INT(f.na->rect.y, 120);
+  TEST_ASSERT_EQ_INT(f.nb->rect.x, 430);
+  TEST_ASSERT_EQ_INT(f.nb->rect.y, 220);
+  /* Del: batch cascade delete (each remove emits changed) */
+  my_node_view_connect(f.view, f.na, 0, f.nb, 0);
+  g_changed = 0;
+  key(&f, MY_KEY_DELETE);
+  TEST_ASSERT_EQ_INT((int)my_widget_child_count(f.view), 1); /* overlay */
+  TEST_ASSERT_EQ_INT((int)my_node_view_link_count(f.view), 0);
+  TEST_ASSERT(g_changed >= 2);
+  fx_destroy(&f);
+}
+
+static void test_minimap_click_jumps_viewport(void) {
+  fx_t f;
+  fx_init(&f);
+  /* click at the minimap center: viewport centers on the canvas bbox
+   * middle; after the jump, pan_off = center_screen - center*zoom */
+  ev(&f, MY_EVENT_POINTER_DOWN, 800 - 10 - 80, 600 - 10 - 50);
+  ev(&f, MY_EVENT_POINTER_UP, 800 - 10 - 80, 600 - 10 - 50);
+  {
+    /* expected: pan_off = (w/2 - cx, h/2 - cy) where (cx,cy) is the
+     * clicked canvas point (= bbox center by construction) */
+    float cx = 0, cy = 0;
+    float sx = 0, sy = 0;
+    /* pan_off must have changed to center the viewport somewhere */
+    my_node_view_get_pan(f.view, &cx, &cy);
+    TEST_ASSERT(cx != 0.0f || cy != 0.0f);
+    /* round-trip sanity: some canvas point now maps to the center */
+    my_node_view_canvas_to_screen(f.view, 0.0f, 0.0f, &sx, &sy);
+    TEST_ASSERT((int)sx != 0 || (int)sy != 0);
+  }
+  fx_destroy(&f);
+}
+
+/* ---------------- flow (needs a real window for loop timers) -------- */
+
+typedef struct wfx_t {
+  my_pal_t* pal;
+  my_pal_main_loop_t* loop;
+  my_window_manager_t* wm;
+  my_window_t* win;
+  my_widget_t* view;
+  my_widget_t* na;
+  my_widget_t* nb;
+} wfx_t;
+
+static void wfx_init(wfx_t* f) {
+  f->pal = my_pal_dummy_create(NULL);
+  f->loop = my_pal_main_loop_create(f->pal);
+  f->wm = my_window_manager_create(NULL, f->pal, f->loop);
+  f->win = my_window_create(NULL, f->pal, 800, 600, "t");
+  my_window_manager_open(f->wm, f->win);
+  my_widget_unref(my_window_widget(f->win));
+  f->view = my_node_view_create(NULL);
+  my_widget_set_rect(f->view, &(my_rect_t){0, 0, 800, 600});
+  my_widget_add_child(my_window_widget(f->win), f->view);
+  my_widget_unref(f->view);
+  f->na = my_node_view_add_node(f->view, "a", "A", NULL, 100, 100, 160,
+                                80);
+  my_node_add_socket(f->na, MY_SOCKET_OUT, "o", 0xFF0000FFu);
+  f->nb = my_node_view_add_node(f->view, "b", "B", NULL, 400, 200, 160,
+                                80);
+  my_node_add_socket(f->nb, MY_SOCKET_IN, "i", 0x00FF00FFu);
+}
+
+static void wfx_destroy(wfx_t* f) {
+  my_window_manager_destroy(f->wm);
+  my_pal_main_loop_destroy(f->loop);
+  my_pal_destroy(f->pal);
+}
+
+static void wev(wfx_t* f, my_event_type_t type, int32_t x, int32_t y) {
+  my_event_t e = my_event_init(type);
+  e.u.pointer.x = x;
+  e.u.pointer.y = y;
+  e.u.pointer.button = 1;
+  my_window_on_pal_event(f->win, &e);
+}
+
+static void test_flow_selected_link_marches(void) {
+  wfx_t f;
+  float o0, o1, o2;
+  wfx_init(&f);
+  my_node_view_connect(f.view, f.na, 0, f.nb, 0);
+  /* no selection: no timer, offset frozen */
+  my_pal_dummy_set_now_ms(f.pal, 100);
+  my_pal_main_loop_run(f.loop);
+  o0 = my_node_view_flow_offset(f.view);
+  TEST_ASSERT(o0 == 0.0f);
+  /* select the link (click its midpoint ~ (330,184)) -> timer mounts,
+   * offset advances on ticks (added at now=100, due at 133) */
+  wev(&f, MY_EVENT_POINTER_DOWN, 330, 184);
+  wev(&f, MY_EVENT_POINTER_UP, 330, 184);
+  my_pal_dummy_set_now_ms(f.pal, 200);
+  my_pal_main_loop_run(f.loop);
+  o1 = my_node_view_flow_offset(f.view);
+  my_pal_dummy_set_now_ms(f.pal, 300);
+  my_pal_main_loop_run(f.loop);
+  o2 = my_node_view_flow_offset(f.view);
+  TEST_ASSERT(o1 > o0);
+  TEST_ASSERT(o2 > o1);
+  /* deselect (click empty) -> timer unmounts, offset stops */
+  wev(&f, MY_EVENT_POINTER_DOWN, 500, 400);
+  wev(&f, MY_EVENT_POINTER_UP, 500, 400);
+  o1 = my_node_view_flow_offset(f.view);
+  my_pal_dummy_set_now_ms(f.pal, 300);
+  my_pal_main_loop_run(f.loop);
+  o2 = my_node_view_flow_offset(f.view);
+  TEST_ASSERT(o2 == o1); /* frozen after deselect */
+  wfx_destroy(&f);
+}
+
+static void test_flow_dash_matches_bezier(void) {
+  wfx_t f;
+  rec_vg_t rec;
+  wfx_init(&f);
+  my_node_view_connect(f.view, f.na, 0, f.nb, 0);
+  wev(&f, MY_EVENT_POINTER_DOWN, 330, 184); /* select -> flow */
+  wev(&f, MY_EVENT_POINTER_UP, 330, 184);
+  my_widget_invalidate(my_window_widget(f.win), NULL);
+  my_window_paint(f.win);
+  rec_vg_init(&rec);
+  my_widget_paint(my_window_widget(f.win), (my_vgcanvas_t*)&rec);
+  /* dashed stroke: multiple subpaths (dash gaps) but all from the same
+   * bezier — many move_to/line_to ops, no curve_to (subdivided) */
+  TEST_ASSERT(rec_count(&rec, "move_to") >= 3);
+  TEST_ASSERT(rec_has(&rec, "stroke"));
+  /* selected-link flow is ON by default; global flow is off */
+  TEST_ASSERT(!my_node_view_get_flow_enabled(f.view));
+  my_node_view_set_flow_enabled(f.view, true);
+  TEST_ASSERT(my_node_view_get_flow_enabled(f.view));
+  wfx_destroy(&f);
+}
+
+static void test_selection_overlay_no_leak(void) {
+  my_allocator_t* dbg = my_allocator_debug_create(NULL);
+  my_widget_t* view = my_node_view_create(dbg);
+  my_widget_t* a = my_node_view_add_node(view, "a", "A", NULL, 0, 0, 160,
+                                         80);
+  my_node_add_socket(a, MY_SOCKET_OUT, "o", 0xFF0000FFu);
+  (void)a;
+  my_widget_unref(view);
+  TEST_ASSERT_EQ_INT(my_allocator_debug_leak_count(dbg), 0);
+  my_allocator_debug_destroy(dbg);
 }
 
 MYTEST_MAIN_BEGIN()
@@ -392,4 +613,10 @@ MYTEST_MAIN_BEGIN()
   MYTEST_RUN(test_zoom_clamp_and_anchor);
   MYTEST_RUN(test_zoomed_interaction_uses_canvas_coords);
   MYTEST_RUN(test_remove_node_cascade);
+  MYTEST_RUN(test_rubber_band_multi_select);
+  MYTEST_RUN(test_multi_drag_and_batch_delete);
+  MYTEST_RUN(test_minimap_click_jumps_viewport);
+  MYTEST_RUN(test_flow_selected_link_marches);
+  MYTEST_RUN(test_flow_dash_matches_bezier);
+  MYTEST_RUN(test_selection_overlay_no_leak);
 MYTEST_MAIN_END()

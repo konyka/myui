@@ -11,6 +11,8 @@
 
 #include "myc/my_types.h"
 
+#include <string.h>
+
 /** @brief Event type tag. */
 typedef enum my_event_type_t {
   MY_EVENT_NONE = 0,
@@ -105,7 +107,8 @@ static inline my_event_t my_event_init(my_event_type_t type) {
   my_event_t e;
   e.type = type;
   e.time_ms = 0;
-  e.u.user.data = NULL;
+  memset(&e.u, 0, sizeof(e.u)); /* M20b: the union must start zeroed —
+                                 * garbage modifiers otherwise */
   return e;
 }
 

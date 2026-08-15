@@ -196,10 +196,14 @@ void my_window_manager_destroy(my_window_manager_t* wm) {
     my_window_t* top =
         (my_window_t*)my_darray_get(wm->windows, my_darray_size(wm->windows) - 1);
     my_darray_remove_at(wm->windows, my_darray_size(wm->windows) - 1);
-    top->wm = NULL;
-    my_widget_unref((my_widget_t*)top);
-    if (top->csd) {
-      my_widget_unref((my_widget_t*)top); /* M16: absorb the create ref */
+    {
+      bool csd = top->csd; /* read BEFORE unref: the first unref may
+                            * destroy the window (M16 latent UAF) */
+      top->wm = NULL;
+      my_widget_unref((my_widget_t*)top);
+      if (csd) {
+        my_widget_unref((my_widget_t*)top); /* M16: absorb the create ref */
+      }
     }
   }
   my_animator_manager_destroy(wm->anim_mgr);

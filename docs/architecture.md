@@ -137,7 +137,7 @@ PAL port 矩阵：
 - **连线绘制**：out 右缘→in 左缘，水平切线 handle dx=max(40,|Δx|·0.5)，curve_to 3px；**预览**（输出接口拖出跟光标，preview 色）；落在输入接口=connect，空白=取消；从已连接输入拖出=拾起旧线（断开+预览）；点选高亮 + Del 删除（键盘可达）；拖空白=pan（直接移节点 rect，hit_test 免换算）。
 - **CSS 部件配色**：`my_theme_get_part`/`my_widget_part_color` 新 API——虚拟部件（非真 widget 的绘制件）以 owner widget 为**含自身**的后代锚点查主题（`node .header` 命中 node 绘制的 header）；`my_theme_get_part` 公开，级联同 #id>.class>type。
 - 命中删除：`my_node_view_find_link_at`（细分折线逐段最近距离 ≤4px，后加优先）。
-- 测试 39 断言：模型/预览/拾起重连/选中删除/拖动跟随/pan/CSS 各部件命中/泄漏。缩放/框选/多选/小地图为 TODO。
+- 测试 39 断言：模型/预览/拾起重连/选中删除/拖动跟随/pan/CSS 各部件命中/泄漏。缩放/框选/多选/小地图分别在 M20a/M20b 落地。
 - **demo_nodes（M19c）**：demos/demo_nodes——参考图局部复刻（Principled BSDF 大节点 + Mapping/Color/Environment 小节点 + 内嵌 my_slider + Color→BaseColor/Mapping→Metallic 连线 + Environment 悬空输出），全套部件配色一条 CSS 字符串（注释逐条标视觉对应）；dummy dump 两帧（默认 + 选中连线橙）目检通过。
 
 ### 增强第一批（M20a）
@@ -146,6 +146,14 @@ PAL port 矩阵：
 - **AA 固化**：nv_paint 显式幂等 `my_vgcanvas_soft_set_antialias_level(vg, 2)`（不依赖调用方状态；soft 默认本已是 2，gles 端 MSAA 路径注释）。
 - **画布缩放**：`screen = canvas*zoom + pan_off`（pan_off 为屏幕 px；M19b 的"移 rect"pan 改为视图偏移）；绘制时 CTM = translate(pan/(base*zoom)) + scale(base*zoom)（base=window HiDPI scale，save/restore 还原），**事件统一在 view 层逆变换**——node 纯绘制化（M19b 的 node 内拖动逻辑上移到 view，单一坐标变换点）。`set_zoom`（钳 0.25–2.0）、`zoom_at`（锚点画布坐标不动）、滚轮以光标为锚（±10%/格，Blender 惯例）。
 - **级联删除**：`my_node_view_remove_node(id)`（节点 widget + 全部引用连线 + changed）；Del 键分派：选中节点→级联删，选中连线→删线（节点点击选中新增）。
+
+### 增强第二批（M20b）
+
+- **框选多选**：view 内选择集 darray（弱引用，`my_node_view_is_selected/selected_count/selected_at` 查询 API）；左键空拖 = rubber band（>3px 才显现，`nv_dashed_rect` 6/4 虚线 + 半透明填充，up 时按节点 rect 与框相交批量选中）；Ctrl+点 = toggle，普通点 = 单选；选中集 >1 时拖任一选中节点 = 整体拖动（MOVE drag_node 分支全员位移）；Del 批量级联删（while 循环 remove_node，其内部自清选择集）。节点选中描边在 my_node 绘制（view 拥有集合、node 回查，`node.selected` 部件色回退 #E0A030，线宽 2）。
+- **小地图**：floating overlay 子控件（`floating` 标志 + 全幅 rect，最后绘制；CTM 用 `soft_set_scale(base)` + 逆平移还原屏幕坐标系）——同件绘制框选与小地图。小地图固定右下 160×100（边距 10），内容 = 全部节点包围盒适配缩放画节点色块 + 视口框（`node_view.minimap`/`node_view.minimap_viewport` 键）；DOWN 先查小地图命中（屏幕坐标），命中则 `nv_center_on` 跳转视口中心。
+- **连线流动画**：选中连线（或 `flow_all`）以 marching dashes 绘制——my_bezier 细分点 + 6px/4px 相位 fmod 的 `nv_stroke_link_dashed`；`nv_flow_sync_timer` 按需挂 33ms 定时器（仅选中连线或 flow_all 时存在），tick offset += 1.5px + invalidate；`my_node_view_flow_offset` 诊断 API 供测试。
+- **事件分派顺序**（DOWN）：小地图命中 → 接口（拖线/拾起）→ 连线（点选）→ 节点（Ctrl toggle/单选/开始拖动）→ 空白（开始框选）；中键拖 = pan。一切坐标仍在 view 层单一逆变换（M20a 约定），overlay 交互用屏幕坐标。
+- **遍历过滤**：overlay 是纯 widget 非节点——`nv_node_at`/`nv_socket_at`/`nv_magnet_scan`/`remove_node` 全部按 `node->floating` 跳过（修掉对浮层越界读节点字段的隐患）。
 
 ## 三次贝塞尔曲线（M19a）
 - **接口**：vgcanvas vtable 末尾追加 `curve_to(cx1,cy1,cx2,cy2,x,y)`（冻结式扩展；NULL 槽 = NOT_SUPPORTED，inline 包装判定）。路径级操作，与 line_to 同类，save/restore 无涉；无当前点（未 move_to）返回 FAIL（canvas 惯例，注释注明）。

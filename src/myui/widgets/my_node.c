@@ -3,6 +3,7 @@
  * @brief Node widget implementation (M19b).
  */
 #include "myui/widgets/my_node.h"
+#include "myui/widgets/my_node_view.h"
 
 #include <string.h>
 
@@ -69,9 +70,17 @@ static void node_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
                                 4);
   node_path_rounded_rect(vg, 0, 0, (float)widget->rect.w,
                          (float)widget->rect.h, 4);
-  my_vgcanvas_set_stroke_color(vg, my_color_from_rgba32(0x1E1E1EFFu));
-  my_vgcanvas_set_line_width(vg, 1);
-  my_vgcanvas_stroke(vg);
+  {
+    /* selection border (M20b): the view owns the set */
+    bool sel = n->view != NULL &&
+               my_node_view_is_selected(n->view, widget);
+    uint32_t border = my_widget_part_color(
+        widget, "node", sel ? "selected" : NULL, MY_STATE_NORMAL,
+        "border_color", sel ? 0xE0A030FFu : 0x1E1E1EFFu);
+    my_vgcanvas_set_stroke_color(vg, my_color_from_rgba32(border));
+    my_vgcanvas_set_line_width(vg, sel ? 2 : 1);
+    my_vgcanvas_stroke(vg);
+  }
   /* header (category色: CSS `node.<category> .header` hits via the
    * node's style_class; .header is a CLASS selector) */
   {

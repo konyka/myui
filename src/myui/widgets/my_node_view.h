@@ -79,4 +79,27 @@ int32_t my_node_view_get_selected(const my_widget_t* view);
 /** @brief Pan the canvas by (dx, dy) (moves node rects). */
 void my_node_view_pan_by(my_widget_t* view, int32_t dx, int32_t dy);
 
+/** @brief Whether a node is in the selection set (M20b). */
+bool my_node_view_is_selected(const my_widget_t* view,
+                              const my_widget_t* node);
+
+/** @brief Number of selected nodes (multi-select). */
+size_t my_node_view_selected_count(const my_widget_t* view);
+
+/** @brief Selected node i in the set (borrowed). */
+my_widget_t* my_node_view_selected_at(const my_widget_t* view, size_t i);
+
+/** @brief Link flow animation: true = ALL links march, false = only the
+ * selected link (default false). Selected-link flow is always on. */
+void my_node_view_set_flow_enabled(my_widget_t* view, bool enabled);
+
+bool my_node_view_get_flow_enabled(const my_widget_t* view);
+
+/** @brief Diagnostics: current flow phase in px (drives dash offset). */
+float my_node_view_flow_offset(const my_widget_t* view);
+
+/** @brief Current pan offset (screen px). */
+void my_node_view_get_pan(const my_widget_t* view, float* out_x,
+                          float* out_y);
+
 #endif /* MY_NODE_VIEW_H */

@@ -46,7 +46,7 @@ ctest --test-dir build --output-on-failure
 - `demo_hello`：最小窗口 + 软件渲染场景
 - `demo_widgets`：控件/布局/主题切换/动画/复合控件（dialog/menu/tooltip）
 - `demo_mvvm`：MVVM 全绑定（计数器、items 列表、导航、XML class+CSS 示范）
-- `demo_nodes`：Blender 风格节点编辑器（贝塞尔连线、拖线/选中/删除、CSS 部件配色）
+- `demo_nodes`：Blender 风格节点编辑器（贝塞尔连线、拖线/磁吸/缩放、框选多选、小地图、连线流动画、CSS 部件配色）
 - `dxx`（apps/duanxianxia）：duanxianxia.com 首页复刻（导航/登录 MVVM/分享导出，对照说明见 docs/apps/duanxianxia.md）
 
 headless 验证：`MYUI_PAL=dummy` 构建后 `MYUI_DEMO_DUMP_PPM=out.ppm ./build/demos/demo_mvvm/demo_mvvm` 可渲染并导出 PPM。

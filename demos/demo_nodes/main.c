@@ -100,8 +100,8 @@ int main(void) {
   my_window_set_font(win, font, 16);
 
   hint = my_label_create(NULL,
-                         "拖动标题栏移动节点，从右侧圆点拖到左侧圆点连线，"
-                         "点线选中，Del 删除");
+                         "拖标题栏移动节点，右点拖到左点连线（磁吸高亮），点线选中流动，"
+                         "Del 删除；滚轮缩放，中键平移，空白左拖框选，右下角小地图");
   my_widget_set_rect(hint, &(my_rect_t){10, 6, 940, 24});
   my_widget_add_child(my_window_widget(win), hint);
   my_widget_unref(hint);
@@ -167,6 +167,51 @@ int main(void) {
         my_window_on_pal_event(win, &e);
         my_window_paint(win);
         dump_ppm(win->pal_window, "/tmp/demo_nodes_selected.ppm");
+      }
+      /* zoomed (wheel at the window center) */
+      {
+        my_event_t e = my_event_init(MY_EVENT_POINTER_WHEEL);
+        e.u.pointer.x = 480;
+        e.u.pointer.y = 320;
+        e.u.pointer.delta = 2;
+        my_window_on_pal_event(win, &e);
+        my_window_paint(win);
+        dump_ppm(win->pal_window, "/tmp/demo_nodes_zoom.ppm");
+      }
+      /* rubber band in progress (left drag on empty space) */
+      {
+        my_event_t e = my_event_init(MY_EVENT_POINTER_DOWN);
+        e.u.pointer.x = 40;
+        e.u.pointer.y = 60;
+        e.u.pointer.button = 1;
+        my_window_on_pal_event(win, &e);
+        e = my_event_init(MY_EVENT_POINTER_MOVE);
+        e.u.pointer.x = 500;
+        e.u.pointer.y = 460;
+        e.u.pointer.button = 1;
+        my_window_on_pal_event(win, &e);
+        my_window_paint(win);
+        dump_ppm(win->pal_window, "/tmp/demo_nodes_band.ppm");
+        e = my_event_init(MY_EVENT_POINTER_UP);
+        my_window_on_pal_event(win, &e);
+      }
+      /* magnet preview: drag from Mapping's out socket near a BSDF
+       * input (ring + snapped endpoint) */
+      {
+        my_event_t e = my_event_init(MY_EVENT_POINTER_DOWN);
+        e.u.pointer.x = 230; /* Mapping out socket: view (10,36) + node (60,80) + (160,34+10) */
+        e.u.pointer.y = 150;
+        e.u.pointer.button = 1;
+        my_window_on_pal_event(win, &e);
+        e = my_event_init(MY_EVENT_POINTER_MOVE);
+        e.u.pointer.x = 400; /* near Base Color input */
+        e.u.pointer.y = 194;
+        e.u.pointer.button = 1;
+        my_window_on_pal_event(win, &e);
+        my_window_paint(win);
+        dump_ppm(win->pal_window, "/tmp/demo_nodes_magnet.ppm");
+        e = my_event_init(MY_EVENT_POINTER_UP);
+        my_window_on_pal_event(win, &e);
       }
       my_font_destroy(font);
       my_window_manager_destroy(wm);

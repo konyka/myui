@@ -70,6 +70,10 @@ node_socket.magnet { background-color: #FFD050 }   /* 磁吸高亮环（M20a） 
 node_link { color: #FF00FF }                  /* 连线 */
 node_link.selected { color: #E0A030 }         /* 选中态 */
 node_link.preview { color: #70C0E8 }          /* 拖线预览态 */
+node.selected { border-color: #E0A030 }       /* 节点选中描边（M20b） */
+node_view.rubber_band { color: #4090E0; background-color: #4090E030 }  /* 框选虚线/填充（M20b） */
+node_view.minimap { background-color: #000000A0 }   /* 小地图底色（M20b） */
+node_view.minimap_viewport { color: #FFFFFF }        /* 小地图视口框（M20b） */
 ```
 
 header/socket/link 不是真 widget——node/node_view 绘制时经 `my_widget_part_color(owner, type, class, state, key, fallback)` 查主题（owner 含自身作后代锚点），回退值为模型自带色（接口类型色）或内建默认。
