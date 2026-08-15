@@ -750,6 +750,57 @@ static void test_minimap_anchored_at_zoom_and_pan(void) {
   my_pal_destroy(pal);
 }
 
+/* ---------------- M23b: owner-type bare rule must not leak into parts -- */
+
+static void test_rubber_band_fill_translucent_under_theme(void) {
+  /* M23b regression (the "solid gray rubber band" live bug): with a theme
+   * that styles the canvas via a BARE type rule — demo_nodes' own
+   * `node_view { background-color: #282828 }` — the part query
+   * (node_view, rubber_band) matched that rule at the type-wide cascade
+   * level, so the band fill became the opaque canvas color (invisible
+   * tint = looks solid) and the minimap bg went opaque too. The part
+   * query must skip type-wide rules of the owner's own type, while the
+   * documented `node_view.rubber_band` selector must keep working. */
+  wfx_t f;
+  my_theme_t* t;
+  my_lcd_t* lcd;
+  const uint8_t* px;
+  wfx_init(&f);
+  t = my_theme_create(NULL);
+  my_theme_load_css(t, "node_view { background-color: #282828 }");
+  my_widget_apply_theme(f.view, t);
+  wev(&f, MY_EVENT_POINTER_DOWN, 50, 50);
+  wev(&f, MY_EVENT_POINTER_MOVE, 300, 190); /* band live while held */
+  my_widget_invalidate((my_widget_t*)f.win, NULL);
+  my_window_paint(f.win);
+  lcd = my_pal_window_get_lcd(f.win->pal_window);
+  /* (70,60): inside the band, clear of na (100,100+): fallback fill
+   * #4090E0 a=0x14 over #282828 -> B ~54 (bug: opaque #282828 -> 40) */
+  px = my_lcd_mem_get_buffer(lcd) + 60 * my_lcd_mem_get_stride(lcd) + 70 * 4;
+  TEST_ASSERT(px[0] > 50);
+  /* (350,400): outside the band/minimap/nodes -> plain canvas #282828 */
+  px = my_lcd_mem_get_buffer(lcd) + 400 * my_lcd_mem_get_stride(lcd) +
+       350 * 4;
+  TEST_ASSERT(px[0] == 0x28 && px[1] == 0x28 && px[2] == 0x28);
+  wev(&f, MY_EVENT_POINTER_UP, 300, 190);
+  /* the documented selector still restyles the band (level-1 class) */
+  my_theme_destroy(t);
+  t = my_theme_create(NULL);
+  my_theme_load_css(t, "node_view { background-color: #282828 } "
+                       "node_view.rubber_band { background-color: #80202040 }");
+  my_widget_apply_theme(f.view, t);
+  wev(&f, MY_EVENT_POINTER_DOWN, 50, 50);
+  wev(&f, MY_EVENT_POINTER_MOVE, 300, 190);
+  my_widget_invalidate((my_widget_t*)f.win, NULL);
+  my_window_paint(f.win);
+  /* #802020 a=0x40 over #282828 -> R ~62, B ~38 */
+  px = my_lcd_mem_get_buffer(lcd) + 60 * my_lcd_mem_get_stride(lcd) + 70 * 4;
+  TEST_ASSERT(px[2] > 55 && px[0] < 45);
+  wev(&f, MY_EVENT_POINTER_UP, 300, 190);
+  my_theme_destroy(t);
+  wfx_destroy(&f);
+}
+
 /* ---------------- M21b: auto size / arrows+type colors / layering ---- */
 
 static void test_node_auto_size(void) {
@@ -932,6 +983,7 @@ MYTEST_MAIN_BEGIN()
   MYTEST_RUN(test_minimap_rect_corner_when_fitting);
   MYTEST_RUN(test_minimap_first_frame_soft_pixels);
   MYTEST_RUN(test_minimap_anchored_at_zoom_and_pan);
+  MYTEST_RUN(test_rubber_band_fill_translucent_under_theme);
   MYTEST_RUN(test_node_auto_size);
   MYTEST_RUN(test_node_explicit_size_wins);
   MYTEST_RUN(test_link_type_color_and_arrow);

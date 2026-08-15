@@ -232,13 +232,15 @@ static bool entry_matches_ex(const my_theme_entry_t* e, const char* type,
   }
 }
 
-/** @brief Shared cascade scan. */
-static const my_value_t* theme_cascade(const my_theme_t* theme,
-                                       const char* type, const char* name,
-                                       const char* style_class,
-                                       const my_widget_t* ancestor_anchor,
-                                       my_widget_state_t state,
-                                       const char* key) {
+/** @brief Shared cascade scan. skip_type_wide excludes the level-2
+ * (bare type) match — see my_theme_get_part. */
+static const my_value_t* theme_cascade_ex(const my_theme_t* theme,
+                                          const char* type, const char* name,
+                                          const char* style_class,
+                                          const my_widget_t* ancestor_anchor,
+                                          my_widget_state_t state,
+                                          const char* key,
+                                          bool skip_type_wide) {
   size_t i, n;
   int level;
   if (theme == NULL || key == NULL) {
@@ -246,6 +248,9 @@ static const my_value_t* theme_cascade(const my_theme_t* theme,
   }
   n = my_darray_size(theme->entries);
   for (level = 0; level < 3; level++) {
+    if (level == 2 && skip_type_wide) {
+      continue;
+    }
     for (i = 0; i < n; i++) {
       const my_theme_entry_t* e =
           (const my_theme_entry_t*)my_darray_get(theme->entries, i);
@@ -259,6 +264,17 @@ static const my_value_t* theme_cascade(const my_theme_t* theme,
     }
   }
   return NULL;
+}
+
+/** @brief Shared cascade scan. */
+static const my_value_t* theme_cascade(const my_theme_t* theme,
+                                       const char* type, const char* name,
+                                       const char* style_class,
+                                       const my_widget_t* ancestor_anchor,
+                                       my_widget_state_t state,
+                                       const char* key) {
+  return theme_cascade_ex(theme, type, name, style_class, ancestor_anchor,
+                          state, key, false);
 }
 
 const my_value_t* my_theme_get_for_widget(const my_theme_t* theme,
@@ -280,8 +296,19 @@ const my_value_t* my_theme_get_part(const my_theme_t* theme,
                                     my_widget_state_t state,
                                     const char* key) {
   /* M19b: virtual parts (node headers, sockets, links...) — the owner
-   * widget itself anchors the descendant search (inclusive) */
-  return theme_cascade(theme, part_type, NULL, part_class, owner, state, key);
+   * widget itself anchors the descendant search (inclusive).
+   * M23b: when the part borrows the OWNER'S OWN type with a class
+   * (node_view.rubber_band / .minimap / .minimap_viewport), a bare
+   * type rule for the owner (e.g. `node_view { background-color }`)
+   * must NOT match — it styles the owner widget, not the overlay
+   * part (the leak made the rubber band fill/minimap bg opaque).
+   * Class-bearing queries keep levels 0/1; part types distinct from
+   * the owner (node_link.selected etc.) keep the full cascade. */
+  bool skip_type_wide = part_class != NULL && part_type != NULL &&
+                        owner != NULL &&
+                        my_str_eq(part_type, owner->widget_type);
+  return theme_cascade_ex(theme, part_type, NULL, part_class, owner, state,
+                          key, skip_type_wide);
 }
 
 /** @brief Part color lookup with theme climbing + fallback (used by

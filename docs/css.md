@@ -78,4 +78,6 @@ node_view.minimap_viewport { color: #FFFFFF }        /* 小地图视口框（M20
 
 header/socket/link 不是真 widget——node/node_view 绘制时经 `my_widget_part_color(owner, type, class, state, key, fallback)` 查主题（owner 含自身作后代锚点），回退值为模型自带色（接口类型色）或内建默认。
 
+级联细节（M23b）：part 查询带 class 且 part_type 与 owner 自身类型同名时（`node_view.rubber_band`/`node_view.minimap`/`node_view.minimap_viewport`），owner 的**裸类型规则**（如 `node_view { background-color: #282828 }`）不参与匹配——它给的是 owner 控件本身，不是 overlay 部件（M23b 之前该泄漏会把框选填充/小地图底色变成不透明画布色）；`node_view.rubber_band` 这类带 class 的选择器不受影响。part_type 与 owner 不同名的查询（`node_link.selected`、`node_socket.magnet`）保留完整级联——裸 `node_link` 规则照常作用于选中/预览连线。
+
 M19c 起后代祖先可带 class（`panel.dark button`：entry 存 "panel.dark"，匹配=祖先类型为 panel 且其 style_class 词含 dark）——demo_nodes 的类别色标题栏全靠它。完整可跑示例见 demos/demo_nodes/main.c 的 NODES_CSS（每条注释标视觉对应：画布/主体/四类别标题栏/接口/连线/选中/预览）。
