@@ -160,3 +160,5 @@ cmake --build build -t ui2c
 ```
 
 tests/ui2c_sample.xml 的 golden 等价测试（运行时加载 vs 生成代码构建，逐节点递归比对）保证两条路径一致。
+
+M24a 起两条路径由同一张控件类表（`src/myui/my_widget_class_builtin.inc`，X-macro 纯数据）驱动：生成代码的属性设置发射为 `my_widget_set_prop_str/int/float/bool` 调用（头文件 `myui/my_widget_class.h`，XML=OFF 裁剪档可用），新增控件/属性只需在该 `.inc` 加一行，loader 与 ui2c 同时生效。

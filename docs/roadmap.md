@@ -47,21 +47,21 @@
 - **M14b duanxianxia 应用骨架** ✅ 已完成：apps/duanxianxia（`dxx` 可执行 + `dxx_core` 静态库供测试链接）；顶栏（#444、logo 文字、4 组下拉菜单 my_menu 展开/收起、6 平铺项含 orange/yellow-bold、1px 分隔线、注册/登录，hover 高亮用 M14a 机制）；指数条 12 列（名称/伪粗体数值/涨跌幅，红涨绿跌，5 项真实新浪快照 2026-08-12 + 7 项约值逐行标注）；页脚两行（免责声明 + ICP）；站点配色 dxx_theme；**框架新增**：my_font_stb 的 TTC 首 face 支持 + `my_font_stb_create_chain` 逐码点 fallback 链（解决 DroidSansFallback 无 Latin / Noto CJK VF 为 CFF2 stb 不可解析的双重阻塞）；dummy dump 主页+菜单展开两图目检通过；差异点累计入 docs/apps/duanxianxia.md。
 - **M14c 直播面板区 + 晋级天梯表** ✅ 已完成：双列直播区（情绪直播 750x800 + 涨停直播/异动/股票池/成交额四卡，feed 关键词红绿高亮经 rich_label，卡内 scroll_view 滚动）；涨停股票池晋级表（表头进度/晋级率/标题 + 分享图片红按钮，6 行 130 项**完整真实快照**（2026-08-04，dxx_data.c 注明；行数/项数/成数与晋级率分子一致性单测钉死），股票项=徽标五色+状态三色+[涨幅]+题材，flow 流式换行 + `flow_measure` 行高自适应，1px #ddd 单元格边框）；整页 scroll_view + 右侧 scroll_bar；tooltip/个股 dialog/分享 dialog 交互全通（dialog 继承根窗口字体——框架行为：my_dialog 新建窗口无字体，复制 rw->font 解决）；**框架修复**：`my_window_on_pal_event` 漏路由 POINTER_WHEEL（滚轮此前从未走通过真实事件路径，嵌套滚动测试暴露）；嵌套 wheel 内层消费不冒泡（单测钉死）；dummy dump 6 场景 PNG 目检通过。
 
-## 性能基线汇总（M13d 刷新，GCC 16，-O0 Debug，本机）
+## 性能基线汇总（M24d 刷新，GCC 16，-O0 Debug，本机）
 
 | 场景 | 数值 |
 |------|------|
-| 50 按钮全帧 | 2.45 ms/帧 |
-| 100 半透明矩形 | 2.00 ms/帧 |
-| 路径 AA level0/1/2 | 0.69 / 1.65 / 2.40 ms/帧 |
-| 100 条贝塞尔 stroke（AA level 2，M19a） | 5.30 ms/帧 |
-| 480x270→800x600 图片 nearest/bilinear | 2.23 / 9.57 ms/帧 |
+| 50 按钮全帧 | 2.50 ms/帧 |
+| 100 半透明矩形 | 2.12 ms/帧 |
+| 路径 AA level0/1/2 | 0.71 / 1.63 / 2.39 ms/帧 |
+| 100 条贝塞尔 stroke（AA level 2，M19a） | 5.36 ms/帧 |
+| 480x270→800x600 图片 nearest/bilinear | 2.30 / 9.84 ms/帧 |
 | 2000x1500→400x300 图片 nearest/纯双线性/盒式+双线性 | 0.72 / 1.82 / 11.06 ms/帧（M12c 整数化；M11c 时 0.69 / 4.80 / 11.96） |
 | GLES 8 描边路径 no-AA/MSAA4x | 0.025 / 0.026 ms/帧 |
 | text_area 万行：载入/2000 移动/100 插入 | 0.13 / 0.09 / 0.09 ms |
 | text_area wrap 万行长行：载入+构建/1000 视觉移动/滚动帧 | 1.57 / 0.10 / 0.30 ms |
 | list_view 万行滚动（固定/变高） | 0.002 ms/次（~22 行控件） |
-| 1051 控件构建 / relayout / 10 万 hit_test | 0.36 / 0.06 / 27.1 ms |
+| 1051 控件构建 / relayout / 10 万 hit_test | 0.32 / 0.05 / 32.1 ms（hit_test 较 M13d 的 27.1ms 漂移来自 M14-M23 的 hover 分发与浮层跳过等累计改动，非 M24；relayout 含 on_measure 调用反而更快） |
 
 - **M14d 交互收尾 + 视觉比对（复刻收官）** ✅ 已完成：导航切换（顶栏全部可点项→占位面板，logo/涨停表现回首页，当前项 #E64C62 高亮模拟 bootstrap active）；登录/注册 dialog（edit hint/password + MVVM 全链路：TwoWay + not_empty validator + submit 命令 + 红字错误提示，注册带确认密码一致性）；分享图片真实导出（晋级表离屏 lcd_mem 渲染 + BGRA→RGBA + stb_image_write，路径可注入，dialog 报真实文件名）；视觉逐项比对表入 docs/apps/duanxianxia.md（一致/近似逐项标注）；dummy dump 10 场景 PNG 全目检。
 - **M14 完成**。
@@ -82,6 +82,8 @@
 - **M24a 控件类注册表（组件化核心）** ✅ 已完成：新增 `my_widget_class`（`my_widget_class_t`=类型+create+属性表{name,type,set,get}+事件表；注册/查找/`my_widget_set_prop/get_prop` 及 typed 封装；基类通用属性 visible/enable/x/y/w/h 内置分发）。内建类表为 X-macro 纯数据文件 `my_widget_class_builtin.inc`（库与 tools/ui2c.c 共享同一来源），适配器集中 `my_widget_class_builtin.c`（属性行顺序复刻旧 make_* 应用顺序；slider min/max 经 set_range 成对保序；checkbox 新增公开 `my_checkbox_set_text`）。三处平行手工映射收敛：MVVM `my_widget_target` 的 160 行 if-else 删成薄壳（NOT_SUPPORTED+"value" 通用存储回退显式化）、ui_loader 删 10 个 make_* 改按类表驱动、ui2c 属性发射改走类表（生成代码新增 readonly/align 等通路，修复 loader/ui2c 旧不一致；golden 按流程再生，运行时 vs 生成代码树等价测试原样通过）。新测试 my_widget_class_test 14 用例 208 断言；dummy/c99/noxml 全绿。
 - **M24b 样式键与状态样板收敛** ✅ 已完成：`my_style_keys.h` 六个键常量（宏→字符串 ABI 不变，经 my_style.h 统一挂载），src/myui+src/mymvvm_myui 裸键全量替换零残留（含 my_window.c/my_css.c 映射表）；`my_widget_current_state()` 单点化 disabled>pressed>hover>normal 推导（button/checkbox/scroll_bar/slider 四处副本收敛，edit/text_area 的 focused 借 HOVER 槽保留并注释）；兜底色收敛（button 结构体 4 色字段删除内联等值、slider 旋钮 0xFFFFFF00 哨兵改显式判空、my_node 三处硬编码色改 part 查询+同值 fallback 主题可覆盖）。副作用显化：slider/checkbox/scroll_bar 现可被主题定义 hover/pressed 样式（样式回退 NORMAL 槽保证默认渲染不变）。零视觉回归硬指标：demo_widgets/demo_nodes 12 对 dump 逐字节一致；唯一既有测试调整=my_widgets_test 的 button 注色方式（字段删除所致，期望值未改）。
 - **M24c create 约定与组合协议** ✅ 已完成（API 只增不删）：vtable 末尾第 4 槽 `on_measure`（内容测量先于 layouter，唯一调用点 `my_widget_relayout`），node auto_size 与 scroll_view re-clamp 两处私钩迁移（`on_layout` 回归纯布局职责）；`my_widget_subclass_init()` 正规化匿名子类化（dialog content/menu overlay+box/tooltip/node_view overlay 五处 `->vtable` 直改收敛，API 形态=受控替换+契约注释，五处均无链式调用需求故不引入 vtable_prev）；复合控件统一取用器 `my_scroll_view_widget`/`my_dialog_widget`/`my_menu_widget`（menu 为模型对象，返回打开期 overlay，语义注明）+ 命名 slot 文档化（dialog_content/dialog_buttons/menu_overlay/menu_box/scroll_view）+ `my_widget_find_descendant` 递归查找。严格告警档发现 vtable 位置初始化器必须补第 4 元素 NULL（-Werror=missing-field-initializers），25 个文件机械补零无行为变化。新测试：on_measure 时机/subclass_init 生命周期/find_descendant；demo dump 11 对逐字节一致。
+- **M24d 组件化文档与收尾** ✅ 已完成：docs/architecture.md 新增"组件模型（M24）"章节（类注册表/共享类表/样式键/vtable 四槽/两种子类化形态/组合协议/自定义控件接入清单）；docs/css.md 补样式键常量节、docs/porting.md 补 ui2c 类表驱动节；bench 汇总刷新（属性查表分发不在任何 bench 路径，构建/relayout 更快，hit_test 漂移归因 M14-M23 累计）。**M24 组件化重构完成**：一个控件=一处声明（my_widget_class_builtin.inc），XML/ui2c/MVVM/主题/属性系统全从同一份数据驱动。
+- **M24 完成**。
 
 - **M19b 节点编辑器控件** ✅ 已完成：`my_node`（类别色标题栏 + 左右接口行 + kappa 贝塞尔圆点 + 标题栏拖动）+ `my_node_view`（模型/贝塞尔连线/拖线预览/拾起重连/选中+Del 删/pan）；连线模型输入槽唯一（Blender 语义）；主题新 API `my_theme_get_part`/`my_widget_part_color`（虚拟部件含自身的后代锚点），CSS 六类部件命中单测固化；过程中发现并修复：子类工厂忘设 widget_type（node/node_view）导致类型选择器不命中。
 - **M19a vgcanvas 三次贝塞尔** ✅ 已完成（节点编辑器前置，spec: docs/superpowers/specs/2026-08-14-node-editor-design.md）：vtable 末尾 curve_to 槽（NULL 安全）；共享 de Casteljau 自适应细分 my_bezier（弦距容差 0.25px、深度帽 16）；soft 复用条带化 AA、gles2 复用三角化批提交；测试 4000+ 断言（细分单测/soft 像素等价/gles2 mock/EGL 读回）+ golden scene_bezier 目检 + bench 100 曲线 5.30ms/帧（AA level 2）。

@@ -34,6 +34,8 @@
 
 `background-color`/`background`→`bg_color`、`color`→`fg_color`、`border-color`→`border_color`、`border-width`→`border_width`、`border-radius`→`round_radius`、`font-size`→`font_size`；其余键原名直传（bg_color 等框架原生键直接可用）。
 
+框架侧这六个键在 `src/myui/my_style_keys.h` 有常量定义（`MY_STYLE_BG_COLOR` 等，M24b）——C 代码里引用样式键一律用常量，避免拼写漂移；值与原字符串完全相同。
+
 ## 级联优先级
 
 `#id` > `.class` > `type`；每级内 state→normal 回落；后代选择器附加祖先类型条件。**伪类比裸规则更具体**（specificity 优先于 source order：裸规则只写 NORMAL 槽，伪类写对应状态槽，style 内部 state→normal 回落完成其余）；同级同键后写覆盖先写（source order）。与文本格式共存：同键后写覆盖。
