@@ -113,6 +113,22 @@ my_widget_t* my_checkbox_create(const my_allocator_t* allocator,
   return (my_widget_t*)c;
 }
 
+my_ret_t my_checkbox_set_text(my_widget_t* checkbox, const char* text) {
+  my_checkbox_t* c = (my_checkbox_t*)checkbox;
+  char* copy;
+  if (checkbox == NULL) {
+    return MY_RET_INVALID_PARAMS;
+  }
+  copy = my_strdup(c->allocator, text);
+  if (text != NULL && copy == NULL) {
+    return MY_RET_OOM;
+  }
+  my_mem_free(c->allocator, c->text);
+  c->text = copy;
+  my_widget_invalidate(checkbox, NULL);
+  return MY_RET_OK;
+}
+
 my_ret_t my_checkbox_set_checked(my_widget_t* checkbox, bool checked) {
   my_checkbox_t* c = (my_checkbox_t*)checkbox;
   if (checkbox == NULL) {

@@ -11,7 +11,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "myui/my_widget_class.h"
 #include "myui/my_xml.h"
+
+#include "myui/my_widget_class_builtin.inc"
 
 static FILE* out;
 
@@ -52,112 +55,84 @@ static bool has_attr(const my_xml_node_t* n, const char* name) {
   return attr(n, name) != NULL;
 }
 
-/** @brief The widget factory call for a tag (matches my_ui_loader). */
-static const char* factory_for(const my_xml_node_t* n) {
-  const char* tag = n->name;
-  if (strcmp(tag, "widget") == 0) {
-    return "my_widget_create(a, \"container\")";
+/* ---------------- built-in class table (shared with the library, M24a) ---------------- */
+
+typedef struct ui2c_prop_desc_t {
+  const char* name;
+  my_prop_type_t type;
+} ui2c_prop_desc_t;
+
+typedef struct ui2c_class_desc_t {
+  const char* tag;
+  const char* create_str; /**< create call text for generated code */
+  const ui2c_prop_desc_t* props;
+} ui2c_class_desc_t;
+
+#define UI2C_PROP_ROW(name, type, set_fn, get_fn) {name, type},
+#define UI2C_CLASS_TABLE(tag, create_fn, create_str, PROPS, EVENTS) \
+  static const ui2c_prop_desc_t ui2c_props_of_##create_fn[] = {     \
+      PROPS(UI2C_PROP_ROW){NULL, MY_PROP_STRING}};
+
+MYUI_BUILTIN_CLASSES(UI2C_CLASS_TABLE)
+
+#define UI2C_CLASS_ROW(tag, create_fn, create_str, PROPS, EVENTS) \
+  {tag, create_str, ui2c_props_of_##create_fn},
+
+static const ui2c_class_desc_t UI2C_CLASSES[] = {
+    MYUI_BUILTIN_CLASSES(UI2C_CLASS_ROW)};
+
+static const ui2c_class_desc_t* ui2c_class_find(const char* tag) {
+  size_t i;
+  for (i = 0; i < sizeof(UI2C_CLASSES) / sizeof(UI2C_CLASSES[0]); i++) {
+    if (strcmp(UI2C_CLASSES[i].tag, tag) == 0) {
+      return &UI2C_CLASSES[i];
+    }
   }
-  return NULL; /* complex factories are emitted manually */
+  return NULL;
 }
 
 static void emit_create(const my_xml_node_t* n, int idx) {
-  const char* tag = n->name;
-  fprintf(out, "  w%d = ", idx);
-  if (strcmp(tag, "button") == 0) {
-    fprintf(out, "my_button_create(a, NULL);\n");
-  } else if (strcmp(tag, "label") == 0) {
-    fprintf(out, "my_label_create(a, NULL);\n");
-  } else if (strcmp(tag, "edit") == 0) {
-    fprintf(out, "my_edit_create(a);\n");
-  } else if (strcmp(tag, "checkbox") == 0) {
-    if (attr(n, "text") != NULL) {
-      fprintf(out, "my_checkbox_create(a, ");
-      c_str(out, attr(n, "text"));
-      fprintf(out, ");\n");
-    } else {
-      fprintf(out, "my_checkbox_create(a, NULL);\n");
-    }
-  } else if (strcmp(tag, "slider") == 0) {
-    fprintf(out, "my_slider_create(a);\n");
-  } else if (strcmp(tag, "progress_bar") == 0) {
-    fprintf(out, "my_progress_bar_create(a);\n");
-  } else if (strcmp(tag, "list_view") == 0) {
-    fprintf(out, "my_list_view_create(a);\n");
-  } else if (strcmp(tag, "image") == 0) {
-    fprintf(out, "my_image_create(a);\n");
-  } else if (strcmp(tag, "scroll_bar") == 0) {
-    fprintf(out, "my_scroll_bar_create(a);\n");
-  } else if (strcmp(tag, "text_area") == 0) {
-    fprintf(out, "my_text_area_create(a);\n");
-  } else {
-    fprintf(out, "my_widget_create(a, \"container\");\n");
-  }
+  const ui2c_class_desc_t* cls = ui2c_class_find(n->name);
+  fprintf(out, "  w%d = %s;\n", idx,
+          cls != NULL ? cls->create_str
+                      : "my_widget_create(a, \"container\")");
 }
 
+/** @brief Emit my_widget_set_prop_* calls for the node's attributes, in
+ * class-table row order (same order the runtime loader applies them). */
 static void emit_tag_specific(const my_xml_node_t* n, int idx) {
-  const char* tag = n->name;
-  if (strcmp(tag, "button") == 0 && attr(n, "text") != NULL) {
-    fprintf(out, "  my_button_set_text(w%d, ", idx);
-    c_str(out, attr(n, "text"));
-    fprintf(out, ");\n");
-  } else if (strcmp(tag, "label") == 0 && attr(n, "text") != NULL) {
-    fprintf(out, "  my_label_set_text(w%d, ", idx);
-    c_str(out, attr(n, "text"));
-    fprintf(out, ");\n");
-  } else if (strcmp(tag, "edit") == 0) {
-    if (attr(n, "hint") != NULL) {
-      fprintf(out, "  my_edit_set_hint(w%d, ", idx);
-      c_str(out, attr(n, "hint"));
-      fprintf(out, ");\n");
+  const ui2c_class_desc_t* cls = ui2c_class_find(n->name);
+  const ui2c_prop_desc_t* p;
+  if (cls == NULL) {
+    return;
+  }
+  for (p = cls->props; p->name != NULL; p++) {
+    const char* av = attr(n, p->name);
+    if (av == NULL) {
+      continue;
     }
-    if (attr(n, "text") != NULL) {
-      fprintf(out, "  my_edit_set_text(w%d, ", idx);
-      c_str(out, attr(n, "text"));
-      fprintf(out, ");\n");
-    }
-    if (attr(n, "password") != NULL) {
-      fprintf(out, "  my_edit_set_password(w%d, true);\n", idx);
-    }
-    if (attr(n, "max_len") != NULL) {
-      fprintf(out, "  my_edit_set_max_len(w%d, %s);\n", idx, attr(n, "max_len"));
-    }
-  } else if (strcmp(tag, "checkbox") == 0) {
-    if (attr(n, "checked") != NULL) {
-      fprintf(out, "  my_checkbox_set_checked(w%d, true);\n", idx);
-    }
-  } else if (strcmp(tag, "slider") == 0) {
-    if (attr(n, "min") != NULL || attr(n, "max") != NULL) {
-      fprintf(out, "  my_slider_set_range(w%d, %s, %s);\n", idx,
-              attr(n, "min") != NULL ? attr(n, "min") : "0.0f",
-              attr(n, "max") != NULL ? attr(n, "max") : "100.0f");
-    }
-    if (attr(n, "step") != NULL) {
-      fprintf(out, "  my_slider_set_step(w%d, %s);\n", idx, attr(n, "step"));
-    }
-    if (attr(n, "value") != NULL) {
-      fprintf(out, "  my_slider_set_value(w%d, %s);\n", idx, attr(n, "value"));
-    }
-  } else if (strcmp(tag, "progress_bar") == 0 && attr(n, "value") != NULL) {
-    fprintf(out, "  my_progress_bar_set_value(w%d, %s);\n", idx,
-            attr(n, "value"));
-  } else if (strcmp(tag, "list_view") == 0 && attr(n, "row_height") != NULL) {
-    fprintf(out, "  my_list_view_set_row_height(w%d, %s);\n", idx,
-            attr(n, "row_height"));
-  } else if (strcmp(tag, "image") == 0 && attr(n, "src") != NULL) {
-    fprintf(out, "  my_image_set_image(w%d, ", idx);
-    c_str(out, attr(n, "src"));
-    fprintf(out, ");\n");
-  } else if (strcmp(tag, "text_area") == 0) {
-    if (attr(n, "hint") != NULL) {
-      fprintf(out, "  my_text_area_set_hint(w%d, ", idx);
-      c_str(out, attr(n, "hint"));
-      fprintf(out, ");\n");
-    }
-    if (attr(n, "text") != NULL) {
-      fprintf(out, "  my_text_area_set_text(w%d, ", idx);
-      c_str(out, attr(n, "text"));
-      fprintf(out, ");\n");
+    switch (p->type) {
+      case MY_PROP_STRING:
+        fprintf(out, "  my_widget_set_prop_str(w%d, \"%s\", ", idx, p->name);
+        c_str(out, av);
+        fprintf(out, ");\n");
+        break;
+      case MY_PROP_INT:
+        fprintf(out, "  my_widget_set_prop_int(w%d, \"%s\", %s);\n", idx,
+                p->name, av);
+        break;
+      case MY_PROP_FLOAT:
+        fprintf(out, "  my_widget_set_prop_float(w%d, \"%s\", %s);\n", idx,
+                p->name, av);
+        break;
+      case MY_PROP_BOOL:
+        fprintf(out, "  my_widget_set_prop_bool(w%d, \"%s\", %s);\n", idx,
+                p->name,
+                strcmp(av, "true") == 0 || strcmp(av, "1") == 0 ? "true"
+                                                                : "false");
+        break;
+      default:
+        break;
     }
   }
 }
@@ -217,7 +192,6 @@ static void emit_bind_rules(const my_xml_node_t* n, int idx) {
 static int emit_node(const my_xml_node_t* n, int idx, int parent) {
   size_t i;
   int next = idx + 1;
-  (void)factory_for;
   emit_create(n, idx);
   fprintf(out, "  if (w%d == NULL) goto fail;\n", idx);
   emit_tag_specific(n, idx);
@@ -251,6 +225,7 @@ static void emit_styles(const my_xml_node_t* root) {
 static const char* REQUIRED_HEADERS =
     "#include \"myui/my_window.h\"\n"
     "#include \"myui/my_layout.h\"\n"
+    "#include \"myui/my_widget_class.h\"\n"
     "#include \"myui/widgets/my_button.h\"\n"
     "#include \"myui/widgets/my_checkbox.h\"\n"
     "#include \"myui/widgets/my_edit.h\"\n"

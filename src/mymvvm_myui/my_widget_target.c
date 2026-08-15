@@ -8,179 +8,32 @@
 
 #include "myc/my_str.h"
 #include "mymvvm_myui/my_mvvm.h"
-#include "myui/widgets/my_button.h"
-#include "myui/widgets/my_checkbox.h"
-#include "myui/widgets/my_edit.h"
-#include "myui/widgets/my_label.h"
+#include "myui/my_widget_class.h"
 #include "myui/widgets/my_list_view.h"
-#include "myui/widgets/my_progress_bar.h"
-#include "myui/widgets/my_slider.h"
-#include "myui/widgets/my_text_area.h"
 
 /* ---------------- properties ---------------- */
 
 static my_ret_t target_set_prop(my_binding_target_t* t, const char* name,
                                 const my_value_t* v) {
   my_widget_target_t* wt = (my_widget_target_t*)t;
-  my_widget_t* w = wt->widget;
-  if (strcmp(name, "text") == 0) {
-    const char* s = my_value_get_str(v);
-    if (my_str_eq(w->widget_type, "button")) {
-      return my_button_set_text(w, s);
-    }
-    if (my_str_eq(w->widget_type, "label")) {
-      return my_label_set_text(w, s);
-    }
-    if (my_str_eq(w->widget_type, "edit")) {
-      return my_edit_set_text(w, s);
-    }
-    if (my_str_eq(w->widget_type, "text_area")) {
-      return my_text_area_set_text(w, s);
-    }
-    return MY_RET_NOT_SUPPORTED;
-  }
-  if (strcmp(name, "hint") == 0) {
-    if (my_str_eq(w->widget_type, "edit")) {
-      return my_edit_set_hint(w, my_value_get_str(v));
-    }
-    if (my_str_eq(w->widget_type, "text_area")) {
-      return my_text_area_set_hint(w, my_value_get_str(v));
-    }
-    return MY_RET_NOT_SUPPORTED;
-  }
-  if (strcmp(name, "value") == 0) {
-    if (my_str_eq(w->widget_type, "checkbox")) {
-      bool b = v->type == MY_VALUE_BOOL ? my_value_get_bool(v) : false;
-      return my_checkbox_set_checked(w, b);
-    }
-    if (my_str_eq(w->widget_type, "slider")) {
-      double d = v->type == MY_VALUE_DOUBLE ? my_value_get_double(v)
-                 : v->type == MY_VALUE_FLOAT ? (double)my_value_get_float(v)
-                 : v->type == MY_VALUE_INT32 ? (double)my_value_get_int32(v)
-                                             : 0.0;
-      return my_slider_set_value(w, (float)d);
-    }
-    if (my_str_eq(w->widget_type, "progress_bar")) {
-      double d = v->type == MY_VALUE_DOUBLE ? my_value_get_double(v)
-                 : v->type == MY_VALUE_FLOAT ? (double)my_value_get_float(v)
-                 : v->type == MY_VALUE_INT32 ? (double)my_value_get_int32(v)
-                                             : 0.0;
-      return my_progress_bar_set_value(w, (float)d);
-    }
-  }
-  if (strcmp(name, "wrap") == 0) {
-    if (my_str_eq(w->widget_type, "text_area")) {
-      return my_text_area_set_wrap(w, v->type == MY_VALUE_BOOL
-                                        ? my_value_get_bool(v)
-                                        : false);
-    }
-    return MY_RET_NOT_SUPPORTED;
-  }
-  if (strcmp(name, "align") == 0) {
-    const char* s = my_value_get_str(v);
-    if (my_str_eq(w->widget_type, "label")) {
-      return my_label_set_align(w, my_text_align_parse(s));
-    }
-    if (my_str_eq(w->widget_type, "text_area")) {
-      return my_text_area_set_align(w, my_text_align_parse(s));
-    }
-    return MY_RET_NOT_SUPPORTED;
-  }
-  if (strcmp(name, "visible") == 0) {
-    return my_widget_set_visible(w, v->type == MY_VALUE_BOOL
-                                      ? my_value_get_bool(v)
-                                      : true);
-  }
-  if (strcmp(name, "enable") == 0) {
-    if (v->type == MY_VALUE_BOOL) {
-      w->enable = my_value_get_bool(v);
-      my_widget_invalidate(w, NULL);
-    }
-    return MY_RET_OK;
-  }
-  if (strcmp(name, "value") == 0) {
+  my_ret_t r = my_widget_set_prop(wt->widget, name, v);
+  if (r == MY_RET_NOT_SUPPORTED && strcmp(name, "value") == 0) {
+    /* generic "value" fallback store for widgets without a value prop */
     my_value_reset(&wt->value);
     my_value_init(&wt->value, wt->allocator);
     return my_value_copy(&wt->value, v);
   }
-  if (strlen(name) == 1 && strchr("xywh", name[0]) != NULL &&
-      v->type == MY_VALUE_INT32) {
-    my_rect_t r = w->rect;
-    int32_t n = my_value_get_int32(v);
-    if (name[0] == 'x') {
-      r.x = n;
-    } else if (name[0] == 'y') {
-      r.y = n;
-    } else if (name[0] == 'w') {
-      r.w = n;
-    } else {
-      r.h = n;
-    }
-    return my_widget_set_rect(w, &r);
-  }
-  return MY_RET_NOT_SUPPORTED;
+  return r;
 }
 
 static my_ret_t target_get_prop(my_binding_target_t* t, const char* name,
                                 my_value_t* v) {
   my_widget_target_t* wt = (my_widget_target_t*)t;
-  my_widget_t* w = wt->widget;
-  if (strcmp(name, "text") == 0) {
-    const char* s = NULL;
-    if (my_str_eq(w->widget_type, "button")) {
-      s = ((my_button_t*)w)->text;
-    } else if (my_str_eq(w->widget_type, "label")) {
-      s = ((my_label_t*)w)->text;
-    } else if (my_str_eq(w->widget_type, "edit")) {
-      s = my_edit_get_text(w);
-    } else if (my_str_eq(w->widget_type, "text_area")) {
-      s = my_text_area_get_text(w);
-    }
-    return my_value_set_str(v, s);
-  }
-  if (strcmp(name, "wrap") == 0) {
-    if (my_str_eq(w->widget_type, "text_area")) {
-      return my_value_set_bool(v, ((my_text_area_t*)w)->wrap);
-    }
-    return MY_RET_NOT_SUPPORTED;
-  }
-  if (strcmp(name, "align") == 0) {
-    if (my_str_eq(w->widget_type, "label")) {
-      return my_value_set_str(v,
-                              my_text_align_str(((my_label_t*)w)->align));
-    }
-    if (my_str_eq(w->widget_type, "text_area")) {
-      return my_value_set_str(v,
-                              my_text_align_str(((my_text_area_t*)w)->align));
-    }
-    return MY_RET_NOT_SUPPORTED;
-  }
-  if (strcmp(name, "visible") == 0) {
-    return my_value_set_bool(v, w->visible);
-  }
-  if (strcmp(name, "enable") == 0) {
-    return my_value_set_bool(v, w->enable);
-  }
-  if (strcmp(name, "value") == 0) {
-    if (my_str_eq(w->widget_type, "checkbox")) {
-      return my_value_set_bool(v, my_checkbox_get_checked(w));
-    }
-    if (my_str_eq(w->widget_type, "slider")) {
-      return my_value_set_double(v, (double)my_slider_get_value(w));
-    }
-    if (my_str_eq(w->widget_type, "progress_bar")) {
-      return my_value_set_double(v, (double)my_progress_bar_get_value(w));
-    }
+  my_ret_t r = my_widget_get_prop(wt->widget, name, v);
+  if (r == MY_RET_NOT_SUPPORTED && strcmp(name, "value") == 0) {
     return my_value_copy(v, &wt->value);
   }
-  if (strlen(name) == 1 && strchr("xywh", name[0]) != NULL) {
-    int32_t n = name[0] == 'x'   ? w->rect.x
-                : name[0] == 'y' ? w->rect.y
-                : name[0] == 'w' ? w->rect.w
-                                 : w->rect.h;
-    return my_value_set_int32(v, n);
-  }
-  return MY_RET_NOT_SUPPORTED;
+  return r;
 }
 
 /* ---------------- events ---------------- */

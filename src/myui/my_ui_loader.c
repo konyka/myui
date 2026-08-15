@@ -13,15 +13,7 @@
 #include "myc/my_str.h"
 #include "myui/my_css.h"
 #include "myui/my_layout.h"
-#include "myui/widgets/my_button.h"
-#include "myui/widgets/my_checkbox.h"
-#include "myui/widgets/my_edit.h"
-#include "myui/widgets/my_image.h"
-#include "myui/widgets/my_label.h"
-#include "myui/widgets/my_list_view.h"
-#include "myui/widgets/my_progress_bar.h"
-#include "myui/widgets/my_slider.h"
-#include "myui/widgets/my_text_area.h"
+#include "myui/my_widget_class.h"
 
 /* ---------------- factory registry ---------------- */
 
@@ -73,12 +65,6 @@ static int32_t attr_int(const my_xml_node_t* node, const char* name,
   return s != NULL ? (int32_t)strtol(s, NULL, 10) : fallback;
 }
 
-static float attr_float(const my_xml_node_t* node, const char* name,
-                        float fallback) {
-  const char* s = my_xml_node_attr(node, name);
-  return s != NULL ? strtof(s, NULL) : fallback;
-}
-
 static bool attr_bool(const my_xml_node_t* node, const char* name,
                       bool fallback) {
   const char* s = my_xml_node_attr(node, name);
@@ -88,165 +74,46 @@ static bool attr_bool(const my_xml_node_t* node, const char* name,
   return my_str_eq(s, "true") || my_str_eq(s, "1");
 }
 
-/* ---------------- built-in factories ---------------- */
+/* ---------------- built-in widget classes (M24a) ---------------- */
 
-static my_widget_t* make_widget(const my_allocator_t* a,
-                                const my_xml_node_t* n) {
-  (void)n;
-  return my_widget_create(a, "container");
-}
-
-static my_widget_t* make_button(const my_allocator_t* a,
-                                const my_xml_node_t* n) {
-  return my_button_create(a, my_xml_node_attr(n, "text"));
-}
-
-static my_widget_t* make_label(const my_allocator_t* a,
-                               const my_xml_node_t* n) {
-  my_widget_t* w = my_label_create(a, my_xml_node_attr(n, "text"));
-  if (w != NULL) {
-    my_label_set_align(w, my_text_align_parse(my_xml_node_attr(n, "align")));
-  }
-  return w;
-}
-
-static my_widget_t* make_edit(const my_allocator_t* a, const my_xml_node_t* n) {
-  my_widget_t* w = my_edit_create(a);
-  const char* hint;
-  if (w == NULL) {
-    return NULL;
-  }
-  hint = my_xml_node_attr(n, "hint");
-  if (hint != NULL) {
-    my_edit_set_hint(w, hint);
-  }
-  if (attr_bool(n, "password", false)) {
-    my_edit_set_password(w, true);
-  }
-  if (attr_bool(n, "readonly", false)) {
-    my_edit_set_readonly(w, true);
-  }
-  if (my_xml_node_attr(n, "max_len") != NULL) {
-    my_edit_set_max_len(w, (size_t)attr_int(n, "max_len", 0));
-  }
-  if (my_xml_node_attr(n, "text") != NULL) {
-    my_edit_set_text(w, my_xml_node_attr(n, "text"));
-  }
-  return w;
-}
-
-static my_widget_t* make_checkbox(const my_allocator_t* a,
-                                  const my_xml_node_t* n) {
-  my_widget_t* w = my_checkbox_create(a, my_xml_node_attr(n, "text"));
-  if (w != NULL && attr_bool(n, "checked", false)) {
-    my_checkbox_set_checked(w, true);
-  }
-  return w;
-}
-
-static my_widget_t* make_slider(const my_allocator_t* a,
-                                const my_xml_node_t* n) {
-  my_widget_t* w = my_slider_create(a);
-  if (w == NULL) {
-    return NULL;
-  }
-  my_slider_set_range(w, attr_float(n, "min", 0.0f),
-                      attr_float(n, "max", 100.0f));
-  my_slider_set_step(w, attr_float(n, "step", 0.0f));
-  my_slider_set_value(w, attr_float(n, "value", 0.0f));
-  return w;
-}
-
-static my_widget_t* make_text_area(const my_allocator_t* a,
-                                   const my_xml_node_t* n) {
-  my_widget_t* w = my_text_area_create(a);
-  const char* hint;
-  if (w == NULL) {
-    return NULL;
-  }
-  hint = my_xml_node_attr(n, "hint");
-  if (hint != NULL) {
-    my_text_area_set_hint(w, hint);
-  }
-  if (attr_bool(n, "readonly", false)) {
-    my_text_area_set_readonly(w, true);
-  }
-  if (attr_bool(n, "wrap", false)) {
-    my_text_area_set_wrap(w, true);
-  }
-  if (my_xml_node_attr(n, "align") != NULL) {
-    my_text_area_set_align(w,
-                           my_text_align_parse(my_xml_node_attr(n, "align")));
-  }
-  if (my_xml_node_attr(n, "max_len") != NULL) {
-    my_text_area_set_max_len(w, (size_t)attr_int(n, "max_len", 0));
-  }
-  if (my_xml_node_attr(n, "text") != NULL) {
-    my_text_area_set_text(w, my_xml_node_attr(n, "text"));
-  }
-  return w;
-}
-
-static my_widget_t* make_progress(const my_allocator_t* a,
-                                  const my_xml_node_t* n) {
-  my_widget_t* w = my_progress_bar_create(a);
-  if (w != NULL) {
-    my_progress_bar_set_value(w, attr_float(n, "value", 0.0f));
-  }
-  return w;
-}
-
-static my_widget_t* make_list_view(const my_allocator_t* a,
-                                   const my_xml_node_t* n) {
-  my_widget_t* w = my_list_view_create(a);
-  if (w != NULL && my_xml_node_attr(n, "row_height") != NULL) {
-    my_list_view_set_row_height(w, attr_int(n, "row_height", 24));
-  }
-  return w;
-}
-
-static my_widget_t* make_image(const my_allocator_t* a, const my_xml_node_t* n) {
-  my_widget_t* w = my_image_create(a);
-  const char* src;
-  const char* scale;
-  if (w == NULL) {
-    return NULL;
-  }
-  src = my_xml_node_attr(n, "src");
-  if (src != NULL) {
-    my_image_set_image(w, src);
-  }
-  scale = my_xml_node_attr(n, "scale");
-  if (scale != NULL) {
-    if (my_str_eq(scale, "none")) {
-      my_image_set_scale_mode(w, MY_IMAGE_SCALE_NONE);
-    } else if (my_str_eq(scale, "center")) {
-      my_image_set_scale_mode(w, MY_IMAGE_SCALE_CENTER);
-    } else if (my_str_eq(scale, "fill")) {
-      my_image_set_scale_mode(w, MY_IMAGE_SCALE_FILL);
-    } else {
-      my_image_set_scale_mode(w, MY_IMAGE_SCALE_FIT);
-    }
-  }
-  return w;
-}
-
-static void register_builtins(void) {
-  static bool done = false;
-  if (done) {
+/**
+ * @brief Apply the class property table to a freshly created widget:
+ * properties are applied in table row order, each only when the XML node
+ * carries a same-named attribute (mirrors the former make_* factories).
+ */
+static void apply_class_props(my_widget_t* widget,
+                              const my_widget_class_t* cls,
+                              const my_xml_node_t* node) {
+  const my_prop_desc_t* p;
+  if (cls->props == NULL) {
     return;
   }
-  done = true;
-  my_ui_loader_register("widget", make_widget);
-  my_ui_loader_register("button", make_button);
-  my_ui_loader_register("label", make_label);
-  my_ui_loader_register("edit", make_edit);
-  my_ui_loader_register("checkbox", make_checkbox);
-  my_ui_loader_register("slider", make_slider);
-  my_ui_loader_register("progress_bar", make_progress);
-  my_ui_loader_register("text_area", make_text_area);
-  my_ui_loader_register("list_view", make_list_view);
-  my_ui_loader_register("image", make_image);
+  for (p = cls->props; p->name != NULL; p++) {
+    const char* s = my_xml_node_attr(node, p->name);
+    my_value_t v;
+    if (s == NULL || p->set == NULL) {
+      continue;
+    }
+    my_value_init(&v, ((my_object_t*)widget)->allocator);
+    switch (p->type) {
+      case MY_PROP_STRING:
+        my_value_set_str(&v, s);
+        break;
+      case MY_PROP_INT:
+        my_value_set_int32(&v, (int32_t)strtol(s, NULL, 10));
+        break;
+      case MY_PROP_FLOAT:
+        my_value_set_float(&v, strtof(s, NULL));
+        break;
+      case MY_PROP_BOOL:
+        my_value_set_bool(&v, my_str_eq(s, "true") || my_str_eq(s, "1"));
+        break;
+      default:
+        break;
+    }
+    p->set(widget, &v);
+    my_value_reset(&v);
+  }
 }
 
 /* ---------------- generic attribute application ---------------- */
@@ -364,16 +231,26 @@ static my_widget_t* build_node(const my_allocator_t* allocator, my_pal_t* pal,
     }
     return NULL;
   }
+  /* custom-registered factories take precedence; built-in tags are
+   * created through the widget class table (M24a) */
   factory = find_factory(node->name);
-  if (factory == NULL) {
-    if (err != NULL) {
-      err->line = node->line;
-      snprintf(err->message, sizeof(err->message), "unknown tag <%s>",
-               node->name);
+  if (factory != NULL) {
+    widget = factory(allocator, node);
+  } else {
+    const my_widget_class_t* cls = my_widget_class_find(node->name);
+    if (cls == NULL) {
+      if (err != NULL) {
+        err->line = node->line;
+        snprintf(err->message, sizeof(err->message), "unknown tag <%s>",
+                 node->name);
+      }
+      return NULL;
     }
-    return NULL;
+    widget = cls->create(allocator);
+    if (widget != NULL) {
+      apply_class_props(widget, cls, node);
+    }
   }
-  widget = factory(allocator, node);
   if (widget == NULL) {
     return NULL;
   }
@@ -408,7 +285,6 @@ my_widget_t* my_ui_load_str(const my_allocator_t* allocator, my_pal_t* pal,
   my_xml_error_t xerr;
   my_widget_t* result = NULL;
 
-  register_builtins();
   if (xml_str == NULL) {
     return NULL;
   }

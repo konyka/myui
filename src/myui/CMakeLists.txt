@@ -13,6 +13,8 @@ add_library(myui STATIC
   my_undo_stack.c
   my_undo_manager.c
   my_ui_loader.c
+  my_widget_class.c
+  my_widget_class_builtin.c
   my_image_loader.c
   my_stb_image.c
   widgets/my_button.c

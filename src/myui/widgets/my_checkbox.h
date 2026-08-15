@@ -23,6 +23,8 @@ typedef struct my_checkbox_t {
 
 my_widget_t* my_checkbox_create(const my_allocator_t* allocator,
                                 const char* text);
+/** @brief Replace the label text (owned copy; NULL clears). */
+my_ret_t my_checkbox_set_text(my_widget_t* checkbox, const char* text);
 my_ret_t my_checkbox_set_checked(my_widget_t* checkbox, bool checked);
 bool my_checkbox_get_checked(my_widget_t* checkbox);
 my_ret_t my_checkbox_set_mixed(my_widget_t* checkbox, bool mixed);
