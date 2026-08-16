@@ -43,6 +43,7 @@
   - [ ] `vk_create_surface(window, vk_instance, &vk_surface)`（M25b）：`vkCreateXlibSurfaceKHR`/`vkCreateWaylandSurfaceKHR`/对应平台的 surface 创建一行转发；Vulkan 后端（swapchain/管线/present）全在 myr 层，port 不需要任何其它 Vulkan 代码。
   - 验证顺序：gl_desktop_smoke/vulkan_smoke 的离屏部分不依赖 port（EGL surfaceless / 离屏 image），可先跑通；再真窗口 enable_gpu 冒烟（照 gl_window_smoke_test）。
   - Vulkan 已知噪音：loader 枚举 `/usr/share/vulkan/icd.d/` 下全部 ICD 时，freedreno 在 Intel 机器上会打印 `TU: error: ...tu_knl.cc...VK_ERROR_INCOMPATIBLE_DRIVER`——这是驱动枚举的固有失败输出，应用代码无法抑制，也不影响后续 Intel ICD 的正常使用；需要干净输出时可用 `VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/intel_icd.x86_64.json` 限定 ICD（按本机实际 ICD 文件名调整）。
+  - **窗口态 Vulkan 的 MSAA 默认策略（M25c）**：`my_vgcanvas_vulkan` 在离屏渲染时仍默认使用 4x MSAA（测试/离屏截图需要精确抗锯齿）；在窗口态（`offscreen == false`）则默认降为单采样 `VK_SAMPLE_COUNT_1_BIT`，因为部分驱动（实测 Mesa ANV）在窗口 MSAA4/MSAA8 下的 sample pattern/resolve 会产生比参考 soft 后端更宽的 1 像素边缘过渡，表现为“涂抹/发虚”。若应用明确需要窗口 MSAA，可设环境变量 `MYUI_VK_MSAA=1` 强制 4x；`MYUI_VK_NOMSAA=1` 仍保留为显式关闭 MSAA 的开关。
 - Apple 平台：Metal shim（M6）。Web(Emscripten)：WebGL（M5）。
 
 ## IME 移植要点（M13a）

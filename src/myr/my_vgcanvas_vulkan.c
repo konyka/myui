@@ -1028,15 +1028,24 @@ static my_ret_t vk_create_targets(my_vgcanvas_vulkan_t* c) {
   vkDeviceWaitIdle(g_vk.dev);
   vk_destroy_targets(c);
   if (c->samples == 0) {
-    /* first creation: prefer 4x MSAA, fall back to single-sample */
+    /* first creation: offscreen prefers 4x MSAA; windowed defaults to
+     * single-sample because some drivers (Mesa ANV) produce wider edge
+     * transitions in windowed MSAA than the reference soft backend.
+     * MYUI_VK_MSAA=1 forces windowed 4x; MYUI_VK_NOMSAA=1 disables MSAA. */
     VkPhysicalDeviceProperties props;
     vkGetPhysicalDeviceProperties(g_vk.pdev, &props);
     c->samples = (props.limits.framebufferColorSampleCounts &
                   VK_SAMPLE_COUNT_4_BIT) != 0
                      ? VK_SAMPLE_COUNT_4_BIT
                      : VK_SAMPLE_COUNT_1_BIT;
+    if (!c->offscreen) {
+      c->samples = VK_SAMPLE_COUNT_1_BIT;
+    }
+    if (getenv("MYUI_VK_MSAA") != NULL) {
+      c->samples = VK_SAMPLE_COUNT_4_BIT;
+    }
     if (getenv("MYUI_VK_NOMSAA") != NULL) {
-      c->samples = VK_SAMPLE_COUNT_1_BIT; /* debug: isolate MSAA chain */
+      c->samples = VK_SAMPLE_COUNT_1_BIT;
     }
   }
   if (c->offscreen) {
