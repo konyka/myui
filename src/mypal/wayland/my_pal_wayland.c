@@ -139,12 +139,21 @@ typedef struct wl_window_t {
   int32_t pointer_x, pointer_y;
   struct wl_callback* frame_cb;
   my_pal_gl_t* gl;    /**< GL mount after gl_enable (owned, M10c) */
+  bool vk_surface;    /**< a Vulkan surface was created on this window
+                           (M25b); soft shm presents are skipped then —
+                           attaching an shm buffer to a surface carrying
+                           Mesa's syncobj object is rejected by the
+                           compositor ("Explicit Sync only supported on
+                           dmabuf buffers") */
 #if defined(MYUI_PAL_GL_EGL)
   struct wl_egl_window* egl_win; /**< owned by the GL mount */
 #endif
 } wl_window_t;
 
 static void present(wl_window_t* w) {
+  if (w->vk_surface) {
+    return; /* M25c: the Vulkan WSI presents dmabuf frames itself */
+  }
   if (w->wlbuf == NULL || !w->configured) {
     return;
   }
@@ -1423,6 +1432,7 @@ static void* wl_win_vk_create_surface(my_pal_window_t* win,
                                 &surf) != VK_SUCCESS) {
     return NULL;
   }
+  w->vk_surface = true; /* soft shm presents are skipped from now on */
   return (void*)surf;
 }
 #else

@@ -42,6 +42,7 @@
   - [ ] `gl_enable_api(window, api)`（M25a，api=GLES2/OPENGL）：建对应类型的 GL 上下文（桌面系统 EGL/GLX/WGL/NSGL 均可——port 内部自由，返回 `my_pal_gl_t` 语义对象：make_current/swap/get_size/has_multisample/destroy）。旧 `gl_enable` 槽保留 = GLES2 转发。
   - [ ] `vk_create_surface(window, vk_instance, &vk_surface)`（M25b）：`vkCreateXlibSurfaceKHR`/`vkCreateWaylandSurfaceKHR`/对应平台的 surface 创建一行转发；Vulkan 后端（swapchain/管线/present）全在 myr 层，port 不需要任何其它 Vulkan 代码。
   - 验证顺序：gl_desktop_smoke/vulkan_smoke 的离屏部分不依赖 port（EGL surfaceless / 离屏 image），可先跑通；再真窗口 enable_gpu 冒烟（照 gl_window_smoke_test）。
+  - Vulkan 已知噪音：loader 枚举 `/usr/share/vulkan/icd.d/` 下全部 ICD 时，freedreno 在 Intel 机器上会打印 `TU: error: ...tu_knl.cc...VK_ERROR_INCOMPATIBLE_DRIVER`——这是驱动枚举的固有失败输出，应用代码无法抑制，也不影响后续 Intel ICD 的正常使用；需要干净输出时可用 `VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/intel_icd.x86_64.json` 限定 ICD（按本机实际 ICD 文件名调整）。
 - Apple 平台：Metal shim（M6）。Web(Emscripten)：WebGL（M5）。
 
 ## IME 移植要点（M13a）

@@ -41,7 +41,6 @@
 #define VKC_GLYPH_CACHE 64
 #define VKC_IMG_CACHE 16
 #define VKC_PUSH_SIZE 32 /* std140 push block: vec2 + pad + vec4 */
-#define VKC_RETIRE_CAP 96 /* deferred texture destroys per frame slot */
 
 /* ---------------- global (shared, refcounted) ---------------- */
 
@@ -276,6 +275,12 @@ typedef struct my_vgcanvas_vulkan_t {
   VkImageView msaa_view;
 
   VkRenderPass renderpass;
+  /* resolve-only renderpass + per-target framebuffers (M25c): the
+   * windowed MSAA resolve goes through a zero-draw subpass so the
+   * swapchain images need no TRANSFER usages (WSI dmabuf constraint) */
+  VkRenderPass resolve_rp;
+  VkFramebuffer resolve_fbs[VKC_MAX_IMGS];
+  VkFramebuffer pending_fb[VKC_MAX_IMGS]; /* transient clear-rp fbs */
   VkDescriptorSetLayout ds_layout;
   VkDescriptorPool ds_pool;
   VkSampler sampler;
@@ -285,9 +290,11 @@ typedef struct my_vgcanvas_vulkan_t {
   VkCommandPool cmd_pool;
   /* deferred texture destruction (M25b): an evicted texture may still be
    * referenced by an in-flight frame; retired textures are destroyed when
-   * the frame slot they were retired into is reused (fence waited) */
-  vk_tex_t retired[VKC_FRAMES][VKC_RETIRE_CAP];
+   * the frame slot they were retired into is reused (fence waited). The
+   * lists grow on demand (a frame may evict many glyphs at once) */
+  vk_tex_t* retired[VKC_FRAMES];
   size_t retired_count[VKC_FRAMES];
+  size_t retired_cap[VKC_FRAMES];
   vk_frame_t frames[VKC_FRAMES];
   uint32_t frame_idx;
   uint32_t img_idx;
@@ -440,7 +447,7 @@ static my_ret_t vk_tex_create(my_vgcanvas_vulkan_t* c, vk_tex_t* t,
   ici.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
   ici.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
   if (vkCreateImage(g_vk.dev, &ici, NULL, &t->img) != VK_SUCCESS) {
-    return MY_RET_FAIL;
+    goto fail;
   }
   vkGetImageMemoryRequirements(g_vk.dev, t->img, &req);
   memset(&mai, 0, sizeof(mai));
@@ -450,8 +457,7 @@ static my_ret_t vk_tex_create(my_vgcanvas_vulkan_t* c, vk_tex_t* t,
                                     VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
   if (mai.memoryTypeIndex == UINT32_MAX ||
       vkAllocateMemory(g_vk.dev, &mai, NULL, &t->mem) != VK_SUCCESS) {
-    vkDestroyImage(g_vk.dev, t->img, NULL);
-    return MY_RET_FAIL;
+    goto fail;
   }
   vkBindImageMemory(g_vk.dev, t->img, t->mem, 0);
   memset(&vci, 0, sizeof(vci));
@@ -463,7 +469,7 @@ static my_ret_t vk_tex_create(my_vgcanvas_vulkan_t* c, vk_tex_t* t,
   vci.subresourceRange.levelCount = 1;
   vci.subresourceRange.layerCount = 1;
   if (vkCreateImageView(g_vk.dev, &vci, NULL, &t->view) != VK_SUCCESS) {
-    return MY_RET_FAIL;
+    goto fail;
   }
   /* staging upload (one-shot, synchronous) */
   {
@@ -473,7 +479,7 @@ static my_ret_t vk_tex_create(my_vgcanvas_vulkan_t* c, vk_tex_t* t,
                        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
                            VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
                        &staging, &staging_mem) != MY_RET_OK) {
-      return MY_RET_FAIL;
+      goto fail;
     }
     vkMapMemory(g_vk.dev, staging_mem, 0, sz, 0, &map);
     memcpy(map, pixels, (size_t)sz);
@@ -482,7 +488,7 @@ static my_ret_t vk_tex_create(my_vgcanvas_vulkan_t* c, vk_tex_t* t,
   if (vk_oneshot(&cmd) != MY_RET_OK) {
     vkDestroyBuffer(g_vk.dev, staging, NULL);
     vkFreeMemory(g_vk.dev, staging_mem, NULL);
-    return MY_RET_FAIL;
+    goto fail;
   }
   vk_transition(cmd, t->img, VK_IMAGE_LAYOUT_UNDEFINED,
                 VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0,
@@ -514,7 +520,7 @@ static my_ret_t vk_tex_create(my_vgcanvas_vulkan_t* c, vk_tex_t* t,
   dai.descriptorSetCount = 1;
   dai.pSetLayouts = &c->ds_layout;
   if (vkAllocateDescriptorSets(g_vk.dev, &dai, &t->ds) != VK_SUCCESS) {
-    return MY_RET_FAIL;
+    goto fail;
   }
   memset(&dii, 0, sizeof(dii));
   dii.sampler = c->sampler;
@@ -529,6 +535,22 @@ static my_ret_t vk_tex_create(my_vgcanvas_vulkan_t* c, vk_tex_t* t,
   wr.pImageInfo = &dii;
   vkUpdateDescriptorSets(g_vk.dev, 1, &wr, 0, NULL);
   return MY_RET_OK;
+
+fail:
+  /* full cleanup: a partially created texture (img set, ds missing)
+   * would otherwise be mistaken for a cache hit and bind a NULL
+   * descriptor set */
+  if (t->view != VK_NULL_HANDLE) {
+    vkDestroyImageView(g_vk.dev, t->view, NULL);
+  }
+  if (t->img != VK_NULL_HANDLE) {
+    vkDestroyImage(g_vk.dev, t->img, NULL);
+  }
+  if (t->mem != VK_NULL_HANDLE) {
+    vkFreeMemory(g_vk.dev, t->mem, NULL);
+  }
+  memset(t, 0, sizeof(*t));
+  return MY_RET_FAIL;
 }
 
 static void vk_tex_destroy_now(my_vgcanvas_vulkan_t* c, vk_tex_t* t) {
@@ -545,20 +567,30 @@ static void vk_tex_destroy_now(my_vgcanvas_vulkan_t* c, vk_tex_t* t) {
 }
 
 /** @brief Defer a texture's destruction to the reuse of the current frame
- * slot (its fence proves all referencing work has completed). */
+ * slot (its fence proves all referencing work has completed). Never
+ * destroys synchronously: this runs while a frame may be RECORDING and
+ * referencing the texture's descriptor set. */
 static void vk_tex_retire(my_vgcanvas_vulkan_t* c, vk_tex_t* t) {
-  size_t* n;
+  size_t idx = c->frame_idx;
+  vk_tex_t* grown;
+  size_t new_cap;
   if (t->img == VK_NULL_HANDLE) {
     return;
   }
-  n = &c->retired_count[c->frame_idx];
-  if (*n >= VKC_RETIRE_CAP) {
-    vkDeviceWaitIdle(g_vk.dev); /* rare overflow: stall, stay correct */
-    vk_tex_destroy_now(c, t);
-    return;
+  if (c->retired_count[idx] + 1 > c->retired_cap[idx]) {
+    new_cap = c->retired_cap[idx] > 0 ? c->retired_cap[idx] * 2 : 32;
+    grown = (vk_tex_t*)my_mem_realloc(c->allocator, c->retired[idx],
+                                      new_cap * sizeof(vk_tex_t));
+    if (grown == NULL) {
+      /* OOM fallback: leak the texture (rare; a later frame's cache
+       * eviction recreates it) rather than freeing mid-record */
+      t->img = VK_NULL_HANDLE;
+      return;
+    }
+    c->retired[idx] = grown;
+    c->retired_cap[idx] = new_cap;
   }
-  c->retired[c->frame_idx][*n] = *t;
-  (*n)++;
+  c->retired[idx][c->retired_count[idx]++] = *t;
   t->img = VK_NULL_HANDLE; /* the cache slot is free again */
 }
 
@@ -580,6 +612,10 @@ static void vk_destroy_targets(my_vgcanvas_vulkan_t* c) {
     if (c->fbs[i] != VK_NULL_HANDLE) {
       vkDestroyFramebuffer(g_vk.dev, c->fbs[i], NULL);
       c->fbs[i] = VK_NULL_HANDLE;
+    }
+    if (c->resolve_fbs[i] != VK_NULL_HANDLE) {
+      vkDestroyFramebuffer(g_vk.dev, c->resolve_fbs[i], NULL);
+      c->resolve_fbs[i] = VK_NULL_HANDLE;
     }
     if (c->target_views[i] != VK_NULL_HANDLE) {
       vkDestroyImageView(g_vk.dev, c->target_views[i], NULL);
@@ -686,6 +722,88 @@ static my_ret_t vk_create_framebuffers(my_vgcanvas_vulkan_t* c) {
   return MY_RET_OK;
 }
 
+/** @brief M25c: zero-draw resolve renderpass for the windowed MSAA
+ * path: the subpass color attachment is the persistent MSAA image
+ * (LOAD/STORE), the resolve attachment the swapchain image — so the
+ * swapchain needs no TRANSFER usages (WSI dmabuf constraint). */
+static my_ret_t vk_create_resolve_rp(my_vgcanvas_vulkan_t* c) {
+  VkAttachmentDescription atts[2];
+  VkAttachmentReference color_ref, resolve_ref;
+  VkSubpassDescription sub;
+  VkSubpassDependency dep;
+  VkRenderPassCreateInfo ri;
+  uint32_t i;
+  if (c->offscreen || c->samples == VK_SAMPLE_COUNT_1_BIT) {
+    return MY_RET_OK;
+  }
+  memset(atts, 0, sizeof(atts));
+  atts[0].format = c->format;
+  atts[0].samples = c->samples;
+  atts[0].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD; /* persistent history */
+  atts[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+  atts[0].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+  atts[0].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+  atts[0].initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+  atts[0].finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+  atts[1].format = c->format;
+  atts[1].samples = VK_SAMPLE_COUNT_1_BIT;
+  atts[1].loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE; /* fully resolved over */
+  atts[1].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+  atts[1].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+  atts[1].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+  atts[1].initialLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+  atts[1].finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+  memset(&color_ref, 0, sizeof(color_ref));
+  color_ref.attachment = 0;
+  color_ref.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+  memset(&resolve_ref, 0, sizeof(resolve_ref));
+  resolve_ref.attachment = 1;
+  resolve_ref.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+  memset(&sub, 0, sizeof(sub));
+  sub.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+  sub.colorAttachmentCount = 1;
+  sub.pColorAttachments = &color_ref;
+  sub.pResolveAttachments = &resolve_ref;
+  memset(&dep, 0, sizeof(dep));
+  dep.srcSubpass = VK_SUBPASS_EXTERNAL;
+  dep.dstSubpass = 0;
+  dep.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+  dep.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+  dep.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+  dep.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+  memset(&ri, 0, sizeof(ri));
+  ri.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+  ri.attachmentCount = 2;
+  ri.pAttachments = atts;
+  ri.subpassCount = 1;
+  ri.pSubpasses = &sub;
+  ri.dependencyCount = 1;
+  ri.pDependencies = &dep;
+  if (vkCreateRenderPass(g_vk.dev, &ri, NULL, &c->resolve_rp) !=
+      VK_SUCCESS) {
+    return MY_RET_FAIL;
+  }
+  for (i = 0; i < c->img_count; i++) {
+    VkImageView atts2[2];
+    VkFramebufferCreateInfo fci;
+    atts2[0] = c->msaa_view;
+    atts2[1] = c->target_views[i];
+    memset(&fci, 0, sizeof(fci));
+    fci.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+    fci.renderPass = c->resolve_rp;
+    fci.attachmentCount = 2;
+    fci.pAttachments = atts2;
+    fci.width = (uint32_t)c->fb_w;
+    fci.height = (uint32_t)c->fb_h;
+    fci.layers = 1;
+    if (vkCreateFramebuffer(g_vk.dev, &fci, NULL, &c->resolve_fbs[i]) !=
+        VK_SUCCESS) {
+      return MY_RET_FAIL;
+    }
+  }
+  return MY_RET_OK;
+}
+
 /** @brief One-shot layout transitions + initial clear right after
  * (re)creating images (fresh images contain garbage; clear to
  * transparent black so untouched pixels are deterministic). */
@@ -701,27 +819,105 @@ static my_ret_t vk_pre_transition_targets(my_vgcanvas_vulkan_t* c) {
   range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
   range.levelCount = 1;
   range.layerCount = 1;
-  if (vk_oneshot(&cmd) != MY_RET_OK) {
-    return MY_RET_FAIL;
+  if (!c->offscreen) {
+    /* M25c: swapchain images may not carry TRANSFER_DST (WSI dmabuf
+     * constraint), so the initial clear is a one-time CLEAR renderpass
+     * per image (transient: created, used and destroyed here) */
+    VkAttachmentDescription att;
+    VkAttachmentReference ref;
+    VkSubpassDescription sub;
+    VkRenderPassCreateInfo ri;
+    VkRenderPass clear_rp = VK_NULL_HANDLE;
+    memset(&att, 0, sizeof(att));
+    att.format = c->format;
+    att.samples = VK_SAMPLE_COUNT_1_BIT;
+    att.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    att.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    att.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    att.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    att.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    att.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    memset(&ref, 0, sizeof(ref));
+    ref.attachment = 0;
+    ref.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    memset(&sub, 0, sizeof(sub));
+    sub.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    sub.colorAttachmentCount = 1;
+    sub.pColorAttachments = &ref;
+    memset(&ri, 0, sizeof(ri));
+    ri.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+    ri.attachmentCount = 1;
+    ri.pAttachments = &att;
+    ri.subpassCount = 1;
+    ri.pSubpasses = &sub;
+    if (vkCreateRenderPass(g_vk.dev, &ri, NULL, &clear_rp) != VK_SUCCESS) {
+      return MY_RET_FAIL;
+    }
+    if (vk_oneshot(&cmd) == MY_RET_OK) {
+      for (i = 0; i < c->img_count; i++) {
+        VkFramebufferCreateInfo fci;
+        VkFramebuffer fb = VK_NULL_HANDLE;
+        VkRenderPassBeginInfo rbi;
+        VkClearValue clear;
+        memset(&clear, 0, sizeof(clear));
+        memset(&fci, 0, sizeof(fci));
+        fci.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+        fci.renderPass = clear_rp;
+        fci.attachmentCount = 1;
+        fci.pAttachments = &c->target_views[i];
+        fci.width = (uint32_t)c->fb_w;
+        fci.height = (uint32_t)c->fb_h;
+        fci.layers = 1;
+        if (vkCreateFramebuffer(g_vk.dev, &fci, NULL, &fb) != VK_SUCCESS) {
+          continue;
+        }
+        memset(&rbi, 0, sizeof(rbi));
+        rbi.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+        rbi.renderPass = clear_rp;
+        rbi.framebuffer = fb;
+        rbi.renderArea.extent.width = (uint32_t)c->fb_w;
+        rbi.renderArea.extent.height = (uint32_t)c->fb_h;
+        rbi.clearValueCount = 1;
+        rbi.pClearValues = &clear;
+        vkCmdBeginRenderPass(cmd, &rbi, VK_SUBPASS_CONTENTS_INLINE);
+        vkCmdEndRenderPass(cmd);
+        c->pending_fb[i] = fb; /* destroyed after the submit below */
+      }
+      vk_oneshot_submit(cmd);
+      for (i = 0; i < c->img_count; i++) {
+        if (c->pending_fb[i] != VK_NULL_HANDLE) {
+          vkDestroyFramebuffer(g_vk.dev, c->pending_fb[i], NULL);
+          c->pending_fb[i] = VK_NULL_HANDLE;
+        }
+      }
+    }
+    vkDestroyRenderPass(g_vk.dev, clear_rp, NULL);
+  } else if (vk_oneshot(&cmd) == MY_RET_OK) {
+    for (i = 0; i < c->img_count; i++) {
+      vk_transition(cmd, c->target_imgs[i], VK_IMAGE_LAYOUT_UNDEFINED,
+                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0,
+                    VK_ACCESS_TRANSFER_WRITE_BIT,
+                    VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                    VK_PIPELINE_STAGE_TRANSFER_BIT, 0);
+      vkCmdClearColorImage(cmd, c->target_imgs[i],
+                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &black, 1,
+                           &range);
+      vk_transition(cmd, c->target_imgs[i],
+                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, home,
+                    VK_ACCESS_TRANSFER_WRITE_BIT,
+                    VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
+                        VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+                    VK_PIPELINE_STAGE_TRANSFER_BIT,
+                    VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0);
+    }
+    vk_oneshot_submit(cmd);
   }
-  for (i = 0; i < c->img_count; i++) {
-    vk_transition(cmd, c->target_imgs[i], VK_IMAGE_LAYOUT_UNDEFINED,
-                  VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0,
-                  VK_ACCESS_TRANSFER_WRITE_BIT,
-                  VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                  VK_PIPELINE_STAGE_TRANSFER_BIT, 0);
-    vkCmdClearColorImage(cmd, c->target_imgs[i],
-                         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &black, 1,
-                         &range);
-    vk_transition(cmd, c->target_imgs[i],
-                  VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, home,
-                  VK_ACCESS_TRANSFER_WRITE_BIT,
-                  VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
-                      VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-                  VK_PIPELINE_STAGE_TRANSFER_BIT,
-                  VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0);
-  }
+  /* the MSAA image is private (not a WSI swapchain image): a plain
+   * transfer clear is fine */
   if (c->msaa_img != VK_NULL_HANDLE) {
+    if (vk_oneshot(&cmd) != MY_RET_OK) {
+      return MY_RET_FAIL;
+    }
     vk_transition(cmd, c->msaa_img, VK_IMAGE_LAYOUT_UNDEFINED,
                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0,
                   VK_ACCESS_TRANSFER_WRITE_BIT,
@@ -737,8 +933,9 @@ static my_ret_t vk_pre_transition_targets(my_vgcanvas_vulkan_t* c) {
                       VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
                   VK_PIPELINE_STAGE_TRANSFER_BIT,
                   VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0);
+    return vk_oneshot_submit(cmd);
   }
-  return vk_oneshot_submit(cmd);
+  return MY_RET_OK;
 }
 
 static my_ret_t vk_create_renderpass(my_vgcanvas_vulkan_t* c) {
@@ -896,9 +1093,12 @@ static my_ret_t vk_create_targets(my_vgcanvas_vulkan_t* c) {
     sci.imageExtent.width = (uint32_t)c->fb_w;
     sci.imageExtent.height = (uint32_t)c->fb_h;
     sci.imageArrayLayers = 1;
-    sci.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
-                     VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
-                     VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    /* M25c: COLOR_ATTACHMENT ONLY. Mesa's wayland WSI rejects transfer
+     * usages on swapchain images for the dmabuf path (falls back to
+     * wl_shm, which the compositor's explicit-sync protocol then
+     * rejects). The creation-time clear and the MSAA resolve are done
+     * with renderpasses instead (vk_pre_transition_targets / flush). */
+    sci.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
     sci.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
     sci.preTransform = caps.currentTransform;
     sci.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
@@ -946,6 +1146,9 @@ static my_ret_t vk_create_targets(my_vgcanvas_vulkan_t* c) {
     }
   }
   if (vk_create_framebuffers(c) != MY_RET_OK) {
+    return MY_RET_FAIL;
+  }
+  if (vk_create_resolve_rp(c) != MY_RET_OK) {
     return MY_RET_FAIL;
   }
   return vk_pre_transition_targets(c);
@@ -1002,11 +1205,11 @@ static my_ret_t vk_create_pipelines(my_vgcanvas_vulkan_t* c) {
   }
   memset(&pool_size, 0, sizeof(pool_size));
   pool_size.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-  pool_size.descriptorCount = 128;
+  pool_size.descriptorCount = 256;
   memset(&pci, 0, sizeof(pci));
   pci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
   pci.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-  pci.maxSets = 128;
+  pci.maxSets = 256;
   pci.poolSizeCount = 1;
   pci.pPoolSizes = &pool_size;
   if (vkCreateDescriptorPool(g_vk.dev, &pci, NULL, &c->ds_pool) !=
@@ -1297,13 +1500,26 @@ static my_ret_t vk_flush(my_vgcanvas_vulkan_t* c) {
     vkCmdEndRenderPass(f->cmd);
     c->in_renderpass = false;
   }
-  if (c->samples != VK_SAMPLE_COUNT_1_BIT) {
-    /* manual full-extent resolve: both the MSAA image and the target are
-     * persistent (loadOp=LOAD), so resolving the whole image preserves
-     * the regions this frame did not touch (partial repaint safe) */
-    VkImageLayout home =
-        c->offscreen ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
-                     : VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+  if (c->samples != VK_SAMPLE_COUNT_1_BIT && !c->offscreen) {
+    /* windowed MSAA: zero-draw resolve renderpass — the subpass end
+     * resolves the persistent MSAA image into the swapchain image
+     * (full renderArea; the MSAA image's loadOp=LOAD history keeps
+     * partial repaints correct). No TRANSFER usage on the swapchain
+     * (M25c, WSI dmabuf constraint). */
+    VkRenderPassBeginInfo rbi;
+    memset(&rbi, 0, sizeof(rbi));
+    rbi.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    rbi.renderPass = c->resolve_rp;
+    rbi.framebuffer = c->resolve_fbs[c->img_idx];
+    rbi.renderArea.extent.width = (uint32_t)c->fb_w;
+    rbi.renderArea.extent.height = (uint32_t)c->fb_h;
+    vkCmdBeginRenderPass(f->cmd, &rbi, VK_SUBPASS_CONTENTS_INLINE);
+    vkCmdEndRenderPass(f->cmd);
+  } else if (c->samples != VK_SAMPLE_COUNT_1_BIT) {
+    /* offscreen: manual full-extent resolve (the private target image
+     * carries TRANSFER usages; both images are persistent, so resolving
+     * the whole image preserves the regions this frame did not touch) */
+    VkImageLayout home = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
     VkImageResolve region;
     vk_transition(f->cmd, c->msaa_img,
                   VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
@@ -1853,6 +2069,8 @@ static void vk_destroy(my_vgcanvas_t* vg) {
   vkDeviceWaitIdle(g_vk.dev);
   vk_retire_collect(c, 0);
   vk_retire_collect(c, 1);
+  my_mem_free(c->allocator, c->retired[0]);
+  my_mem_free(c->allocator, c->retired[1]);
   for (i = 0; i < VKC_GLYPH_CACHE; i++) {
     vk_tex_destroy_now(c, &c->glyph_cache[i].tex);
   }
@@ -1882,6 +2100,9 @@ static void vk_destroy(my_vgcanvas_t* vg) {
   }
   if (c->renderpass != VK_NULL_HANDLE) {
     vkDestroyRenderPass(g_vk.dev, c->renderpass, NULL);
+  }
+  if (c->resolve_rp != VK_NULL_HANDLE) {
+    vkDestroyRenderPass(g_vk.dev, c->resolve_rp, NULL);
   }
   vk_destroy_targets(c);
   if (c->surface != VK_NULL_HANDLE) {
@@ -2048,9 +2269,16 @@ my_ret_t my_vgcanvas_vulkan_readback(my_vgcanvas_t* vg, uint8_t* rgba,
   VkCommandBuffer cmd;
   VkDeviceSize sz;
   void* map;
-  if (c == NULL || !c->offscreen || rgba == NULL || width != c->fb_w ||
-      height != c->fb_h) {
+  if (c == NULL || rgba == NULL || width != c->fb_w || height != c->fb_h) {
     return MY_RET_INVALID_PARAMS;
+  }
+  if (!c->offscreen) {
+    /* M25c: windowed readback is intentionally NOT_SUPPORTED — swapchain
+     * images carry no TRANSFER_SRC (WSI dmabuf constraint), and no caller
+     * depends on it (the smoke test uses the offscreen canvas). Read the
+     * persistent MSAA/offscreen image instead if this ever becomes
+     * needed. */
+    return MY_RET_NOT_SUPPORTED;
   }
   if (c->cmd_pending) {
     vk_frame_t* f = &c->frames[c->frame_idx];
