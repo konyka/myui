@@ -37,6 +37,15 @@ my_ret_t my_menu_popup(my_window_t* win, my_menu_t* menu, int32_t x,
 void my_menu_dismiss(my_menu_t* menu);
 
 /**
+ * @brief Set the maximum cascade depth (number of visible levels). Values
+ * < 1 are clamped to 1. Default is 3.
+ */
+void my_menu_set_max_depth(my_menu_t* menu, int32_t depth);
+
+/** @brief Current maximum cascade depth. */
+int32_t my_menu_max_depth(const my_menu_t* menu);
+
+/**
  * @brief The popup's overlay widget while open, NULL while closed (M24c
  * uniform accessor). A menu is a data model, not a widget — this is the
  * semantically equivalent handle: the in-window overlay (named

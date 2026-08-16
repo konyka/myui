@@ -332,12 +332,12 @@ PAL port 矩阵：
 
 ## 复合控件：dialog / menu / tooltip（M13c）
 
-- **浮层基础设施**：widget 新 `floating` 标志（overlay 子控件，linear 布局两个 pass 均跳过，rect 由 owner 绝对设置）+ `user_data` 指针（core 不用，owner 回链）；PAL 窗口 vtable 新 `move` 槽（dummy 记录、x11 物理换算 XMoveWindow、wayland NOT_SUPPORTED、fb noop——dialog 拖拽移动留 TODO）；dummy port 新 `my_pal_dummy_inject_event`（走注册 handler/wm 全路由，测试用）。
+- **浮层基础设施**：widget 新 `floating` 标志（overlay 子控件，linear 布局两个 pass 均跳过，rect 由 owner 绝对设置）+ `user_data` 指针（core 不用，owner 回链）；PAL 窗口 vtable 新 `move` 槽（dummy 记录、x11 物理换算 XMoveWindow、wayland NOT_SUPPORTED、fb noop）；dummy port 新 `my_pal_dummy_inject_event`（走注册 handler/wm 全路由，测试用）。
 - **模态与遮罩**：window 新 `modal`/`scrim` 标志；window_manager 路由事件时 top 窗 modal 且目标非 top 则吞掉 POINTER/KEY/IME；被遮窗 scrim=true 时 paint 逐脏区叠加 rgba(0,0,0,96) 半透明幕。
 - **my_dialog（组合式，非控件子类）**：真实 PAL 子窗口（win 字段公开）；内容容器 `my_dialog_content()`（focusable，挂 ESC→CANCEL 的 key_down 监听）+ 底部按钮行（按钮 ctx darray，click→`my_dialog_close(result)`）；close 回报 result 回调并清理 wm 窗口。模态靠 wm 阻断 + scrim，无额外事件循环。
-- **my_menu（数据模型 + 窗口内浮层，不开 PAL 窗）**：`my_menu_popup(win, menu, x, y, cb, ctx)` 在窗口 root 末尾挂**全窗口 floating overlay**（吃外部点击→dismiss，吞其余事件，键盘导航经焦点），menu box 为其子（绝对定位、内部点击吃掉）；item 是 box 子控件（DOWN 高亮、UP 叶项报 id/有子菜单则开级联）。**边缘翻转**：x+bw 超窗宽则贴右缘（y 同理），再 clamp ≥0；级联上限 `MENU_MAX_DEPTH=3`，子菜单继承父 cb/win；键盘 Up/Down 环绕移动高亮、Enter 激活、ESC 关当前层；选叶项沿 parent 链全关。文本宽按 8px 格子估算（无字体测量）。
+- **my_menu（数据模型 + 窗口内浮层，不开 PAL 窗）**：`my_menu_popup(win, menu, x, y, cb, ctx)` 在窗口 root 末尾挂**全窗口 floating overlay**（吃外部点击→dismiss，吞其余事件，键盘导航经焦点），menu box 为其子（绝对定位、内部点击吃掉）；item 是 box 子控件（DOWN 高亮、UP 叶项报 id/有子菜单则开级联）。**边缘翻转**：x+bw 超窗宽则贴右缘（y 同理），再 clamp ≥0；级联上限默认 3，可通过 `my_menu_set_max_depth` 运行时调整（子菜单继承该限制）；键盘 Up/Down 环绕移动高亮、Enter 激活、ESC 在子层回退到父层、在顶层关闭全部；选叶项沿 parent 链全关。**悬停级联（M26a）**：带 `sub` 项 hover 120ms 后自动展开，同级非 sub 项 hover 立即关闭已展开子菜单，子菜单 overlay 检测光标离开 box 时自动关闭。文本宽按 8px 格子估算（无字体测量）。
 - **tooltip（窗口级悬停浮层）**：widget 新 owned `tooltip` 字符串（set/get，destroy 释放；XML 通用属性 `tooltip="..."`）；my_window 在事件分发**前**做 hover 跟踪（POINTER_MOVE hit_test 后沿祖先找带 tooltip 者，排除 tip 自身）：目标变更→取消 500ms one-shot 定时器（win->loop，回调返回 FAIL 即单次）并隐藏旧 tip，到时→在光标 +(12,16) 处弹 floating "tooltip" 小控件（越界钳进窗口、底部越界翻到光标上方）；POINTER_DOWN/KEY_DOWN 立即取消+隐藏；目标子树被移除经 removed_hook 清态（tip_hide 先清指针再 remove 防重入）；窗口 destroy 取消定时器并收 tip（window/tree 各持一引用，平衡释放）。
-- **主题默认色**：menu_box/menu_item（hover 高亮）/dialog_content/tooltip 四组键入 `my_theme_default_create`；demo_widgets 增 Dialog/Menu 按钮、各按钮 tooltip，dummy dump 出 scrim/dialog/menu/tooltip 四张目检图。级联深度>3、菜单鼠标悬停开级联（现要点/Enter）、dialog 拖拽移动为 TODO。
+- **主题默认色**：menu_box/menu_item（hover 高亮）/dialog_content/tooltip 四组键入 `my_theme_default_create`；demo_widgets 增 Dialog/Menu 按钮、各按钮 tooltip，dummy dump 出 scrim/dialog/menu/tooltip 四张目检图。dialog 拖拽移动由 M16 CSD 标题栏覆盖。
 
 ## CSS 样式子集（M18a）
 

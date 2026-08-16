@@ -58,6 +58,21 @@ static void key(fx_t* f, int32_t k) {
   my_pal_dummy_inject_event(f->pal, f->win->pal_window, &e);
 }
 
+static void move(fx_t* f, int32_t x, int32_t y) {
+  my_event_t e = my_event_init(MY_EVENT_POINTER_MOVE);
+  e.u.pointer.x = x;
+  e.u.pointer.y = y;
+  my_pal_dummy_inject_event(f->pal, f->win->pal_window, &e);
+}
+
+static void advance(fx_t* f, uint32_t ms) {
+  my_pal_dummy_set_now_ms(f->pal, ms);
+  my_pal_main_loop_pump_n(f->loop, 10);
+  /* pump_n only drains queued events; timers fire during run() when the
+   * queue is empty. */
+  my_pal_main_loop_run(f->loop);
+}
+
 /** @brief The open menu box = child 0 of the root's last child (overlay). */
 static my_widget_t* menu_box(fx_t* f) {
   my_widget_t* root = my_window_widget(f->win);
@@ -194,6 +209,106 @@ static void test_menu_no_leak(void) {
   my_allocator_debug_destroy(dbg);
 }
 
+static void test_max_depth_api(void) {
+  my_menu_t* m = my_menu_create(NULL);
+  TEST_ASSERT_EQ_INT(my_menu_max_depth(m), 3);
+  my_menu_set_max_depth(m, 5);
+  TEST_ASSERT_EQ_INT(my_menu_max_depth(m), 5);
+  my_menu_set_max_depth(m, 1);
+  TEST_ASSERT_EQ_INT(my_menu_max_depth(m), 1);
+  my_menu_set_max_depth(m, 0); /* clamp to 1 */
+  TEST_ASSERT_EQ_INT(my_menu_max_depth(m), 1);
+  my_menu_set_max_depth(m, -3); /* clamp to 1 */
+  TEST_ASSERT_EQ_INT(my_menu_max_depth(m), 1);
+  my_menu_destroy(m);
+}
+
+static void test_deep_cascade(void) {
+  my_menu_t* m = my_menu_create(NULL);
+  my_menu_t* l2;
+  my_menu_t* l3;
+  my_menu_t* l4;
+  my_menu_t* l5;
+  my_menu_set_max_depth(m, 5);
+  l2 = my_menu_add_submenu(m, "L2");
+  TEST_ASSERT_NOT_NULL(l2);
+  l3 = my_menu_add_submenu(l2, "L3");
+  TEST_ASSERT_NOT_NULL(l3);
+  l4 = my_menu_add_submenu(l3, "L4");
+  TEST_ASSERT_NOT_NULL(l4);
+  l5 = my_menu_add_submenu(l4, "L5");
+  TEST_ASSERT_NOT_NULL(l5);
+  TEST_ASSERT_NULL(my_menu_add_submenu(l5, "L6")); /* depth 6 > 5 */
+  my_menu_destroy(m);
+}
+
+static void test_hover_opens_submenu(void) {
+  fx_t f;
+  my_menu_t* m;
+  my_menu_t* sub;
+  fx_init(&f);
+  m = my_menu_create(NULL);
+  sub = my_menu_add_submenu(m, "More");
+  my_menu_add_item(sub, "Deep", 7);
+  my_menu_add_item(m, "Alpha", 1);
+  my_menu_popup(f.win, m, 10, 10, on_select, NULL);
+  /* hover over the "More" item at y=10+4+12 (index 0) */
+  move(&f, 20, 10 + 4 + 12);
+  TEST_ASSERT_EQ_INT((int)root_child_count(&f), 1); /* timer pending, no sub yet */
+  /* before timer fires, nothing opens */
+  advance(&f, 50);
+  TEST_ASSERT_EQ_INT((int)root_child_count(&f), 1);
+  /* after 120ms the submenu opens */
+  advance(&f, 150);
+  TEST_ASSERT_EQ_INT((int)root_child_count(&f), 2);
+  my_menu_destroy(m);
+  fx_destroy(&f);
+}
+
+static void test_hover_to_leaf_closes_submenu(void) {
+  fx_t f;
+  my_menu_t* m;
+  my_menu_t* sub;
+  fx_init(&f);
+  m = my_menu_create(NULL);
+  sub = my_menu_add_submenu(m, "More");
+  my_menu_add_item(sub, "Deep", 7);
+  my_menu_add_item(m, "Alpha", 1);
+  my_menu_popup(f.win, m, 10, 10, on_select, NULL);
+  /* open submenu by hover */
+  move(&f, 20, 10 + 4 + 12);
+  advance(&f, 150);
+  TEST_ASSERT_EQ_INT((int)root_child_count(&f), 2);
+  /* hover over the leaf item (index 1) */
+  move(&f, 20, 10 + 4 + 12 + 24);
+  TEST_ASSERT_EQ_INT((int)root_child_count(&f), 1); /* sub closed immediately */
+  my_menu_destroy(m);
+  fx_destroy(&f);
+}
+
+static void test_esc_back_one_level(void) {
+  fx_t f;
+  my_menu_t* m;
+  my_menu_t* sub;
+  fx_init(&f);
+  m = my_menu_create(NULL);
+  sub = my_menu_add_submenu(m, "More");
+  my_menu_add_item(sub, "Deep", 7);
+  my_menu_popup(f.win, m, 10, 10, on_select, NULL);
+  /* open submenu by hover */
+  move(&f, 20, 10 + 4 + 12);
+  advance(&f, 150);
+  TEST_ASSERT_EQ_INT((int)root_child_count(&f), 2);
+  /* ESC closes only the submenu layer */
+  key(&f, MY_KEY_ESCAPE);
+  TEST_ASSERT_EQ_INT((int)root_child_count(&f), 1);
+  /* another ESC closes the root menu */
+  key(&f, MY_KEY_ESCAPE);
+  TEST_ASSERT_EQ_INT((int)root_child_count(&f), 0);
+  my_menu_destroy(m);
+  fx_destroy(&f);
+}
+
 MYTEST_MAIN_BEGIN()
   MYTEST_RUN(test_popup_and_select);
   MYTEST_RUN(test_outside_click_dismisses);
@@ -201,4 +316,9 @@ MYTEST_MAIN_BEGIN()
   MYTEST_RUN(test_submenu_cascade);
   MYTEST_RUN(test_keyboard_nav);
   MYTEST_RUN(test_menu_no_leak);
+  MYTEST_RUN(test_max_depth_api);
+  MYTEST_RUN(test_deep_cascade);
+  MYTEST_RUN(test_hover_opens_submenu);
+  MYTEST_RUN(test_hover_to_leaf_closes_submenu);
+  MYTEST_RUN(test_esc_back_one_level);
 MYTEST_MAIN_END()

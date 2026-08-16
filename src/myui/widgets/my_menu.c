@@ -38,6 +38,9 @@ struct my_menu_t {
   my_menu_select_cb cb;
   void* cb_ctx;
   int32_t active;            /**< highlighted item index (-1 none) */
+  int32_t hover_index;       /**< last hovered item index (-1 none) */
+  int32_t max_depth;         /**< cascade depth limit, default 3 */
+  uint32_t hover_timer;      /**< pending submenu open timer id */
 };
 
 /* ---------------- item widget ---------------- */
@@ -89,6 +92,27 @@ static void menu_close_all(my_menu_t* m) {
 
 static void menu_open_sub(my_menu_t* parent, menu_item_t* item,
                           int32_t item_y);
+static void menu_cancel_hover_timer(my_menu_t* m);
+
+typedef struct hover_open_ctx_t {
+  my_menu_t* menu;
+  menu_item_t* item;
+  int32_t item_y;
+} hover_open_ctx_t;
+
+static my_ret_t menu_hover_open_cb(void* ctx) {
+  hover_open_ctx_t* h = (hover_open_ctx_t*)ctx;
+  my_menu_t* m = h->menu;
+  if (m != NULL && m->win != NULL && m->overlay != NULL &&
+      m->open_sub != h->item->sub) {
+    menu_open_sub(m, h->item, h->item_y);
+  }
+  if (m != NULL) {
+    m->hover_timer = 0;
+  }
+  my_mem_free(h->menu != NULL ? h->menu->allocator : NULL, h);
+  return MY_RET_FAIL; /* one-shot */
+}
 
 static my_ret_t menu_item_event(my_widget_t* widget, const my_event_t* event) {
   menu_item_widget_t* iw = (menu_item_widget_t*)widget;
@@ -99,6 +123,7 @@ static my_ret_t menu_item_event(my_widget_t* widget, const my_event_t* event) {
   }
   if (event->type == MY_EVENT_POINTER_UP) {
     if (iw->item->sub != NULL) {
+      menu_cancel_hover_timer(iw->menu);
       menu_open_sub(iw->menu, iw->item, widget->rect.y);
     } else {
       my_menu_select_cb cb = iw->menu->cb;
@@ -106,6 +131,32 @@ static my_ret_t menu_item_event(my_widget_t* widget, const my_event_t* event) {
       menu_close_all(iw->menu);
       if (cb != NULL) {
         cb(cb_ctx, iw->item->id);
+      }
+    }
+    return MY_RET_OK;
+  }
+  if (event->type == MY_EVENT_POINTER_MOVE) {
+    if (iw->menu->active != iw->index) {
+      iw->menu->active = iw->index;
+      my_widget_invalidate(widget->parent, NULL);
+    }
+    if (iw->menu->hover_index != iw->index) {
+      iw->menu->hover_index = iw->index;
+      menu_cancel_hover_timer(iw->menu);
+      if (iw->item->sub != NULL) {
+        hover_open_ctx_t* h =
+            (hover_open_ctx_t*)my_mem_calloc(iw->menu->allocator, 1,
+                                              sizeof(*h));
+        if (h != NULL) {
+          h->menu = iw->menu;
+          h->item = iw->item;
+          h->item_y = widget->rect.y;
+          iw->menu->hover_timer = my_pal_main_loop_add_timer(
+              iw->menu->win->loop, menu_hover_open_cb, h, 120);
+        }
+      } else if (iw->menu->open_sub != NULL) {
+        my_menu_dismiss(iw->menu->open_sub);
+        iw->menu->open_sub = NULL;
       }
     }
     return MY_RET_OK;
@@ -138,7 +189,14 @@ static void menu_box_paint(my_widget_t* widget, my_vgcanvas_t* vg) {
 }
 
 static my_ret_t menu_box_event(my_widget_t* widget, const my_event_t* event) {
-  (void)widget;
+  if (event->type == MY_EVENT_POINTER_MOVE) {
+    my_menu_t* m = (my_menu_t*)my_widget_get_user_data(widget);
+    if (m != NULL && m->hover_index != -1) {
+      menu_cancel_hover_timer(m);
+      m->hover_index = -1;
+    }
+    return MY_RET_OK;
+  }
   (void)event;
   return MY_RET_OK; /* clicks inside the box background are eaten */
 }
@@ -187,15 +245,37 @@ static void menu_close_overlay(my_menu_t* m) {
   }
 }
 
+static void menu_cancel_hover_timer(my_menu_t* m) {
+  if (m == NULL || m->hover_timer == 0) {
+    return;
+  }
+  if (m->win != NULL && m->win->loop != NULL) {
+    my_pal_main_loop_remove_timer(m->win->loop, m->hover_timer);
+  }
+  m->hover_timer = 0;
+}
+
 void my_menu_dismiss(my_menu_t* menu) {
+  my_menu_t* parent;
+  my_widget_t* parent_overlay;
+  my_window_t* win;
   if (menu == NULL) {
     return;
   }
+  parent = menu->parent;
+  parent_overlay =
+      (parent != NULL && parent->overlay != NULL) ? parent->overlay : NULL;
+  win = menu->win; /* captured before menu_close_overlay clears it */
+  menu_cancel_hover_timer(menu);
+  menu->hover_index = -1;
   if (menu->open_sub != NULL) {
     my_menu_dismiss(menu->open_sub);
     menu->open_sub = NULL;
   }
   menu_close_overlay(menu);
+  if (parent_overlay != NULL && win != NULL) {
+    my_event_dispatcher_set_focus(&win->dispatcher, parent_overlay);
+  }
 }
 
 my_widget_t* my_menu_widget(my_menu_t* menu) {
@@ -249,6 +329,25 @@ static my_ret_t menu_overlay_on_event(my_widget_t* widget,
   }
   if (event->type == MY_EVENT_KEY_DOWN) {
     return menu_key_event(widget, event);
+  }
+  if (event->type == MY_EVENT_POINTER_MOVE) {
+    /* The overlay is full-window; the box is the interactive region. If the
+     * cursor leaves the box, dismiss this submenu so the parent menu can
+     * receive hover events over its own items. */
+    my_widget_t* box = NULL;
+    if (my_widget_child_count(widget) > 0) {
+      box = my_widget_get_child(widget, 0);
+    }
+    if (box != NULL) {
+      int32_t px = event->u.pointer.x;
+      int32_t py = event->u.pointer.y;
+      if (px < box->rect.x || px >= box->rect.x + box->rect.w ||
+          py < box->rect.y || py >= box->rect.y + box->rect.h) {
+        my_menu_dismiss(m);
+        return MY_RET_FAIL;
+      }
+    }
+    return MY_RET_OK;
   }
   return MY_RET_OK; /* swallow everything else while open */
 }
@@ -398,11 +497,24 @@ my_menu_t* my_menu_create(const my_allocator_t* allocator) {
   m->allocator = allocator;
   m->items = my_darray_create(allocator, 0);
   m->active = -1;
+  m->hover_index = -1;
+  m->max_depth = MENU_MAX_DEPTH;
   if (m->items == NULL) {
     my_mem_free(allocator, m);
     return NULL;
   }
   return m;
+}
+
+void my_menu_set_max_depth(my_menu_t* menu, int32_t depth) {
+  if (menu == NULL) {
+    return;
+  }
+  menu->max_depth = depth < 1 ? 1 : depth;
+}
+
+int32_t my_menu_max_depth(const my_menu_t* menu) {
+  return menu != NULL ? menu->max_depth : MENU_MAX_DEPTH;
 }
 
 void my_menu_destroy(my_menu_t* menu) {
@@ -448,13 +560,15 @@ my_menu_t* my_menu_add_submenu(my_menu_t* menu, const char* text) {
   my_menu_t* sub;
   size_t depth = 1;
   my_menu_t* p;
+  int32_t max_depth;
   if (menu == NULL || text == NULL) {
     return NULL;
   }
+  max_depth = my_menu_max_depth(menu);
   for (p = menu->parent; p != NULL; p = p->parent) {
     depth++;
   }
-  if (depth >= MENU_MAX_DEPTH) {
+  if ((int32_t)depth >= max_depth) {
     return NULL; /* cascade depth cap (documented) */
   }
   sub = my_menu_create(menu->allocator);
@@ -462,6 +576,7 @@ my_menu_t* my_menu_add_submenu(my_menu_t* menu, const char* text) {
     return NULL;
   }
   sub->parent = menu;
+  sub->max_depth = max_depth; /* inherit depth limit from parent */
   it = (menu_item_t*)my_mem_calloc(menu->allocator, 1, sizeof(menu_item_t));
   if (it == NULL) {
     my_menu_destroy(sub);
