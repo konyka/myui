@@ -60,6 +60,8 @@ void my_event_dispatcher_init(my_event_dispatcher_t* dispatcher,
   }
 }
 
+static bool is_self_or_descendant(my_widget_t* w, my_widget_t* ancestor);
+
 static const char* event_name_of(my_event_type_t type) {
   switch (type) {
     case MY_EVENT_POINTER_DOWN:
@@ -79,22 +81,41 @@ static const char* event_name_of(my_event_type_t type) {
   }
 }
 
-/** @brief Deliver to target, then bubble to parents until consumed. */
-static bool deliver(my_widget_t* target, const my_event_t* event) {
+/**
+ * @brief Deliver to target, then bubble to parents until consumed.
+ *
+ * A handler may remove or destroy the target widget (e.g. a menu dismisses
+ * itself on pointer events). We hold a temporary ref so the widget stays
+ * addressable for the generic emitter call, but only emit if the widget is
+ * still attached to the dispatcher's tree.
+ */
+static bool deliver(my_event_dispatcher_t* d, my_widget_t* target,
+                    const my_event_t* event) {
   my_widget_t* w = target;
   bool consumed = false;
   while (w != NULL) {
+    my_widget_t* parent = w->parent;
     if (w->enable) {
+      my_widget_t* ref = my_widget_ref(w);
       if (w->vtable != NULL && w->vtable->on_event != NULL &&
           w->vtable->on_event(w, event) == MY_RET_OK) {
         consumed = true;
       }
-      my_emitter_emit(w->emitter, event_name_of(event->type), (void*)event);
+      /* A consumed handler may have removed or destroyed the widget (e.g. a
+       * menu dismisses itself). Don't try to emit on a detached widget; just
+       * drop our temporary ref and stop propagation. */
       if (consumed) {
+        my_widget_unref(ref);
         return true;
       }
+      /* Not consumed: the widget is expected to remain in the tree. Emit the
+       * convenience event mirroring the PAL event type. */
+      if (is_self_or_descendant(ref, d->root)) {
+        my_emitter_emit(ref->emitter, event_name_of(event->type), (void*)event);
+      }
+      my_widget_unref(ref);
     }
-    w = w->parent;
+    w = parent;
   }
   return false;
 }
@@ -224,14 +245,14 @@ bool my_event_dispatch(my_event_dispatcher_t* dispatcher,
       hover_update(dispatcher, target);
       if (target != NULL) {
         set_focus(dispatcher, nearest_focusable(target));
-        return deliver(target, event);
+        return deliver(dispatcher, target, event);
       }
       set_focus(dispatcher, NULL); /* click on empty space: blur */
       return false;
     case MY_EVENT_POINTER_WHEEL:
       target = my_widget_hit_test(dispatcher->root, event->u.pointer.x,
                                   event->u.pointer.y);
-      return target != NULL ? deliver(target, event) : false;
+      return target != NULL ? deliver(dispatcher, target, event) : false;
     case MY_EVENT_POINTER_MOVE:
       target = dispatcher->grabbed;
       if (target == NULL) {
@@ -239,7 +260,7 @@ bool my_event_dispatch(my_event_dispatcher_t* dispatcher,
                                     event->u.pointer.y);
       }
       hover_update(dispatcher, target);
-      return target != NULL ? deliver(target, event) : false;
+      return target != NULL ? deliver(dispatcher, target, event) : false;
     case MY_EVENT_POINTER_UP:
       target = dispatcher->grabbed;
       if (target == NULL) {
@@ -251,11 +272,11 @@ bool my_event_dispatch(my_event_dispatcher_t* dispatcher,
       hover_update(dispatcher,
                    my_widget_hit_test(dispatcher->root, event->u.pointer.x,
                                       event->u.pointer.y));
-      return target != NULL ? deliver(target, event) : false;
+      return target != NULL ? deliver(dispatcher, target, event) : false;
     case MY_EVENT_KEY_DOWN:
       if (event->u.key.key == MY_KEY_TAB) {
         bool consumed = dispatcher->focused != NULL
-                            ? deliver(dispatcher->focused, event)
+                            ? deliver(dispatcher, dispatcher->focused, event)
                             : false;
         if (!consumed) {
           int dir = (event->u.key.modifiers & MY_KEYMOD_SHIFT) != 0 ? -1 : 1;
@@ -268,15 +289,18 @@ bool my_event_dispatch(my_event_dispatcher_t* dispatcher,
         }
         return consumed;
       }
-      return dispatcher->focused != NULL ? deliver(dispatcher->focused, event)
-                                         : false;
+      return dispatcher->focused != NULL
+                 ? deliver(dispatcher, dispatcher->focused, event)
+                 : false;
     case MY_EVENT_KEY_UP:
-      return dispatcher->focused != NULL ? deliver(dispatcher->focused, event)
-                                         : false;
+      return dispatcher->focused != NULL
+                 ? deliver(dispatcher, dispatcher->focused, event)
+                 : false;
     case MY_EVENT_IME_PREEDIT: /* IME events go to the focus (M13a) */
     case MY_EVENT_IME_COMMIT:
-      return dispatcher->focused != NULL ? deliver(dispatcher->focused, event)
-                                         : false;
+      return dispatcher->focused != NULL
+                 ? deliver(dispatcher, dispatcher->focused, event)
+                 : false;
     default:
       return false;
   }

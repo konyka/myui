@@ -39,8 +39,8 @@ struct my_menu_t {
   void* cb_ctx;
   int32_t active;            /**< highlighted item index (-1 none) */
   int32_t hover_index;       /**< last hovered item index (-1 none) */
-  int32_t max_depth;         /**< cascade depth limit, default 3 */
-  uint32_t hover_timer;      /**< pending submenu open timer id */
+  int32_t max_depth;    /**< cascade depth limit, default 3 */
+  uint32_t hover_timer; /**< pending submenu open timer id */
 };
 
 /* ---------------- item widget ---------------- */
@@ -128,9 +128,10 @@ static my_ret_t menu_item_event(my_widget_t* widget, const my_event_t* event) {
     } else {
       my_menu_select_cb cb = iw->menu->cb;
       void* cb_ctx = iw->menu->cb_ctx;
+      int32_t id = iw->item->id;
       menu_close_all(iw->menu);
       if (cb != NULL) {
-        cb(cb_ctx, iw->item->id);
+        cb(cb_ctx, id);
       }
     }
     return MY_RET_OK;

@@ -4,7 +4,7 @@
 
 **Goal:** 为 `my_menu` 增加悬停自动展开级联子菜单、可配置级联深度、ESC 在子菜单层逐层回退的交互能力。
 
-**Architecture:** 复用 M14a 引入的 widget hover 状态机（`hover_enter`/`hover_leave` 事件），在 `menu_item_event` 中处理悬停；用一次性 timer 实现 120ms 延迟开级联；ESC 行为按 `m->parent` 链区分顶层/子层；级联深度从编译时常数改为 `my_menu_t` 字段并暴露 API。
+**Architecture:** 在 `menu_item_event` 中处理 `POINTER_MOVE` 命中，用一次性 timer 实现 120ms 延迟开级联；ESC 行为按 `m->parent` 链区分顶层/子层；级联深度从编译时常数改为 `my_menu_t` 字段并暴露 API；事件分发器增加 `my_widget_ref` 保护以支持菜单 overlay/叶项同步 self-dismiss 而不触发 ASan UAF。
 
 **Tech Stack:** C99, myui 内部 my_timer/my_event, dummy port 事件注入测试。
 
@@ -72,8 +72,8 @@ git commit -m "M26a-1: my_menu 级联深度 API，默认保持 3"
 - Test: `tests/my_menu_test.c`
 
 **Interfaces:**
-- Consumes: `my_widget_on(..., "hover_enter", ...)`, `my_pal_main_loop_add_timer/remove_timer`。
-- Produces: 内部 `menu_open_sub_delayed` / `menu_cancel_open_timer`。
+- Consumes: `MY_EVENT_POINTER_MOVE`, `my_pal_main_loop_add_timer/remove_timer`。
+- Produces: 内部 `menu_hover_open_cb` / `menu_cancel_hover_timer`。
 
 - [ ] **Step 1: Write failing hover-cascade test**
 
@@ -98,14 +98,13 @@ static void test_menu_hover_opens_submenu(void) {
 - [ ] **Step 2: Implement hover handling**
 
 1. 在 `menu_item_widget_t` 中新增 `my_menu_t* menu`（已存在）、`int32_t index`（已存在）。
-2. `menu_item_event` 增加 `MY_EVENT_HOVER_ENTER` 分支：
+2. `menu_item_event` 增加 `MY_EVENT_POINTER_MOVE` 分支：
    - 设置 `iw->menu->active = iw->index`。
-   - 如果 `iw->item->sub != NULL`，启动一次性 120ms timer，回调中调用 `menu_open_sub(iw->menu, iw->item, widget->rect.y)`。
-   - 保存 timer id 到 `iw->menu->open_timer_id`。
-3. `MY_EVENT_HOVER_LEAVE` 分支：
-   - 如果离开的项持有待打开 timer，取消 timer。
-   - 不关闭已打开的同级子菜单（避免误关）。
-4. 当 hover 到另一项且该项无子菜单时，如果父菜单存在 `open_sub`，立即 `my_menu_dismiss(open_sub)` 并清 `open_sub`。
+   - 如果 `iw->item->sub != NULL` 且不是已打开的 sub，取消旧 timer 并启动一次性 120ms timer，回调中调用 `menu_open_sub(iw->menu, iw->item, widget->rect.y)`。
+   - 保存 timer id 到 `iw->menu->hover_timer`。
+   - 如果项无 sub 且父菜单存在 `open_sub`，立即 `my_menu_dismiss(open_sub)` 并清 `open_sub`。
+3. `menu_box_event` 的 `POINTER_MOVE` 在光标离开所有 item 时取消待打开 timer 并重置 `hover_index`。
+4. 子菜单 overlay 的 `POINTER_MOVE` 在光标离开 box 时 dismiss 自身（保持已有逻辑）。
 
 - [ ] **Step 3: Run tests**
 
@@ -214,38 +213,48 @@ git commit -m "M26a-4: ESC 在子菜单层逐层回退"
 
 ---
 
-### Task 5: 文档更新与全矩阵验证
+### Task 5: 事件分发器安全修复、文档更新与全矩阵验证
 
 **Files:**
+- Modify: `src/myui/my_event_dispatch.c`
 - Modify: `docs/architecture.md`
 - Modify: `docs/roadmap.md`
 - Modify: `docs/superpowers/specs/2026-08-16-m26a-menu-hover-cascade-design.md`（更新状态）
 
-- [ ] **Step 1: Update architecture.md**
+- [ ] **Step 1: 修复事件分发器对自销毁控件的安全**
 
-将浮层基础设施节中的 "dialog 拖拽移动留 TODO" 与 "菜单鼠标悬停开级联（现要点/Enter）" 更新为：
-- "dialog 拖拽移动：M16 CSD 已覆盖（栏体 POINTER_DOWN → begin_move）。"
-- "菜单鼠标悬停开级联（M26a）：带 sub 项 hover 120ms 后自动展开，同级非 sub 项 hover 立即关闭已展开子菜单。"
+在 `my_event_dispatch.c` 的 `deliver` 中：
+- 调用 `on_event` 前 `my_widget_ref(w)`；
+- handler 返回 `MY_RET_OK` 后直接 `my_widget_unref(ref)` 并 `return true`，不再 emit 通用事件或访问父链；
+- handler 未吃掉事件时，通过 `is_self_or_descendant(ref, d->root)` 确认仍在树中再 emit；
+- 父指针在 unref 前捕获，避免释放后继续冒泡。
 
-- [ ] **Step 2: Update roadmap.md**
+这样菜单 overlay/叶项可同步 self-dismiss，无需延迟 timer。
+
+- [ ] **Step 2: Update architecture.md**
+
+在事件流节说明 `deliver` 对自销毁 handler 的安全处理；在 my_menu 段保持“悬停级联（M26a）”描述不变。
+
+- [ ] **Step 3: Update roadmap.md**
 
 在 M19+ 候选中将 "菜单悬停开级联/级联深度>3/ESC 焦点回退父层" 标为 ✅ 已完成（M26a）。
 
-- [ ] **Step 3: Run full matrix**
+- [ ] **Step 4: Run full matrix + ASan 菜单测试**
 
 ```bash
 for d in build build-c99 build-c11 build-c17 build-c23 build-wl build-dummy build-min build-noimg build-trim; do
   make -C "$d" -j$(nproc) && ctest --test-dir "$d" -j1 --output-on-failure || break
 done
+make -C build-asan -j$(nproc) my_menu_test && ./build-asan/tests/my_menu_test
 ```
 
-Expected: 全部 PASS。
+Expected: 全矩阵 PASS；ASan `my_menu_test` 无 UAF。
 
-- [ ] **Step 4: Commit and push**
+- [ ] **Step 5: Commit and push**
 
 ```bash
-git add docs/architecture.md docs/roadmap.md docs/superpowers/specs/2026-08-16-m26a-menu-hover-cascade-design.md
-git commit -m "M26a-5: 文档更新"
+git add -A
+git commit -m "M26a: 菜单悬停级联、级联深度可调、ESC 回退父层，并修复事件分发器自销毁安全"
 git push origin main
 ```
 

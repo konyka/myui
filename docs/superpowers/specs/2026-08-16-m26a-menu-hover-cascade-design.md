@@ -24,9 +24,20 @@
 - 不引入全局 hover 计时器，避免每帧开销。
 - 级联深度 >3 仅在模型树存在时展开，不预创建控件。
 
-## 4. TDD 与文档
+## 5. 事件分发器安全（M26a 附属修复）
+
+菜单 overlay 在 `POINTER_DOWN`（外部点击）和 `POINTER_MOVE`（光标离开 box）时会同步 `my_menu_dismiss` 自身；叶项 `POINTER_UP` 会同步 `menu_close_all`。这些 handler 在事件分发中途释放控件树，原先会导致 ASan heap-use-after-free。修复方案：
+
+- `my_event_dispatch.c` 的 `deliver` 在调用 `on_event` 前临时 `my_widget_ref` 当前目标；
+- 若 handler 返回 `MY_RET_OK`（吃掉事件）且可能已移除/销毁自身，直接 `return true` 停止冒泡，不再访问该 widget；
+- 未吃事件的控件仍通过 `is_self_or_descendant` 确认仍在树中后再 emit 通用事件；
+- 父指针在 unref 前捕获，避免释放后继续冒泡。
+
+因此菜单叶项可恢复同步关闭，无需延迟 1ms timer；测试也无需在两次点击之间额外 pump timer。
+
+## 6. TDD 与文档
 
 - dummy port 注入事件：hover_enter 到子菜单项 → 断言子菜单 overlay 创建；hover 到普通项 → 断言同级子菜单关闭；ESC 在子菜单层 → 断言仅该层关闭且父菜单仍打开。
 - 新增 `my_menu_test` 用例（或扩展既有 `my_menu_test`）。
-- 四档 C 标准 + dummy/wl/min/noxml/trim 全绿。
-- 文档：更新 `docs/architecture.md` 浮层基础设施节（去掉 dialog 拖拽/菜单悬停 TODO），更新 `docs/roadmap.md` M19+ 候选勾选状态。
+- 四档 C 标准 + dummy/wl/min/noxml/trim 全绿；`build-asan/tests/my_menu_test` 无 UAF。
+- 文档：更新 `docs/architecture.md` 事件流节说明自销毁 handler 安全；更新 `docs/roadmap.md` M19+ 候选勾选状态。

@@ -50,6 +50,11 @@ static void click(fx_t* f, int32_t x, int32_t y) {
   e.u.pointer.x = x;
   e.u.pointer.y = y;
   my_pal_dummy_inject_event(f->pal, f->win->pal_window, &e);
+  /* Leaf-item close is deferred 1ms so the dispatcher finishes delivering
+   * the UP event before the widget tree is freed. Advance clock well past
+   * the 1ms deferral and let the dummy loop drain events + fire timers. */
+  my_pal_dummy_set_now_ms(f->pal, my_pal_time_now_ms(f->pal) + 100);
+  my_pal_main_loop_run(f->loop);
 }
 
 static void key(fx_t* f, int32_t k) {
