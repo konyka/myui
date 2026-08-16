@@ -260,6 +260,9 @@ typedef struct my_vgcanvas_vulkan_t {
   bool offscreen;
   int32_t fb_w, fb_h;
   bool need_recreate;
+  int dbg_frames; /* MYUI_VK_DUMP frame counter (debug only) */
+  int dbg_dump_frame; /* dump at the Nth present (MYUI_VK_DUMP_FRAME) */
+  const char* dbg_dump_path; /* env snapshot at create (debug only) */
 
   VkSurfaceKHR surface;   /* windowed only */
   VkSwapchainKHR swapchain;
@@ -733,8 +736,15 @@ static my_ret_t vk_create_resolve_rp(my_vgcanvas_vulkan_t* c) {
   VkSubpassDependency dep;
   VkRenderPassCreateInfo ri;
   uint32_t i;
-  if (c->offscreen || c->samples == VK_SAMPLE_COUNT_1_BIT) {
+  if ((c->offscreen && getenv("MYUI_VK_RPRESOLVE") == NULL) ||
+      c->samples == VK_SAMPLE_COUNT_1_BIT) {
     return MY_RET_OK;
+  }
+  if (c->resolve_rp != VK_NULL_HANDLE) {
+    /* swapchain recreation: the renderpass is format/samples-invariant,
+     * but rebuild it cleanly instead of leaking the old one */
+    vkDestroyRenderPass(g_vk.dev, c->resolve_rp, NULL);
+    c->resolve_rp = VK_NULL_HANDLE;
   }
   memset(atts, 0, sizeof(atts));
   atts[0].format = c->format;
@@ -767,9 +777,11 @@ static my_ret_t vk_create_resolve_rp(my_vgcanvas_vulkan_t* c) {
   memset(&dep, 0, sizeof(dep));
   dep.srcSubpass = VK_SUBPASS_EXTERNAL;
   dep.dstSubpass = 0;
+  /* M25 fix: cover prior reads (resolve source) as well as writes */
   dep.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
   dep.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-  dep.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+  dep.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
+                      VK_ACCESS_COLOR_ATTACHMENT_READ_BIT;
   dep.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
   memset(&ri, 0, sizeof(ri));
   ri.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
@@ -984,9 +996,17 @@ static my_ret_t vk_create_renderpass(my_vgcanvas_vulkan_t* c) {
   memset(&dep, 0, sizeof(dep));
   dep.srcSubpass = VK_SUBPASS_EXTERNAL;
   dep.dstSubpass = 0;
-  dep.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+  /* M25 fix: with VKC_FRAMES=2 in flight, frame N+1's render into the ONE
+   * persistent MSAA image may overlap frame N's resolve READING it (its
+   * begin_frame only waited the N-1 fence). srcStage/srcAccess therefore
+   * cover color READS (resolve source) and TRANSFER reads (offscreen
+   * resolve), ordering this renderpass behind those reads. */
+  dep.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
+                     VK_PIPELINE_STAGE_TRANSFER_BIT;
   dep.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-  dep.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+  dep.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
+                      VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
+                      VK_ACCESS_TRANSFER_READ_BIT;
   dep.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
   ri.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
   ri.attachmentCount = 1;
@@ -1015,6 +1035,9 @@ static my_ret_t vk_create_targets(my_vgcanvas_vulkan_t* c) {
                   VK_SAMPLE_COUNT_4_BIT) != 0
                      ? VK_SAMPLE_COUNT_4_BIT
                      : VK_SAMPLE_COUNT_1_BIT;
+    if (getenv("MYUI_VK_NOMSAA") != NULL) {
+      c->samples = VK_SAMPLE_COUNT_1_BIT; /* debug: isolate MSAA chain */
+    }
   }
   if (c->offscreen) {
     VkImageCreateInfo ici;
@@ -1104,6 +1127,13 @@ static my_ret_t vk_create_targets(my_vgcanvas_vulkan_t* c) {
     sci.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
     sci.presentMode = VK_PRESENT_MODE_FIFO_KHR; /* vsync, guaranteed */
     sci.clipped = VK_TRUE;
+    if (getenv("MYUI_VK_DEBUG") != NULL) {
+      fprintf(stderr,
+              "[vkdbg] swapchain: fb=%dx%d caps.currentExtent=%ux%u "
+              "samples=%d\n",
+              (int)c->fb_w, (int)c->fb_h, caps.currentExtent.width,
+              caps.currentExtent.height, (int)c->samples);
+    }
     if (vkCreateSwapchainKHR(g_vk.dev, &sci, NULL, &c->swapchain) !=
         VK_SUCCESS) {
       return MY_RET_FAIL;
@@ -1500,7 +1530,8 @@ static my_ret_t vk_flush(my_vgcanvas_vulkan_t* c) {
     vkCmdEndRenderPass(f->cmd);
     c->in_renderpass = false;
   }
-  if (c->samples != VK_SAMPLE_COUNT_1_BIT && !c->offscreen) {
+  if (c->samples != VK_SAMPLE_COUNT_1_BIT &&
+      (!c->offscreen || getenv("MYUI_VK_RPRESOLVE") != NULL)) {
     /* windowed MSAA: zero-draw resolve renderpass — the subpass end
      * resolves the persistent MSAA image into the swapchain image
      * (full renderArea; the MSAA image's loadOp=LOAD history keeps
@@ -1601,6 +1632,140 @@ static my_ret_t vk_end_frame(my_vgcanvas_t* vg) {
   return MY_RET_OK;
 }
 
+/** @brief Debug helper (MYUI_VK_DUMP): resolve the persistent MSAA image
+ * into a private single-sample image and dump it as PPM. */
+static void vk_debug_dump(my_vgcanvas_vulkan_t* c, const char* path) {
+  VkImageCreateInfo ici;
+  VkMemoryRequirements req;
+  VkMemoryAllocateInfo mai;
+  VkImage dbg = VK_NULL_HANDLE;
+  VkDeviceMemory dbg_mem = VK_NULL_HANDLE;
+  VkBuffer buf = VK_NULL_HANDLE;
+  VkDeviceMemory mem = VK_NULL_HANDLE;
+  VkCommandBuffer cmd;
+  VkDeviceSize sz = (VkDeviceSize)c->fb_w * (VkDeviceSize)c->fb_h * 4;
+  void* map = NULL;
+  FILE* fp;
+  int x, y;
+  const uint8_t* px;
+  if (c->msaa_img == VK_NULL_HANDLE) {
+    return;
+  }
+  vkDeviceWaitIdle(g_vk.dev);
+  memset(&ici, 0, sizeof(ici));
+  ici.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+  ici.imageType = VK_IMAGE_TYPE_2D;
+  ici.format = c->format;
+  ici.extent.width = (uint32_t)c->fb_w;
+  ici.extent.height = (uint32_t)c->fb_h;
+  ici.extent.depth = 1;
+  ici.mipLevels = 1;
+  ici.arrayLayers = 1;
+  ici.samples = VK_SAMPLE_COUNT_1_BIT;
+  ici.tiling = VK_IMAGE_TILING_OPTIMAL;
+  ici.usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+  ici.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+  ici.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+  if (vkCreateImage(g_vk.dev, &ici, NULL, &dbg) != VK_SUCCESS) {
+    return;
+  }
+  vkGetImageMemoryRequirements(g_vk.dev, dbg, &req);
+  memset(&mai, 0, sizeof(mai));
+  mai.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+  mai.allocationSize = req.size;
+  mai.memoryTypeIndex = vk_mem_type(req.memoryTypeBits,
+                                    VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+  if (vkAllocateMemory(g_vk.dev, &mai, NULL, &dbg_mem) != VK_SUCCESS ||
+      vkBindImageMemory(g_vk.dev, dbg, dbg_mem, 0) != VK_SUCCESS ||
+      vk_make_buffer(sz, VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                         VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                     &buf, &mem) != MY_RET_OK ||
+      vk_oneshot(&cmd) != MY_RET_OK) {
+    goto done;
+  }
+  vk_transition(cmd, dbg, VK_IMAGE_LAYOUT_UNDEFINED,
+                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0,
+                VK_ACCESS_TRANSFER_WRITE_BIT,
+                VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                VK_PIPELINE_STAGE_TRANSFER_BIT, 0);
+  vk_transition(cmd, c->msaa_img, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+                VK_ACCESS_TRANSFER_READ_BIT,
+                VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                VK_PIPELINE_STAGE_TRANSFER_BIT, 0);
+  {
+    VkImageResolve rs;
+    memset(&rs, 0, sizeof(rs));
+    rs.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    rs.srcSubresource.layerCount = 1;
+    rs.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    rs.dstSubresource.layerCount = 1;
+    rs.extent.width = (uint32_t)c->fb_w;
+    rs.extent.height = (uint32_t)c->fb_h;
+    rs.extent.depth = 1;
+    vkCmdResolveImage(cmd, c->msaa_img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                      dbg, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &rs);
+  }
+  vk_transition(cmd, c->msaa_img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                VK_ACCESS_TRANSFER_READ_BIT,
+                VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
+                    VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+                VK_PIPELINE_STAGE_TRANSFER_BIT,
+                VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0);
+  vk_transition(cmd, dbg, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT,
+                VK_PIPELINE_STAGE_TRANSFER_BIT,
+                VK_PIPELINE_STAGE_TRANSFER_BIT, 0);
+  {
+    VkBufferImageCopy cp;
+    memset(&cp, 0, sizeof(cp));
+    cp.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    cp.imageSubresource.layerCount = 1;
+    cp.imageExtent.width = (uint32_t)c->fb_w;
+    cp.imageExtent.height = (uint32_t)c->fb_h;
+    cp.imageExtent.depth = 1;
+    vkCmdCopyImageToBuffer(cmd, dbg, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                           buf, 1, &cp);
+  }
+  if (vk_oneshot_submit(cmd) != MY_RET_OK ||
+      vkMapMemory(g_vk.dev, mem, 0, sz, 0, &map) != VK_SUCCESS) {
+    goto done;
+  }
+  fp = fopen(path, "wb");
+  if (fp != NULL) {
+    fprintf(fp, "P6\n%d %d\n255\n", (int)c->fb_w, (int)c->fb_h);
+    px = (const uint8_t*)map;
+    for (y = 0; y < c->fb_h; y++) {
+      for (x = 0; x < c->fb_w; x++) {
+        const uint8_t* p = px + ((size_t)y * (size_t)c->fb_w + (size_t)x) * 4;
+        fputc(p[2], fp); /* BGRA -> RGB */
+        fputc(p[1], fp);
+        fputc(p[0], fp);
+      }
+    }
+    fclose(fp);
+    fprintf(stderr, "[vkdbg] dumped %s\n", path);
+  }
+  vkUnmapMemory(g_vk.dev, mem);
+done:
+  if (buf != VK_NULL_HANDLE) {
+    vkDestroyBuffer(g_vk.dev, buf, NULL);
+  }
+  if (mem != VK_NULL_HANDLE) {
+    vkFreeMemory(g_vk.dev, mem, NULL);
+  }
+  if (dbg != VK_NULL_HANDLE) {
+    vkDestroyImage(g_vk.dev, dbg, NULL);
+  }
+  if (dbg_mem != VK_NULL_HANDLE) {
+    vkFreeMemory(g_vk.dev, dbg_mem, NULL);
+  }
+}
+
 my_ret_t my_vgcanvas_vulkan_present(my_vgcanvas_t* vg) {
   my_vgcanvas_vulkan_t* c = (my_vgcanvas_vulkan_t*)vg;
   vk_frame_t* f;
@@ -1608,6 +1773,12 @@ my_ret_t my_vgcanvas_vulkan_present(my_vgcanvas_t* vg) {
   VkResult pr;
   if (c == NULL || c->offscreen) {
     return MY_RET_INVALID_PARAMS;
+  }
+  if (!c->cmd_pending) {
+    /* nothing was recorded this frame (e.g. begin_frame failed):
+     * presenting now would wait on a semaphore that no submit signaled
+     * and desync the swapchain — skip (M25 crash fix) */
+    return MY_RET_OK;
   }
   if (vk_flush(c) != MY_RET_OK) {
     return MY_RET_FAIL;
@@ -1627,6 +1798,15 @@ my_ret_t my_vgcanvas_vulkan_present(my_vgcanvas_t* vg) {
     return MY_RET_FAIL;
   }
   c->frame_idx = (c->frame_idx + 1) % VKC_FRAMES;
+  /* debug: MYUI_VK_DUMP=<path> dumps the resolved frame content once
+   * (resolves the persistent MSAA image into a private 1-sample image,
+   * which unlike swapchain images may carry TRANSFER usage) */
+  if (c->dbg_dump_path != NULL) {
+    c->dbg_frames++;
+    if (c->dbg_frames == c->dbg_dump_frame) {
+      vk_debug_dump(c, c->dbg_dump_path);
+    }
+  }
   return MY_RET_OK;
 }
 
@@ -1683,6 +1863,26 @@ static my_ret_t vk_translate(my_vgcanvas_t* vg, float dx, float dy) {
   my_vgcanvas_vulkan_t* c = (my_vgcanvas_vulkan_t*)vg;
   c->state.tx += dx;
   c->state.ty += dy;
+  return MY_RET_OK;
+}
+
+/** @brief reset_clip slot (M25): same device-space math as clip_rect but
+ * REPLACES the clip instead of intersecting (overlay escape hatch). */
+static my_ret_t vk_reset_clip(my_vgcanvas_t* vg, const my_rectf_t* rect) {
+  my_vgcanvas_vulkan_t* c = (my_vgcanvas_vulkan_t*)vg;
+  if (rect == NULL) {
+    return MY_RET_INVALID_PARAMS;
+  }
+  c->state.clip = my_rect_init(
+      (int32_t)floorf((rect->x + c->state.tx) * c->state.scale),
+      (int32_t)floorf((rect->y + c->state.ty) * c->state.scale),
+      (int32_t)ceilf((rect->x + c->state.tx + rect->w) * c->state.scale) -
+          (int32_t)floorf((rect->x + c->state.tx) * c->state.scale),
+      (int32_t)ceilf((rect->y + c->state.ty + rect->h) * c->state.scale) -
+          (int32_t)floorf((rect->y + c->state.ty) * c->state.scale));
+  if (c->in_renderpass) {
+    vk_apply_clip(c);
+  }
   return MY_RET_OK;
 }
 
@@ -2141,7 +2341,7 @@ static const my_vgcanvas_vtable_t s_vk_vtable = {
     vk_close_path,       vk_fill,        vk_stroke,        vk_draw_text,
     vk_destroy,          vk_set_font,    vk_measure_text,
     vk_draw_image,       vk_set_line_cap, vk_set_line_join,
-    vk_curve_to};
+    vk_curve_to,         vk_reset_clip};
 
 static my_vgcanvas_t* vk_create_common(const my_allocator_t* allocator,
                                        VkSurfaceKHR surface, int32_t width,
@@ -2236,6 +2436,14 @@ static my_vgcanvas_t* vk_create_common(const my_allocator_t* allocator,
             VK_SUCCESS) {
       vk_destroy((my_vgcanvas_t*)c);
       return NULL;
+    }
+  }
+  c->dbg_dump_path = getenv("MYUI_VK_DUMP"); /* debug snapshot (once) */
+  c->dbg_dump_frame = 90;
+  {
+    const char* df = getenv("MYUI_VK_DUMP_FRAME");
+    if (df != NULL && atoi(df) > 0) {
+      c->dbg_dump_frame = atoi(df);
     }
   }
   return (my_vgcanvas_t*)c;

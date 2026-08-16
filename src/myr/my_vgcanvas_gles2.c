@@ -233,6 +233,24 @@ static my_ret_t gles_translate(my_vgcanvas_t* vg, float dx, float dy) {
   return MY_RET_OK;
 }
 
+/** @brief reset_clip slot (M25): same device-space math as clip_rect but
+ * REPLACES the clip instead of intersecting (overlay escape hatch). */
+static my_ret_t gles_reset_clip(my_vgcanvas_t* vg, const my_rectf_t* rect) {
+  my_vgcanvas_gles2_t* s = (my_vgcanvas_gles2_t*)vg;
+  if (rect == NULL) {
+    return MY_RET_INVALID_PARAMS;
+  }
+  s->state.clip = my_rect_init(
+      (int32_t)floorf((rect->x + s->state.tx) * s->state.scale),
+      (int32_t)floorf((rect->y + s->state.ty) * s->state.scale),
+      (int32_t)ceilf((rect->x + s->state.tx + rect->w) * s->state.scale) -
+          (int32_t)floorf((rect->x + s->state.tx) * s->state.scale),
+      (int32_t)ceilf((rect->y + s->state.ty + rect->h) * s->state.scale) -
+          (int32_t)floorf((rect->y + s->state.ty) * s->state.scale));
+  gles_apply_clip(s);
+  return MY_RET_OK;
+}
+
 static my_ret_t gles_clip_rect(my_vgcanvas_t* vg, const my_rectf_t* rect) {
   my_vgcanvas_gles2_t* s = (my_vgcanvas_gles2_t*)vg;
   my_rect_t dev, clipped;
@@ -627,7 +645,7 @@ static const my_vgcanvas_vtable_t s_gles_vtable = {
     gles_close_path,       gles_fill,        gles_stroke,        gles_draw_text,
     gles_destroy,          gles_set_font,    gles_measure_text,
     gles_draw_image,       gles_set_line_cap, gles_set_line_join,
-    gles_curve_to};
+    gles_curve_to,         gles_reset_clip};
 
 my_vgcanvas_t* my_vgcanvas_gles2_create_with_gl(const my_allocator_t* allocator,
                                                 int32_t width, int32_t height,

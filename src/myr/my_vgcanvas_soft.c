@@ -1456,6 +1456,8 @@ static void soft_destroy(my_vgcanvas_t* vg) {
   }
 }
 
+static my_ret_t soft_reset_clip(my_vgcanvas_t* vg, const my_rectf_t* rect);
+
 static const my_vgcanvas_vtable_t s_soft_vtable = {
     soft_begin_frame,      soft_end_frame,   soft_save,          soft_restore,
     soft_translate,        soft_clip_rect,   soft_set_fill_color,
@@ -1464,7 +1466,7 @@ static const my_vgcanvas_vtable_t s_soft_vtable = {
     soft_close_path,       soft_fill,        soft_stroke,        soft_draw_text,
     soft_destroy,          soft_set_font,    soft_measure_text,
     soft_draw_image,       soft_set_line_cap, soft_set_line_join,
-    soft_curve_to};
+    soft_curve_to,         soft_reset_clip};
 
 my_vgcanvas_t* my_vgcanvas_soft_create(const my_allocator_t* allocator,
                                        my_lcd_t* lcd) {
@@ -1497,11 +1499,11 @@ my_vgcanvas_t* my_vgcanvas_soft_create(const my_allocator_t* allocator,
   return (my_vgcanvas_t*)s;
 }
 
-void my_vgcanvas_soft_reset_clip(my_vgcanvas_t* vg, const my_rectf_t* rect) {
+static my_ret_t soft_reset_clip(my_vgcanvas_t* vg, const my_rectf_t* rect) {
   my_vgcanvas_soft_t* s = (my_vgcanvas_soft_t*)vg;
   my_rect_t dev;
   if (rect == NULL) {
-    return;
+    return MY_RET_INVALID_PARAMS;
   }
   dev = my_rect_init((int32_t)floorf(SOFT_SX(s, rect->x)),
                      (int32_t)floorf(SOFT_SY(s, rect->y)),
@@ -1510,6 +1512,15 @@ void my_vgcanvas_soft_reset_clip(my_vgcanvas_t* vg, const my_rectf_t* rect) {
                      (int32_t)ceilf(SOFT_SY(s, rect->y + rect->h)) -
                          (int32_t)floorf(SOFT_SY(s, rect->y)));
   s->state.clip = dev; /* replace, not intersect */
+  return MY_RET_OK;
+}
+
+void my_vgcanvas_soft_reset_clip(my_vgcanvas_t* vg, const my_rectf_t* rect) {
+  /* M25: vtable-guarded like the other soft-specific setters — calling
+   * this on a non-soft backend used to CORRUPT its state struct */
+  if (vg != NULL && vg->vtable == &s_soft_vtable) {
+    soft_reset_clip(vg, rect);
+  }
 }
 
 void my_vgcanvas_soft_set_scale(my_vgcanvas_t* vg, float scale) {

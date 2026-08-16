@@ -119,6 +119,16 @@ typedef struct my_vgcanvas_vtable_t {
    */
   my_ret_t (*curve_to)(my_vgcanvas_t* vg, float cx1, float cy1, float cx2,
                        float cy2, float x, float y);
+  /**
+   * @brief Replace (NOT intersect) the current clip with rect, user
+   * space (M25). Escape hatch for overlays that paint in a different
+   * coordinate space than the framework-baked clip assumes (node_view
+   * minimap/rubber-band, M22). NULL slot = NOT_SUPPORTED (the caller
+   * must tolerate that). Replaces the former soft-only
+   * my_vgcanvas_soft_reset_clip() — which corrupted non-soft backends
+   * when called on them.
+   */
+  my_ret_t (*reset_clip)(my_vgcanvas_t* vg, const my_rectf_t* rect);
 } my_vgcanvas_vtable_t;
 
 /** @brief vgcanvas base "class": first member of every backend. */
@@ -254,6 +264,16 @@ static inline my_ret_t my_vgcanvas_set_line_cap(my_vgcanvas_t* vg,
 static inline my_ret_t my_vgcanvas_set_line_join(my_vgcanvas_t* vg,
                                                  my_line_join_t join) {
   return vg->vtable->set_line_join(vg, join);
+}
+
+/** @brief Replace (not intersect) the clip; NOT_SUPPORTED when the
+ * backend has no reset_clip slot (M25). */
+static inline my_ret_t my_vgcanvas_reset_clip(my_vgcanvas_t* vg,
+                                              const my_rectf_t* rect) {
+  if (vg->vtable->reset_clip == NULL) {
+    return MY_RET_NOT_SUPPORTED;
+  }
+  return vg->vtable->reset_clip(vg, rect);
 }
 
 #endif /* MY_VGCANVAS_H */

@@ -213,7 +213,7 @@ static const my_vgcanvas_vtable_t REC_VG_VTABLE = {
     rec_begin_path,  rec_move_to,    rec_line_to,    rec_close_path,
     rec_fill,        rec_stroke,     rec_draw_text,  rec_destroy,
     rec_set_font,    rec_measure_text, rec_draw_image, rec_set_line_cap,
-    rec_set_line_join, rec_curve_to};
+    rec_set_line_join, rec_curve_to, NULL /* reset_clip */};
 
 static void rec_vg_init(rec_vg_t* r) {
   memset(r, 0, sizeof(*r));

@@ -562,7 +562,14 @@ void my_window_paint(my_window_t* win) {
   if (win->gl != NULL) {
     my_pal_gl_make_current(win->gl);
   }
-  my_vgcanvas_begin_frame(vg, my_dirty_rects_get(&win->dirty, 0));
+  if (my_vgcanvas_begin_frame(vg, my_dirty_rects_get(&win->dirty, 0)) !=
+      MY_RET_OK) {
+    /* backend frame setup failed (e.g. vulkan swapchain recreation
+     * hiccup): skip the frame but KEEP the dirty rects so the next tick
+     * retries. Presenting an unrecorded frame would desync the
+     * backend's semaphore chain (M25 crash fix). */
+    return;
+  }
   n = my_dirty_rects_count(&win->dirty);
   for (i = 0; i < n; i++) {
     const my_rect_t* r = my_dirty_rects_get(&win->dirty, i);

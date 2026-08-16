@@ -954,8 +954,8 @@ static void nv_overlay_paint(my_widget_t* ov, my_vgcanvas_t* vg) {
     my_vgcanvas_translate(vg, ddx, ddy);
     /* the clip baked by my_widget_paint under the canvas CTM shifts with
      * pan/zoom and clips the screen-space minimap (M22); replace it */
-    my_vgcanvas_soft_reset_clip(vg, &(my_rectf_t){0, 0, (float)ov->rect.w,
-                                                  (float)ov->rect.h});
+    my_vgcanvas_reset_clip(vg, &(my_rectf_t){0, 0, (float)ov->rect.w,
+                                             (float)ov->rect.h});
   }
   /* rubber band (canvas rect -> screen) */
   if (v->banding && v->band_moved) {
